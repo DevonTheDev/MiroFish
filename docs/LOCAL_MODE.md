@@ -295,3 +295,21 @@ The local frontend suite executes actual Vue setup scripts with real reactivity,
 deferred HTTP boundaries and a linked parent/child test. It also checks optional
 API signal/body compatibility. Full browser navigation and real model responses
 remain separate runtime checks.
+
+### Simulation post/comment reads
+
+The `/api/simulation/<id>/posts` and `/comments` endpoints resolve their SQLite
+files under `SimulationManager.SIMULATION_DATA_DIR`, matching the state manager.
+They accept only `twitter` or `reddit` (omission uses the saved platform), reject
+unsafe ID components and resolved symlink escapes, and validate `limit` in 0–500
+(default 50) plus a nonnegative SQLite-sized `offset`. Invalid input returns 400
+rather than selecting another filesystem path or requesting an unlimited page.
+
+Database connections use SQLite `mode=ro` and close even when a query fails. They
+still read committed live WAL data; this is a read-only database connection, not
+an immutable snapshot or a guarantee about SQLite's auxiliary WAL files. A missing
+simulation read creates no directories, and a database removed before opening
+is not recreated. Tests use disposable real SQLite files, including failure paths
+and symlinks. This hardens these two endpoints; it is not a complete filesystem
+sandbox or a security claim about every API route, hostile local processes, or
+native Windows behavior.

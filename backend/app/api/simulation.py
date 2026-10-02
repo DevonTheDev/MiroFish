@@ -4,8 +4,11 @@ Step2: Zep实体读取与过滤、OASIS模拟准备与运行（全程自动化�
 """
 
 import os
+import re
+import sqlite3
 import traceback
-from contextlib import nullcontext
+from pathlib import Path
+from contextlib import closing, nullcontext
 from flask import request, jsonify, send_file
 
 from . import simulation_bp
@@ -2151,158 +2154,125 @@ def get_agent_stats(simulation_id: str):
 
 # ============== 数据库查询接口 ==============
 
+def _simulation_database_query(simulation_id: str):
+    """Validate bounded query inputs and resolve files inside simulation storage."""
+    reserved = {"con", "prn", "aux", "nul"} | {
+        f"{prefix}{number}" for prefix in ("com", "lpt") for number in range(1, 10)
+    }
+    if (
+        not isinstance(simulation_id, str)
+        or not re.fullmatch(r"[A-Za-z0-9_-]{1,128}", simulation_id)
+        or simulation_id.casefold() in reserved
+    ):
+        raise ValueError("simulation_id must be a safe single path component")
+
+    try:
+        limit = int(request.args.get('limit', '50'))
+        offset = int(request.args.get('offset', '0'))
+    except (ValueError, TypeError):
+        raise ValueError("limit and offset must be integers") from None
+    if not 0 <= limit <= 500:
+        raise ValueError("limit must be between 0 and 500")
+    if not 0 <= offset <= 2**63 - 1:
+        raise ValueError("offset must be between 0 and 9223372036854775807")
+
+    root = Path(SimulationManager.SIMULATION_DATA_DIR).resolve()
+
+    def contained(path):
+        try:
+            resolved = path.resolve()
+        except (OSError, RuntimeError):
+            raise ValueError("Invalid simulation storage path") from None
+        if not resolved.is_relative_to(root):
+            raise ValueError("Simulation files must remain inside simulation storage")
+        return resolved
+
+    simulation_dir = contained(root / simulation_id)
+    platform = request.args.get('platform')
+    if not platform:
+        # Validate before the state loader follows a symlink. Do not create a
+        # simulation directory merely to answer a read for an unknown ID.
+        state_path = contained(simulation_dir / 'state.json')
+        platform = _get_default_platform(simulation_id) if state_path.is_file() else 'reddit'
+    if platform not in {'twitter', 'reddit'}:
+        raise ValueError("platform must be twitter or reddit")
+    database = contained(simulation_dir / f"{platform}_simulation.db")
+    return platform, database, limit, offset
+
+
 @simulation_bp.route('/<simulation_id>/posts', methods=['GET'])
 def get_simulation_posts(simulation_id: str):
-    """
-    获取模拟中的帖子
-    
-    Query参数：
-        platform: 平台类型（twitter/reddit）
-        limit: 返回数量（默认50）
-        offset: 偏移量
-    
-    返回帖子列表（从SQLite数据库读取）
-    """
+    """Read posts using bounded pagination (limit 0..500, default 50)."""
     try:
-        platform = request.args.get('platform') or _get_default_platform(simulation_id)
-        limit = request.args.get('limit', 50, type=int)
-        offset = request.args.get('offset', 0, type=int)
-
-        sim_dir = os.path.join(
-            os.path.dirname(__file__),
-            f'../../uploads/simulations/{simulation_id}'
-        )
-
-        db_file = f"{platform}_simulation.db"
-        db_path = os.path.join(sim_dir, db_file)
-        
-        if not os.path.exists(db_path):
+        platform, database, limit, offset = _simulation_database_query(simulation_id)
+        if not database.is_file():
             return jsonify({
                 "success": True,
                 "data": {
-                    "platform": platform,
-                    "count": 0,
-                    "posts": [],
+                    "platform": platform, "count": 0, "posts": [],
                     "message": t('api.dbNotExist')
                 }
             })
-        
-        import sqlite3
-        conn = sqlite3.connect(db_path)
-        conn.row_factory = sqlite3.Row
-        cursor = conn.cursor()
-        
-        try:
-            cursor.execute("""
-                SELECT * FROM post 
-                ORDER BY created_at DESC 
-                LIMIT ? OFFSET ?
-            """, (limit, offset))
-            
-            posts = [dict(row) for row in cursor.fetchall()]
-            
-            cursor.execute("SELECT COUNT(*) FROM post")
-            total = cursor.fetchone()[0]
-            
-        except sqlite3.OperationalError:
-            posts = []
-            total = 0
-        
-        conn.close()
-        
+
+        # mode=ro cannot create a missing database or modify the main DB. Use
+        # closing: sqlite3's own context manager does not close its connection.
+        with closing(sqlite3.connect(database.as_uri() + '?mode=ro', uri=True)) as conn:
+            conn.row_factory = sqlite3.Row
+            cursor = conn.cursor()
+            try:
+                cursor.execute("""
+                    SELECT * FROM post ORDER BY created_at DESC LIMIT ? OFFSET ?
+                """, (limit, offset))
+                posts = [dict(row) for row in cursor.fetchall()]
+                cursor.execute("SELECT COUNT(*) FROM post")
+                total = cursor.fetchone()[0]
+            except sqlite3.OperationalError:
+                posts, total = [], 0
         return jsonify({
             "success": True,
-            "data": {
-                "platform": platform,
-                "total": total,
-                "count": len(posts),
-                "posts": posts
-            }
+            "data": {"platform": platform, "total": total, "count": len(posts), "posts": posts}
         })
-        
+    except ValueError as e:
+        return jsonify({"success": False, "error": str(e)}), 400
     except Exception as e:
         logger.error(f"获取帖子失败: {str(e)}")
         return jsonify({
-            "success": False,
-            "error": str(e),
-            "traceback": traceback.format_exc()
+            "success": False, "error": str(e), "traceback": traceback.format_exc()
         }), 500
 
 
 @simulation_bp.route('/<simulation_id>/comments', methods=['GET'])
 def get_simulation_comments(simulation_id: str):
-    """
-    获取模拟中的评论
-
-    Query参数：
-        platform: 平台类型（twitter/reddit，根据模拟配置自动选择）
-        post_id: 过滤帖子ID（可选）
-        limit: 返回数量
-        offset: 偏移量
-    """
+    """Read comments, optionally by post_id, with the same bounded pagination."""
     try:
-        platform = request.args.get('platform') or _get_default_platform(simulation_id)
+        _platform, database, limit, offset = _simulation_database_query(simulation_id)
         post_id = request.args.get('post_id')
-        limit = request.args.get('limit', 50, type=int)
-        offset = request.args.get('offset', 0, type=int)
+        if not database.is_file():
+            return jsonify({"success": True, "data": {"count": 0, "comments": []}})
 
-        sim_dir = os.path.join(
-            os.path.dirname(__file__),
-            f'../../uploads/simulations/{simulation_id}'
-        )
-        
-        db_path = os.path.join(sim_dir, f"{platform}_simulation.db")
-        
-        if not os.path.exists(db_path):
-            return jsonify({
-                "success": True,
-                "data": {
-                    "count": 0,
-                    "comments": []
-                }
-            })
-        
-        import sqlite3
-        conn = sqlite3.connect(db_path)
-        conn.row_factory = sqlite3.Row
-        cursor = conn.cursor()
-        
-        try:
-            if post_id:
-                cursor.execute("""
-                    SELECT * FROM comment 
-                    WHERE post_id = ?
-                    ORDER BY created_at DESC 
-                    LIMIT ? OFFSET ?
-                """, (post_id, limit, offset))
-            else:
-                cursor.execute("""
-                    SELECT * FROM comment 
-                    ORDER BY created_at DESC 
-                    LIMIT ? OFFSET ?
-                """, (limit, offset))
-            
-            comments = [dict(row) for row in cursor.fetchall()]
-            
-        except sqlite3.OperationalError:
-            comments = []
-        
-        conn.close()
-        
-        return jsonify({
-            "success": True,
-            "data": {
-                "count": len(comments),
-                "comments": comments
-            }
-        })
-        
+        with closing(sqlite3.connect(database.as_uri() + '?mode=ro', uri=True)) as conn:
+            conn.row_factory = sqlite3.Row
+            cursor = conn.cursor()
+            try:
+                if post_id:
+                    cursor.execute("""
+                        SELECT * FROM comment WHERE post_id = ?
+                        ORDER BY created_at DESC LIMIT ? OFFSET ?
+                    """, (post_id, limit, offset))
+                else:
+                    cursor.execute("""
+                        SELECT * FROM comment ORDER BY created_at DESC LIMIT ? OFFSET ?
+                    """, (limit, offset))
+                comments = [dict(row) for row in cursor.fetchall()]
+            except sqlite3.OperationalError:
+                comments = []
+        return jsonify({"success": True, "data": {"count": len(comments), "comments": comments}})
+    except ValueError as e:
+        return jsonify({"success": False, "error": str(e)}), 400
     except Exception as e:
         logger.error(f"获取评论失败: {str(e)}")
         return jsonify({
-            "success": False,
-            "error": str(e),
-            "traceback": traceback.format_exc()
+            "success": False, "error": str(e), "traceback": traceback.format_exc()
         }), 500
 
 
