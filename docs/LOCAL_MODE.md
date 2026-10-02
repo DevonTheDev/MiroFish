@@ -444,8 +444,28 @@ up temporary files; a denied cleanup is logged without masking the original
 error, and an abrupt exit may leave a temporary file. The in-memory Project,
 including its updated timestamp, is not rolled back on failure.
 
-This applies only to project metadata, not uploads, extracted text, report or
-simulation state. It is per-file replacement, not a multi-file transaction,
+The project save path covers metadata, with simulation state covered below; it
+does not cover uploads, extracted text, report or runner state. It is per-file
+replacement, not a multi-file transaction,
 concurrent-edit lock, power-loss durability or a hostile-local-filesystem sandbox.
 Local tests use disposable files, real project readers and injected I/O failures;
 native Windows behavior remains a separate runtime check.
+
+### Recoverable simulation preparation state
+
+SimulationManager now uses the same staged JSON writer for `state.json`. A reader
+using another manager sees the previous complete file until the save finishes;
+serialization, staging, close or replacement failure preserves that file. A failed
+first save leaves no partial final JSON. A distinct new state object enters this
+manager's cache only after replacement succeeds, and a normal retry can recover.
+
+The manager still creates a directory when explicitly saving a valid new state.
+Reads remain noncreating, and existing path/alias validation precedes staging.
+Already-shared mutable state objects and their timestamps are not rolled back on
+failure: the current manager can retain unsaved in-memory edits while a fresh
+manager reads the previous disk snapshot. JSON fields and formatting are unchanged.
+
+This shares the project writer's cleanup and per-file limits; it adds no concurrent
+edit lock, multi-file transaction, crash durability or native Windows guarantee.
+Tests cover cache ownership, fresh readers, first saves and retries with disposable
+files. Existing project-save and both managers' path-boundary tests also run.

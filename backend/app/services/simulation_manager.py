@@ -15,6 +15,7 @@ from enum import Enum
 from ..config import Config
 from ..storage import StoragePathError, storage_path, validate_record_id
 from ..utils.logger import get_logger
+from ..utils.persistence import write_json_atomic
 from .zep_entity_reader import ZepEntityReader, FilteredEntities
 from .oasis_profile_generator import OasisProfileGenerator, OasisAgentProfile
 from .simulation_config_generator import SimulationConfigGenerator, SimulationParameters
@@ -165,8 +166,7 @@ class SimulationManager:
 
         state.updated_at = datetime.now().isoformat()
         
-        with open(state_file, 'w', encoding='utf-8') as f:
-            json.dump(state.to_dict(), f, ensure_ascii=False, indent=2)
+        write_json_atomic(state_file, state.to_dict(), logger=logger)
         
         self._simulations[state.simulation_id] = state
     
