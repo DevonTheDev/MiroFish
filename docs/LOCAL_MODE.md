@@ -313,3 +313,24 @@ is not recreated. Tests use disposable real SQLite files, including failure path
 and symlinks. This hardens these two endpoints; it is not a complete filesystem
 sandbox or a security claim about every API route, hostile local processes, or
 native Windows behavior.
+
+
+### Project and report file storage
+
+Project/report managers accept record IDs containing 1–128 ASCII letters,
+digits, underscores or hyphens; Windows device names are rejected. Every managed
+child path is checked before use, including uploads, extracted text, report
+sections, logs and legacy report JSON/Markdown files. Descendant symlinks and
+junction aliases are refused, even when they point to a sibling record. The
+configured storage root itself may be a symlink for a relocated data directory.
+Listings skip unsafe entries rather than following them. Invalid project/report
+route IDs return 400 before their handlers run.
+
+Normal saved records, legacy report lookup and generated filenames keep their
+formats. Original upload display names are retained; generated filenames must
+remain portable components. Report log writers now use the same configured root
+as report readers. Local regressions use disposable files and symlinks; malformed
+deletes are tested with the destructive operation intercepted. These are scoped
+project/report path checks, not authentication, crash-safe saves, a complete API
+sandbox, or protection against hostile local filesystem changes between a check
+and access. Native Windows behavior remains a separate runtime check.

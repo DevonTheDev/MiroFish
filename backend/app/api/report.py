@@ -10,6 +10,7 @@ from flask import request, jsonify, send_file
 
 from . import report_bp
 from ..config import Config
+from ..storage import StoragePathError
 from ..services.report_agent import ReportAgent, ReportManager, ReportStatus
 from ..services.simulation_manager import SimulationManager
 from ..services.simulation_runner import SimulationRunner, RunnerStatus
@@ -25,6 +26,17 @@ from ..utils.zep_lifecycle import (
 )
 
 logger = get_logger('mirofish.api.report')
+
+
+@report_bp.before_request
+def validate_storage_route_id():
+    """Reject unsafe route IDs before locks, background work or deletion."""
+    record_id = (request.view_args or {}).get('report_id')
+    if record_id is not None:
+        try:
+            ReportManager._get_report_folder(record_id)
+        except StoragePathError as exc:
+            return jsonify({"success": False, "error": str(exc)}), 400
 
 
 # ============== 报告生成接口 ==============

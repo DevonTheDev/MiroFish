@@ -13,6 +13,7 @@ from zep_cloud import NotFoundError
 
 from . import graph_bp
 from ..config import Config
+from ..storage import StoragePathError
 from ..services.ontology_generator import OntologyGenerator
 from ..services.graph_builder import BatchSubmission, GraphBuilderService
 from ..services.text_processor import TextProcessor
@@ -31,6 +32,17 @@ from ..utils.llm_client import LLMResponseError
 logger = get_logger('mirofish.api')
 _build_locks: dict[str, threading.Lock] = {}
 _build_locks_guard = threading.Lock()
+
+
+@graph_bp.before_request
+def validate_storage_route_id():
+    """Reject unsafe route IDs before locks, background work or deletion."""
+    record_id = (request.view_args or {}).get('project_id')
+    if record_id is not None:
+        try:
+            ProjectManager._get_project_dir(record_id)
+        except StoragePathError as exc:
+            return jsonify({"success": False, "error": str(exc)}), 400
 
 
 class GraphInUseError(RuntimeError):
