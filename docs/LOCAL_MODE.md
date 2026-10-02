@@ -428,3 +428,24 @@ rows. These checks are limited to interview history, not other runner/IPC paths,
 backend-wide authentication, protection against hostile local path mutation or a
 native Windows guarantee. Local tests use Flask and disposable SQLite, including
 read-only enforcement, closure after errors and live WAL commits, without inference.
+
+### Recoverable project metadata saves
+
+ProjectManager stages each `project.json` beside its destination and replaces the
+file only after JSON serialization and handle closure succeed. Progress readers
+continue to see the previous complete metadata during a save. Serialization,
+close or replacement failures preserve that previous file; a failed first save
+leaves no partial final JSON. Each save owns a unique temporary file, so cleanup
+of a failed overlapping save cannot remove another save's completed output.
+
+The existing ID/path guards, UTF-8 JSON format and propagated save errors remain.
+Saving a missing project does not create its directory. Ordinary failures clean
+up temporary files; a denied cleanup is logged without masking the original
+error, and an abrupt exit may leave a temporary file. The in-memory Project,
+including its updated timestamp, is not rolled back on failure.
+
+This applies only to project metadata, not uploads, extracted text, report or
+simulation state. It is per-file replacement, not a multi-file transaction,
+concurrent-edit lock, power-loss durability or a hostile-local-filesystem sandbox.
+Local tests use disposable files, real project readers and injected I/O failures;
+native Windows behavior remains a separate runtime check.

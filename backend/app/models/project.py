@@ -7,12 +7,17 @@ import os
 import json
 import uuid
 import shutil
+import tempfile
 from datetime import datetime
 from typing import Dict, Any, List, Optional
 from enum import Enum
 from dataclasses import dataclass, field, asdict
 from ..config import Config
 from ..storage import StoragePathError, storage_path, validate_record_id
+from ..utils.logger import get_logger
+
+
+logger = get_logger("mirofish.project")
 
 
 class ProjectStatus(str, Enum):
@@ -177,8 +182,26 @@ class ProjectManager:
         project.updated_at = datetime.now().isoformat()
         meta_path = cls._get_project_meta_path(project.project_id)
         
-        with open(meta_path, 'w', encoding='utf-8') as f:
-            json.dump(project.to_dict(), f, ensure_ascii=False, indent=2)
+        temporary_path = None
+        try:
+            # Keep readers on the old complete snapshot until serialization and
+            # close succeed. Unique staging files also isolate overlapping saves.
+            with tempfile.NamedTemporaryFile(
+                mode='w', encoding='utf-8', dir=os.path.dirname(meta_path),
+                prefix='.project.json.', suffix='.tmp', delete=False,
+            ) as f:
+                temporary_path = f.name
+                json.dump(project.to_dict(), f, ensure_ascii=False, indent=2)
+            os.replace(temporary_path, meta_path)
+        finally:
+            if temporary_path is not None:
+                try:
+                    os.unlink(temporary_path)
+                except FileNotFoundError:
+                    pass
+                except OSError:
+                    logger.warning("Could not remove temporary project metadata %s",
+                                   temporary_path, exc_info=True)
     
     @classmethod
     def get_project(cls, project_id: str) -> Optional[Project]:
