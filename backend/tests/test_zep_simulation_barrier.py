@@ -482,3 +482,183 @@ def test_shutdown_drain_failure_remains_failed_and_retryable(monkeypatch):
         SimulationRunner._cleanup_done = False
         SimulationRunner._graph_memory_enabled.pop(simulation_id, None)
         SimulationRunner._manual_stop_requests.discard(simulation_id)
+
+
+@pytest.mark.parametrize("graph_memory", [False, True])
+@pytest.mark.parametrize("drain_failure", [False, True])
+@pytest.mark.parametrize("manual_stop", [False, True])
+def test_completed_platforms_finalize_while_interview_process_stays_alive(
+    monkeypatch, tmp_path, graph_memory, drain_failure, manual_stop
+):
+    simulation_id = "sim-interview-alive"
+    sim_dir = tmp_path / simulation_id
+    for platform in ("twitter", "reddit"):
+        log_dir = sim_dir / platform
+        log_dir.mkdir(parents=True)
+        (log_dir / "actions.jsonl").write_text(
+            '{"event_type":"simulation_end","total_rounds":1}\n',
+            encoding="utf-8",
+        )
+    state = SimulationRunState(
+        simulation_id=simulation_id,
+        runner_status=RunnerStatus.STOPPING if manual_stop else RunnerStatus.RUNNING,
+        twitter_running=True,
+        reddit_running=True,
+    )
+    process = SimpleNamespace(returncode=None)
+    process.poll = lambda: process.returncode
+    drains = []
+    observations = []
+
+    def drain(_simulation_id):
+        drains.append((process.poll(), state.runner_status))
+        if drain_failure:
+            raise RuntimeError("ingestion incomplete")
+
+    def observe_live_process(_seconds):
+        observations.append((state.runner_status, state.error))
+        # Keep the child alive for two monitor passes, then let it exit normally.
+        if len(observations) == 2:
+            process.returncode = 0
+
+    monkeypatch.setattr(SimulationRunner, "RUN_STATE_DIR", str(tmp_path))
+    monkeypatch.setattr(SimulationRunner, "get_run_state", lambda _sid: state)
+    monkeypatch.setattr(SimulationRunner, "_save_run_state", lambda _state: None)
+    monkeypatch.setattr(SimulationRunner, "_sync_simulation_status", lambda *_args: None)
+    monkeypatch.setattr(runner_module.time, "sleep", observe_live_process)
+    monkeypatch.setattr(runner_module.ZepGraphMemoryManager, "stop_updater", drain)
+    monkeypatch.setitem(SimulationRunner._processes, simulation_id, process)
+    monkeypatch.setitem(SimulationRunner._graph_memory_enabled, simulation_id, graph_memory)
+    monkeypatch.setattr(
+        SimulationRunner, "_manual_stop_requests",
+        {simulation_id} if manual_stop else set(),
+    )
+
+    SimulationRunner._monitor_simulation(simulation_id)
+
+    expected = (
+        RunnerStatus.FAILED if graph_memory and drain_failure
+        else RunnerStatus.STOPPED if manual_stop else RunnerStatus.COMPLETED
+    )
+    interim = RunnerStatus.STOPPING if manual_stop else expected
+    assert [status for status, _error in observations] == [interim, interim]
+    exit_code_at_drain = 0 if manual_stop else None
+    assert drains == (
+        [(exit_code_at_drain, RunnerStatus.STOPPING)] if graph_memory else []
+    )
+    assert state.runner_status == expected
+    if graph_memory and drain_failure:
+        assert "ingestion incomplete" in state.error
+        assert SimulationRunner._graph_memory_enabled[simulation_id] is True
+    else:
+        assert state.error is None
+        assert not SimulationRunner._graph_memory_enabled.get(simulation_id, False)
+
+
+def test_completion_waits_for_expected_platform_even_before_its_log_exists(
+    monkeypatch, tmp_path
+):
+    state = SimulationRunState(
+        simulation_id="sim-platform-delayed",
+        runner_status=RunnerStatus.RUNNING,
+        twitter_completed=True,
+        reddit_running=True,
+    )
+    log_dir = tmp_path / state.simulation_id / "twitter"
+    log_dir.mkdir(parents=True)
+    (log_dir / "actions.jsonl").write_text("", encoding="utf-8")
+    monkeypatch.setattr(SimulationRunner, "RUN_STATE_DIR", str(tmp_path))
+
+    assert SimulationRunner._check_all_platforms_completed(state) is False
+
+
+def test_manual_stop_can_close_completed_interview_environment(monkeypatch):
+    simulation_id = "sim-close-interviews"
+    state = SimulationRunState(
+        simulation_id=simulation_id,
+        runner_status=RunnerStatus.COMPLETED,
+        twitter_completed=True,
+        reddit_completed=True,
+    )
+    process = SimpleNamespace(returncode=None)
+    process.poll = lambda: process.returncode
+    monkeypatch.setattr(SimulationRunner, "get_run_state", lambda _sid: state)
+    monkeypatch.setattr(SimulationRunner, "_save_run_state", lambda _state: None)
+    monkeypatch.setattr(SimulationRunner, "_sync_simulation_status", lambda *_args: None)
+    monkeypatch.setattr(
+        SimulationRunner, "_terminate_process",
+        lambda _process, _sid: setattr(process, "returncode", 0),
+    )
+    monkeypatch.setitem(SimulationRunner._processes, simulation_id, process)
+
+    result = SimulationRunner.stop_simulation(simulation_id)
+
+    assert result.runner_status == RunnerStatus.STOPPED
+    assert process.poll() == 0
+
+
+def test_force_restart_stops_completed_live_environment_before_cleanup(monkeypatch):
+    simulation_id = "sim-restart-interviews"
+    state = SimpleNamespace(status=SimulationStatus.COMPLETED)
+    run_state = SimpleNamespace(runner_status=RunnerStatus.COMPLETED)
+    cleanup_called = []
+    monkeypatch.setattr(
+        simulation_api, "SimulationManager",
+        lambda: SimpleNamespace(get_simulation=lambda _sid: state),
+    )
+    monkeypatch.setattr(simulation_api, "_check_simulation_prepared", lambda _sid: (True, {}))
+    monkeypatch.setattr(SimulationRunner, "get_run_state", lambda _sid: run_state)
+    monkeypatch.setitem(
+        SimulationRunner._processes, simulation_id, SimpleNamespace(poll=lambda: None),
+    )
+    monkeypatch.setattr(
+        SimulationRunner, "stop_simulation",
+        lambda _sid: (_ for _ in ()).throw(SimulationStopPending("still stopping interviews")),
+    )
+    monkeypatch.setattr(
+        SimulationRunner, "cleanup_simulation_logs",
+        lambda _sid: cleanup_called.append(True) or {"success": True},
+    )
+
+    app = Flask(__name__)
+    with app.test_request_context(
+        "/api/simulation/start", method="POST",
+        json={"simulation_id": simulation_id, "force": True},
+    ):
+        response, status = simulation_api.start_simulation()
+
+    assert cleanup_called == []
+    assert status == 409
+    assert response.get_json()["pending"] is True
+
+
+@pytest.mark.parametrize("process_exited", [False, True])
+def test_direct_start_rejects_completed_but_owned_interview_environment(
+    monkeypatch, tmp_path, process_exited
+):
+    simulation_id = "sim-duplicate-interviews"
+    sim_dir = tmp_path / simulation_id
+    sim_dir.mkdir()
+    (sim_dir / "simulation_config.json").write_text("{}", encoding="utf-8")
+    state = SimulationRunState(simulation_id=simulation_id, runner_status=RunnerStatus.COMPLETED)
+    saved = []
+    monkeypatch.setattr(SimulationRunner, "RUN_STATE_DIR", str(tmp_path))
+    monkeypatch.setattr(SimulationRunner, "get_run_state", lambda _sid: state)
+    monkeypatch.setattr(SimulationRunner, "_save_run_state", lambda value: saved.append(value))
+    monkeypatch.setitem(
+        SimulationRunner._processes, simulation_id,
+        SimpleNamespace(poll=lambda: 0 if process_exited else None),
+    )
+    monkeypatch.setitem(
+        SimulationRunner._monitor_threads, simulation_id,
+        SimpleNamespace(is_alive=lambda: True),
+    )
+    monkeypatch.setattr(
+        runner_module.subprocess, "Popen",
+        lambda *_args, **_kwargs: pytest.fail("duplicate child must not start"),
+    )
+
+    with pytest.raises(ValueError, match="运行或结束处理"):
+        SimulationRunner.start_simulation(simulation_id)
+
+    assert saved == []

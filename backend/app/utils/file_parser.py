@@ -174,6 +174,16 @@ def split_text_into_chunks(
     Returns:
         文本块列表
     """
+    if isinstance(chunk_size, bool) or not isinstance(chunk_size, int) or chunk_size <= 0:
+        raise ValueError("chunk_size must be a positive integer")
+    if (
+        isinstance(overlap, bool)
+        or not isinstance(overlap, int)
+        or overlap < 0
+        or overlap >= chunk_size
+    ):
+        raise ValueError("overlap must satisfy 0 <= overlap < chunk_size")
+
     if len(text) <= chunk_size:
         return [text] if text.strip() else []
     
@@ -188,8 +198,11 @@ def split_text_into_chunks(
             # 查找最近的句子结束符
             for sep in ['。', '！', '？', '.\n', '!\n', '?\n', '\n\n', '. ', '! ', '? ']:
                 last_sep = text[start:end].rfind(sep)
-                if last_sep != -1 and last_sep > chunk_size * 0.3:
-                    end = start + last_sep + len(sep)
+                # A shorter sentence boundary must still advance beyond the
+                # overlap; otherwise the next chunk repeats or moves backwards.
+                split_offset = last_sep + len(sep)
+                if last_sep > chunk_size * 0.3 and split_offset > overlap:
+                    end = start + split_offset
                     break
         
         chunk = text[start:end].strip()

@@ -433,7 +433,9 @@ class SimulationRunner:
             }
             if (
                 existing and existing.runner_status in active_statuses
-            ) or ZepGraphMemoryManager.get_updater(simulation_id) is not None:
+            ) or cls.has_active_environment(simulation_id) or (
+                ZepGraphMemoryManager.get_updater(simulation_id) is not None
+            ):
                 raise ValueError(f"模拟已在运行或结束处理中: {simulation_id}")
             cls._save_run_state(state)
         
@@ -650,6 +652,11 @@ class SimulationRunner:
                     reddit_position = cls._read_action_log(
                         reddit_actions_log, reddit_position, state, "reddit"
                     )
+
+                # Simulation scripts remain alive for interviews after their
+                # final action events. Finish ingestion without killing that
+                # environment, but only after every expected platform ends.
+                cls._finalize_completed_platforms(state)
                 
                 # 更新状态
                 cls._save_run_state(state)
@@ -744,24 +751,25 @@ class SimulationRunner:
                         logger.error(f"模拟失败: {simulation_id}, error={state.error}")
                 cls._manual_stop_requests.discard(simulation_id)
             
-            # 清理进程资源
-            cls._processes.pop(simulation_id, None)
-            cls._action_queues.pop(simulation_id, None)
-            cls._monitor_threads.pop(simulation_id, None)
-            
-            # 关闭日志文件句柄
-            if simulation_id in cls._stdout_files:
-                try:
-                    cls._stdout_files[simulation_id].close()
-                except Exception:
-                    pass
-                cls._stdout_files.pop(simulation_id, None)
-            if simulation_id in cls._stderr_files and cls._stderr_files[simulation_id]:
-                try:
-                    cls._stderr_files[simulation_id].close()
-                except Exception:
-                    pass
-                cls._stderr_files.pop(simulation_id, None)
+                # Release ownership under the same lock as startup claims, so
+                # this monitor cannot remove a replacement run's resources.
+                cls._processes.pop(simulation_id, None)
+                cls._action_queues.pop(simulation_id, None)
+                cls._monitor_threads.pop(simulation_id, None)
+
+                # 关闭日志文件句柄
+                if simulation_id in cls._stdout_files:
+                    try:
+                        cls._stdout_files[simulation_id].close()
+                    except Exception:
+                        pass
+                    cls._stdout_files.pop(simulation_id, None)
+                if simulation_id in cls._stderr_files and cls._stderr_files[simulation_id]:
+                    try:
+                        cls._stderr_files[simulation_id].close()
+                    except Exception:
+                        pass
+                    cls._stderr_files.pop(simulation_id, None)
     
     @classmethod
     def _read_action_log(
@@ -818,12 +826,11 @@ class SimulationRunner:
                                     # 如果运行了两个平台，需要两个都完成
                                     all_completed = cls._check_all_platforms_completed(state)
                                     if all_completed:
-                                        # Platform completion is only an input
-                                        # signal. The monitor publishes the
-                                        # terminal status after the process has
-                                        # exited and Zep ingestion has drained.
+                                        # The monitor publishes terminal status
+                                        # after reading both log tails and
+                                        # draining Zep, keeping interviews alive.
                                         logger.info(
-                                            f"所有平台已结束，等待进程与图谱写入完成: "
+                                            f"所有平台已结束，等待图谱写入完成: "
                                             f"{state.simulation_id}"
                                         )
                                 
@@ -880,30 +887,58 @@ class SimulationRunner:
     
     @classmethod
     def _check_all_platforms_completed(cls, state: SimulationRunState) -> bool:
-        """
-        检查所有启用的平台是否都已完成模拟
-        
-        通过检查对应的 actions.jsonl 文件是否存在来判断平台是否被启用
-        
-        Returns:
-            True 如果所有启用的平台都已完成
-        """
-        sim_dir = os.path.join(cls.RUN_STATE_DIR, state.simulation_id)
-        twitter_log = os.path.join(sim_dir, "twitter", "actions.jsonl")
-        reddit_log = os.path.join(sim_dir, "reddit", "actions.jsonl")
-        
-        # 检查哪些平台被启用（通过文件是否存在判断）
-        twitter_enabled = os.path.exists(twitter_log)
-        reddit_enabled = os.path.exists(reddit_log)
-        
-        # 如果平台被启用但未完成，则返回 False
-        if twitter_enabled and not state.twitter_completed:
-            return False
-        if reddit_enabled and not state.reddit_completed:
-            return False
-        
-        # 至少有一个平台被启用且已完成
-        return twitter_enabled or reddit_enabled
+        """Use launch state, since an expected platform's log may not exist yet."""
+        expected = [
+            completed
+            for running, completed in (
+                (state.twitter_running, state.twitter_completed),
+                (state.reddit_running, state.reddit_completed),
+            )
+            if running or completed
+        ]
+        return bool(expected) and all(expected)
+
+    @classmethod
+    def _finalize_completed_platforms(cls, state: SimulationRunState) -> None:
+        """Drain completed producers once while retaining the interview child."""
+        simulation_id = state.simulation_id
+        with cls._finalization_lock(simulation_id):
+            if (
+                state.runner_status != RunnerStatus.RUNNING
+                or simulation_id in cls._manual_stop_requests
+                or not cls._check_all_platforms_completed(state)
+            ):
+                return
+
+            status = RunnerStatus.COMPLETED
+            error_message = None
+            if cls._graph_memory_enabled.get(simulation_id, False):
+                state.runner_status = RunnerStatus.STOPPING
+                cls._save_run_state(state)
+                cls._sync_simulation_status(simulation_id, RunnerStatus.STOPPING)
+                try:
+                    ZepGraphMemoryManager.stop_updater(simulation_id)
+                    cls._graph_memory_enabled.pop(simulation_id, None)
+                except Exception as error:
+                    # Retain the failed updater for the existing explicit
+                    # recovery path; a later process exit must not erase this.
+                    status = RunnerStatus.FAILED
+                    error_message = f"Zep图谱写入未完整完成: {error}"
+            state.runner_status = status
+            state.error = error_message
+            state.completed_at = datetime.now().isoformat()
+            cls._save_run_state(state)
+            cls._sync_simulation_status(simulation_id, status, error_message)
+
+    @classmethod
+    def has_active_environment(cls, simulation_id: str) -> bool:
+        """Include live interviews and the monitor still releasing resources."""
+        process = cls._processes.get(simulation_id)
+        monitor = cls._monitor_threads.get(simulation_id)
+        return bool(
+            (process is not None and process.poll() is None)
+            or (monitor is not None and monitor.is_alive())
+        )
     
     @classmethod
     def _terminate_process(cls, process: subprocess.Popen, simulation_id: str, timeout: int = 10):
@@ -987,6 +1022,7 @@ class SimulationRunner:
                     RunnerStatus.STOPPING,
                 ]
                 and not retrying_finalization
+                and not cls.has_active_environment(simulation_id)
             ):
                 raise ValueError(
                     f"模拟未在运行: {simulation_id}, status={state.runner_status}"
