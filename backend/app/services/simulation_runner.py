@@ -1159,6 +1159,8 @@ class SimulationRunner:
                 
                 try:
                     data = json.loads(line)
+                    if not isinstance(data, dict):
+                        continue
                     
                     # 跳过非动作记录（如 simulation_start, round_start, round_end 等事件）
                     if "event_type" in data:
@@ -1167,25 +1169,39 @@ class SimulationRunner:
                     # 跳过没有 agent_id 的记录（非 Agent 动作）
                     if "agent_id" not in data:
                         continue
+
+                    # Reject malformed sorting/grouping keys per row. A single
+                    # bad record must not break the complete history/summary.
+                    record_agent_id = data["agent_id"]
+                    record_round = data.get("round", 0)
+                    record_timestamp = data.get("timestamp", "")
+                    record_action_type = data.get("action_type", "")
+                    if (type(record_agent_id) is not int or record_agent_id < 0
+                            or type(record_round) is not int or record_round < 0
+                            or not isinstance(record_timestamp, str)
+                            or not isinstance(record_action_type, str)):
+                        continue
                     
                     # 获取平台：优先使用记录中的 platform，否则使用默认平台
                     record_platform = data.get("platform") or default_platform or ""
+                    if not isinstance(record_platform, str):
+                        continue
                     
                     # 过滤
                     if platform_filter and record_platform != platform_filter:
                         continue
-                    if agent_id is not None and data.get("agent_id") != agent_id:
+                    if agent_id is not None and record_agent_id != agent_id:
                         continue
-                    if round_num is not None and data.get("round") != round_num:
+                    if round_num is not None and record_round != round_num:
                         continue
                     
                     actions.append(AgentAction(
-                        round_num=data.get("round", 0),
-                        timestamp=data.get("timestamp", ""),
+                        round_num=record_round,
+                        timestamp=record_timestamp,
                         platform=record_platform,
-                        agent_id=data.get("agent_id", 0),
+                        agent_id=record_agent_id,
                         agent_name=data.get("agent_name", ""),
-                        action_type=data.get("action_type", ""),
+                        action_type=record_action_type,
                         action_args=data.get("action_args", {}),
                         result=data.get("result"),
                         success=data.get("success", True),

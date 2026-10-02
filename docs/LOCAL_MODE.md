@@ -486,6 +486,26 @@ formulas are unchanged. Local tests exercise the Flask endpoints with disposable
 JSONL logs, including 10,004 actions and a controlled log-removal case.
 
 These readers still load full histories and do not take an atomic snapshot across
-files. This does not add universal runner path validation, log-schema validation,
+files. This does not add universal runner path validation, full log-schema validation,
 constant-memory paging, timestamp/timezone normalization or native filesystem
 validation. Model calls and simulation execution are not involved in these tests.
+
+### Malformed action-history records
+
+History reads skip individual non-object JSON values and records whose agent ID
+or round is not a nonnegative integer (including booleans). Timestamp and action
+type keys must be strings, and the effective platform after the existing default
+is applied must be a string. A malformed row cannot break sorting/grouping of the
+valid actions before and after it. Existing event lines and incomplete JSON lines
+remain skipped; invalid rows are left untouched on disk.
+
+Missing optional keys retain their previous defaults. In particular, a missing
+round is consistently treated as round zero when filtering as well as when
+returning the action. Optional action payloads/results and success values are
+preserved. Both the modern and legacy logger output formats remain supported.
+
+These checks apply to the history reader, not the separate live-ingestion parser
+or the complete action schema. They do not validate timestamp syntax, normalize
+timezones, repair logs, bound memory usage, or suppress filesystem/UTF-8 errors.
+Local tests use actual log writers, disposable JSONL files and Flask queries;
+no model or gameplay execution is involved.
