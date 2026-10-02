@@ -263,3 +263,14 @@ and chat text remains unchanged in storage and downloads.
 Run `npm test --prefix frontend` for rendering regressions, then
 `npm run build --prefix frontend` for the local production build. This content boundary is separate from
 the model-server trust boundary and is not a general browser/network sandbox.
+
+### Report-generation log polling
+
+The Step 4 report-generation view keeps at most one pending request per log
+stream, so slow responses do not queue duplicate reads at the same cursor.
+Changing or clearing the report, or closing the component, cancels its browser
+reads and rejects late responses from the old view, even after A→B→A navigation.
+Completion stops periodic polling while allowing the already-pending final
+console response to finish. Closing the view does not cancel backend report
+creation. Local frontend tests cover these reactive/lifecycle paths; a full
+browser run with a real model remains a separate integration check.

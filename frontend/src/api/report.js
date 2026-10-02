@@ -20,18 +20,20 @@ export const getReportStatus = (reportId) => {
  * 获取 Agent 日志（增量）
  * @param {string} reportId
  * @param {number} fromLine - 从第几行开始获取
+ * @param {AbortSignal} [signal] - Optional cancellation for a closed/replaced view
  */
-export const getAgentLog = (reportId, fromLine = 0) => {
-  return service.get(`/api/report/${reportId}/agent-log`, { params: { from_line: fromLine } })
+export const getAgentLog = (reportId, fromLine = 0, signal) => {
+  return service.get(`/api/report/${reportId}/agent-log`, { params: { from_line: fromLine }, signal })
 }
 
 /**
  * 获取控制台日志（增量）
  * @param {string} reportId
  * @param {number} fromLine - 从第几行开始获取
+ * @param {AbortSignal} [signal] - Optional cancellation for a closed/replaced view
  */
-export const getConsoleLog = (reportId, fromLine = 0) => {
-  return service.get(`/api/report/${reportId}/console-log`, { params: { from_line: fromLine } })
+export const getConsoleLog = (reportId, fromLine = 0, signal) => {
+  return service.get(`/api/report/${reportId}/console-log`, { params: { from_line: fromLine }, signal })
 }
 
 /**

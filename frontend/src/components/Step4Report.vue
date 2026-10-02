@@ -1915,13 +1915,30 @@ const getLogLevelClass = (log) => {
 // Polling
 let agentLogTimer = null
 let consoleLogTimer = null
+let pollingGeneration = 0
+let agentLogRequest = null
+let consoleLogRequest = null
+let disposed = false
+
+const cancelLogRequests = () => {
+  pollingGeneration++
+  agentLogRequest?.abort()
+  consoleLogRequest?.abort()
+  agentLogRequest = null
+  consoleLogRequest = null
+}
 
 const fetchAgentLog = async () => {
-  if (!props.reportId) return
-  
+  if (!props.reportId || disposed || isComplete.value || agentLogRequest) return
+  const reportId = props.reportId
+  const generation = pollingGeneration
+  const request = new AbortController()
+  agentLogRequest = request
+
   try {
-    const res = await getAgentLog(props.reportId, agentLogLine.value)
-    
+    const res = await getAgentLog(reportId, agentLogLine.value, request.signal)
+    if (disposed || request.signal.aborted || generation !== pollingGeneration || reportId !== props.reportId) return
+
     if (res.success && res.data) {
       const newLogs = res.data.logs || []
       
@@ -1963,6 +1980,7 @@ const fetchAgentLog = async () => {
         agentLogLine.value = res.data.from_line + newLogs.length
         
         nextTick(() => {
+          if (disposed || generation !== pollingGeneration) return
           if (rightPanel.value) {
             // 如果任务已完成，滚动到顶部；否则滚动到底部跟随最新日志
             if (isComplete.value) {
@@ -1975,7 +1993,11 @@ const fetchAgentLog = async () => {
       }
     }
   } catch (err) {
-    console.warn('Failed to fetch agent log:', err)
+    if (!disposed && !request.signal.aborted && generation === pollingGeneration) {
+      console.warn('Failed to fetch agent log:', err)
+    }
+  } finally {
+    if (agentLogRequest === request) agentLogRequest = null
   }
 }
 
@@ -2025,11 +2047,16 @@ const extractFinalContent = (response) => {
 }
 
 const fetchConsoleLog = async () => {
-  if (!props.reportId) return
-  
+  if (!props.reportId || disposed || isComplete.value || consoleLogRequest) return
+  const reportId = props.reportId
+  const generation = pollingGeneration
+  const request = new AbortController()
+  consoleLogRequest = request
+
   try {
-    const res = await getConsoleLog(props.reportId, consoleLogLine.value)
-    
+    const res = await getConsoleLog(reportId, consoleLogLine.value, request.signal)
+    if (disposed || request.signal.aborted || generation !== pollingGeneration || reportId !== props.reportId) return
+
     if (res.success && res.data) {
       const newLogs = res.data.logs || []
       
@@ -2038,6 +2065,7 @@ const fetchConsoleLog = async () => {
         consoleLogLine.value = res.data.from_line + newLogs.length
         
         nextTick(() => {
+          if (disposed || generation !== pollingGeneration) return
           if (logContent.value) {
             logContent.value.scrollTop = logContent.value.scrollHeight
           }
@@ -2045,12 +2073,16 @@ const fetchConsoleLog = async () => {
       }
     }
   } catch (err) {
-    console.warn('Failed to fetch console log:', err)
+    if (!disposed && !request.signal.aborted && generation === pollingGeneration) {
+      console.warn('Failed to fetch console log:', err)
+    }
+  } finally {
+    if (consoleLogRequest === request) consoleLogRequest = null
   }
 }
 
 const startPolling = () => {
-  if (agentLogTimer || consoleLogTimer) return
+  if (disposed || isComplete.value || !props.reportId || agentLogTimer || consoleLogTimer) return
   
   fetchAgentLog()
   fetchConsoleLog()
@@ -2079,26 +2111,28 @@ onMounted(() => {
 })
 
 onUnmounted(() => {
+  disposed = true
   stopPolling()
+  cancelLogRequests()
 })
 
 watch(() => props.reportId, (newId) => {
-  if (newId) {
-    agentLogs.value = []
-    consoleLogs.value = []
-    agentLogLine.value = 0
-    consoleLogLine.value = 0
-    reportOutline.value = null
-    currentSectionIndex.value = null
-    generatedSections.value = {}
-    expandedContent.value = new Set()
-    expandedLogs.value = new Set()
-    collapsedSections.value = new Set()
-    isComplete.value = false
-    startTime.value = null
-    
-    startPolling()
-  }
+  stopPolling()
+  cancelLogRequests()
+  agentLogs.value = []
+  consoleLogs.value = []
+  agentLogLine.value = 0
+  consoleLogLine.value = 0
+  reportOutline.value = null
+  currentSectionIndex.value = null
+  generatedSections.value = {}
+  expandedContent.value = new Set()
+  expandedLogs.value = new Set()
+  collapsedSections.value = new Set()
+  isComplete.value = false
+  startTime.value = null
+
+  if (newId) startPolling()
 }, { immediate: true })
 </script>
 
