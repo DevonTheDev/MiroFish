@@ -376,3 +376,30 @@ requests. This covers the manager and config download, not all direct API,
 SimulationRunner, script or IPC file access. It is not a full filesystem sandbox,
 protection against hostile local path mutation during long-running work, an
 atomic/concurrent state-update mechanism, or proof of native Windows behavior.
+
+### Restart cleanup safety
+
+`cleanup_simulation_logs` validates the simulation ID, record directory and every
+existing cleanup target before deleting any files. Descendant aliases and non-file
+targets refuse the whole cleanup. The deletion list remains the existing run state,
+main/stdout/stderr logs, two simulation databases, environment status and each
+platform's `actions.jsonl`; preparation metadata, config and profiles are retained.
+
+Cleanup takes the runner's startup/finalization lock without waiting, and refuses
+unfinished run states, owned live processes/monitors, retained memory updaters or
+failures inspecting current-backend resource owners. It never stops those resources
+itself. A caller can retry after normal finalization. Cache removal happens under the same lock only after
+all requested deletes succeed, so cleanup cannot erase a newer startup claim.
+Ordinary unlink failures can still leave a partial cleanup; the error/file lists
+and cached state remain available for retry.
+
+A corrupt or unreadable uncached run-state file can still be cleaned when no
+active state was parsed and this backend owns no process, monitor or updater. This
+preserves recovery of damaged run files; it does not establish that another
+backend or an orphan process has stopped.
+
+These are current-backend ownership checks and scoped path checks, not a
+cross-process lock, orphan-process detector, transactional deletion, hostile-local-
+filesystem sandbox or native Windows guarantee. Tests intercept malformed deletes,
+use disposable positive fixtures and synthetic resource owners, and exercise a
+real two-thread startup/cleanup boundary plus the force-restart API failure path.

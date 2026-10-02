@@ -19,6 +19,7 @@ from enum import Enum
 from queue import Queue
 
 from ..config import Config
+from ..storage import StoragePathError, storage_path, validate_record_id
 from ..utils.logger import get_logger
 from ..utils.locale import get_locale, set_locale
 from ..utils.zep import (
@@ -1425,64 +1426,78 @@ class SimulationRunner:
         Returns:
             清理结果信息
         """
-        import shutil
-        
-        sim_dir = os.path.join(cls.RUN_STATE_DIR, simulation_id)
-        
-        if not os.path.exists(sim_dir):
-            return {"success": True, "message": "模拟目录不存在，无需清理"}
-        
-        cleaned_files = []
-        errors = []
-        
-        # 要删除的文件列表（包括数据库文件）
-        files_to_delete = [
-            "run_state.json",
-            "simulation.log",
-            "stdout.log",
-            "stderr.log",
-            "twitter_simulation.db",  # Twitter 平台数据库
-            "reddit_simulation.db",   # Reddit 平台数据库
-            "env_status.json",        # 环境状态文件
+        def refused(message):
+            return {"success": False, "cleaned_files": [], "errors": [message]}
+
+        # Resolve every target before the first unlink: a bad later target must
+        # not leave an otherwise valid run partially erased.
+        relative_targets = [
+            ("run_state.json",), ("simulation.log",), ("stdout.log",),
+            ("stderr.log",), ("twitter_simulation.db",), ("reddit_simulation.db",),
+            ("env_status.json",), ("twitter", "actions.jsonl"),
+            ("reddit", "actions.jsonl"),
         ]
-        
-        # 要删除的目录列表（包含动作日志）
-        dirs_to_clean = ["twitter", "reddit"]
-        
-        # 删除文件
-        for filename in files_to_delete:
-            file_path = os.path.join(sim_dir, filename)
-            if os.path.exists(file_path):
-                try:
-                    os.remove(file_path)
-                    cleaned_files.append(filename)
-                except Exception as e:
-                    errors.append(f"删除 {filename} 失败: {str(e)}")
-        
-        # 清理平台目录中的动作日志
-        for dir_name in dirs_to_clean:
-            dir_path = os.path.join(sim_dir, dir_name)
-            if os.path.exists(dir_path):
-                actions_file = os.path.join(dir_path, "actions.jsonl")
-                if os.path.exists(actions_file):
+        try:
+            simulation_id = validate_record_id(simulation_id)
+            sim_dir = storage_path(cls.RUN_STATE_DIR, simulation_id)
+            if os.path.exists(sim_dir) and not os.path.isdir(sim_dir):
+                return refused("Simulation storage is not a directory")
+            targets = [
+                ("/".join(parts), storage_path(cls.RUN_STATE_DIR, simulation_id, *parts))
+                for parts in relative_targets
+            ]
+            for name, path in targets:
+                if os.path.exists(path) and not os.path.isfile(path):
+                    return refused(f"Cleanup target is not a regular file: {name}")
+        except StoragePathError as exc:
+            return refused(str(exc))
+
+        # Share the startup/finalization ownership lock without waiting for a
+        # potentially long ingestion drain. Callers can retry after it finishes.
+        lock = cls._finalization_lock(simulation_id)
+        if not lock.acquire(blocking=False):
+            return refused("Simulation startup/finalization is still in progress")
+        try:
+            try:
+                state = cls.get_run_state(simulation_id)
+                unfinished = state is not None and state.runner_status in {
+                    RunnerStatus.STARTING, RunnerStatus.RUNNING,
+                    RunnerStatus.PAUSED, RunnerStatus.STOPPING,
+                }
+                if (unfinished or cls.has_active_environment(simulation_id)
+                        or ZepGraphMemoryManager.get_updater(simulation_id) is not None):
+                    return refused("Simulation resources must finish before cleanup")
+            except Exception as exc:
+                return refused(f"Could not verify simulation cleanup safety: {exc}")
+
+            if not os.path.exists(sim_dir):
+                return {"success": True, "message": "模拟目录不存在，无需清理"}
+
+            cleaned_files = []
+            errors = []
+            for name, path in targets:
+                if os.path.exists(path):
                     try:
-                        os.remove(actions_file)
-                        cleaned_files.append(f"{dir_name}/actions.jsonl")
-                    except Exception as e:
-                        errors.append(f"删除 {dir_name}/actions.jsonl 失败: {str(e)}")
-        
-        # 清理内存中的运行状态
-        if simulation_id in cls._run_states:
-            del cls._run_states[simulation_id]
-        
-        logger.info(f"清理模拟日志完成: {simulation_id}, 删除文件: {cleaned_files}")
-        
-        return {
-            "success": len(errors) == 0,
-            "cleaned_files": cleaned_files,
-            "errors": errors if errors else None
-        }
-    
+                        os.remove(path)
+                        cleaned_files.append(name)
+                    except Exception as exc:
+                        errors.append(f"删除 {name} 失败: {exc}")
+
+            # Retain retry context after a partial OS failure. Holding the same
+            # lock until this pop also prevents erasing a newer startup claim.
+            if not errors:
+                cls._run_states.pop(simulation_id, None)
+                logger.info(f"清理模拟日志完成: {simulation_id}, 删除文件: {cleaned_files}")
+            else:
+                logger.warning(f"模拟日志清理未完成: {simulation_id}, errors={errors}")
+            return {
+                "success": not errors,
+                "cleaned_files": cleaned_files,
+                "errors": errors or None,
+            }
+        finally:
+            lock.release()
+
     # 防止重复清理的标志
     _cleanup_done = False
     
