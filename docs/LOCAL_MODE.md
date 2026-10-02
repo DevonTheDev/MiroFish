@@ -206,10 +206,29 @@ Hugging Face downloads, and the UI no longer fetches Google Fonts.
 ```sh
 cd backend
 uv sync --extra local --locked
-uv run --extra local --locked python -m pytest -q
+uv run --extra local --locked python scripts/run_offline_tests.py -q
 cd ..
 npm run build
 ```
+
+The offline runner clears inherited model/database credentials and provider overrides,
+disables implicit model downloads and telemetry, and installs a Python socket/DNS
+regression guard before importing pytest. Loopback TCP/UDP and Unix sockets remain
+available for the real test fixtures. This is not an OS firewall: native libraries
+or non-Python subprocesses require their own isolation. Dependencies and the Neo4j
+image must be prepared online first; model weights are never needed for this suite.
+
+Set `MIRO_TEST_NEO4J_URI` to a dedicated disposable loopback database and add
+`--require-neo4j` when all integration cases must run. Without that opt-in, database
+integration tests are explicitly skipped. From the root, `npm run test:local` runs
+the same guarded command with the local dependency extra.
+
+`.github/workflows/local-verification.yml` runs this complete database-backed suite
+and a separate frontend build on main pushes and pull requests. It uses pinned
+actions, read-only repository permission, standard CPU runners and no model/API
+secrets. It creates no release or deployment. Fork owners may need to enable
+GitHub Actions before the first run; a committed workflow alone does not prove
+that GitHub has executed it.
 
 Network-realistic gateway tests use synthetic loopback HTTP servers. The optional
 Neo4j integration tests use `MIRO_TEST_NEO4J_URI` and a dedicated disposable
