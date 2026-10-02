@@ -213,6 +213,7 @@ cd backend
 uv sync --extra local --locked
 uv run --extra local --locked python scripts/run_offline_tests.py -q
 cd ..
+npm test --prefix frontend
 npm run build
 ```
 
@@ -228,12 +229,9 @@ Set `MIRO_TEST_NEO4J_URI` to a dedicated disposable loopback database and add
 integration tests are explicitly skipped. From the root, `npm run test:local` runs
 the same guarded command with the local dependency extra.
 
-`.github/workflows/local-verification.yml` runs this complete database-backed suite
-and a separate frontend build on main pushes and pull requests. It uses pinned
-actions, read-only repository permission, standard CPU runners and no model/API
-secrets. It creates no release or deployment. Fork owners may need to enable
-GitHub Actions before the first run; a committed workflow alone does not prove
-that GitHub has executed it.
+Run these checks locally using Python/pytest and the frontend test/build commands.
+This fork does not run its verification suite through GitHub Actions. The existing
+upstream release and star-history workflows are separate from these local tests.
 
 Network-realistic gateway tests use synthetic loopback HTTP servers. The optional
 Neo4j integration tests use `MIRO_TEST_NEO4J_URI` and a dedicated disposable
@@ -259,6 +257,6 @@ links or images into active browser elements, so generated content cannot load
 remote images, frames or styles merely by being displayed. The original report
 and chat text remains unchanged in storage and downloads.
 
-Run `npm test --prefix frontend` for rendering regressions; the frontend CI job
-runs these before its production build. This content boundary is separate from
+Run `npm test --prefix frontend` for rendering regressions, then
+`npm run build --prefix frontend` for the local production build. This content boundary is separate from
 the model-server trust boundary and is not a general browser/network sandbox.
