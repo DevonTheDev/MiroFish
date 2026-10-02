@@ -1221,6 +1221,8 @@ class SimulationRunner:
         
         # 读取 Twitter 动作文件（根据文件路径自动设置 platform 为 twitter）
         twitter_actions_log = os.path.join(sim_dir, "twitter", "actions.jsonl")
+        reddit_actions_log = os.path.join(sim_dir, "reddit", "actions.jsonl")
+        modern_logs_exist = os.path.exists(twitter_actions_log) or os.path.exists(reddit_actions_log)
         if not platform or platform == "twitter":
             actions.extend(cls._read_actions_from_file(
                 twitter_actions_log,
@@ -1231,7 +1233,6 @@ class SimulationRunner:
             ))
         
         # 读取 Reddit 动作文件（根据文件路径自动设置 platform 为 reddit）
-        reddit_actions_log = os.path.join(sim_dir, "reddit", "actions.jsonl")
         if not platform or platform == "reddit":
             actions.extend(cls._read_actions_from_file(
                 reddit_actions_log,
@@ -1241,8 +1242,10 @@ class SimulationRunner:
                 round_num=round_num
             ))
         
-        # 如果分平台文件不存在，尝试读取旧的单一文件格式
-        if not actions:
+        # Fall back only when no modern log existed at the start of this read
+        # and none supplied actions. Empty filters/removed logs must not revive
+        # stale results from an older run.
+        if not actions and not modern_logs_exist:
             actions_log = os.path.join(sim_dir, "actions.jsonl")
             actions = cls._read_actions_from_file(
                 actions_log,
@@ -1309,7 +1312,7 @@ class SimulationRunner:
         Returns:
             每轮的汇总信息
         """
-        actions = cls.get_actions(simulation_id, limit=10000)
+        actions = cls.get_all_actions(simulation_id)
         
         # 按轮次分组
         rounds: Dict[int, Dict[str, Any]] = {}
@@ -1342,7 +1345,8 @@ class SimulationRunner:
             
             r["active_agents"].add(action.agent_id)
             r["action_types"][action.action_type] = r["action_types"].get(action.action_type, 0) + 1
-            r["last_action_time"] = action.timestamp
+            r["first_action_time"] = min(r["first_action_time"], action.timestamp)
+            r["last_action_time"] = max(r["last_action_time"], action.timestamp)
         
         # 转换为列表
         result = []
@@ -1370,7 +1374,7 @@ class SimulationRunner:
         Returns:
             Agent统计列表
         """
-        actions = cls.get_actions(simulation_id, limit=10000)
+        actions = cls.get_all_actions(simulation_id)
         
         agent_stats: Dict[int, Dict[str, Any]] = {}
         
@@ -1398,7 +1402,8 @@ class SimulationRunner:
                 stats["reddit_actions"] += 1
             
             stats["action_types"][action.action_type] = stats["action_types"].get(action.action_type, 0) + 1
-            stats["last_action_time"] = action.timestamp
+            stats["first_action_time"] = min(stats["first_action_time"], action.timestamp)
+            stats["last_action_time"] = max(stats["last_action_time"], action.timestamp)
         
         # 按总动作数排序
         result = sorted(agent_stats.values(), key=lambda x: x["total_actions"], reverse=True)

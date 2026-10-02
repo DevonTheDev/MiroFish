@@ -469,3 +469,23 @@ This shares the project writer's cleanup and per-file limits; it adds no concurr
 edit lock, multi-file transaction, crash durability or native Windows guarantee.
 Tests cover cache ownership, fresh readers, first saves and retries with disposable
 files. Existing project-save and both managers' path-boundary tests also run.
+
+### Complete action-history summaries
+
+Per-platform action logs take precedence over the legacy root `actions.jsonl`.
+If either modern log exists when a read starts, an empty platform/agent/round
+filter cannot revive old legacy rows. The legacy-only layout still works, with
+its existing filtering, pagination and descending timestamp order. The source
+choice is retained if a modern log disappears during the read.
+
+Round timelines and agent statistics now aggregate the complete action history,
+including older rounds/agents beyond 10,000 actions. Their first/last action times
+are the minimum/maximum under the existing timestamp ordering, rather than being
+reversed by descending traversal. Ordinary action-list pagination and count/type
+formulas are unchanged. Local tests exercise the Flask endpoints with disposable
+JSONL logs, including 10,004 actions and a controlled log-removal case.
+
+These readers still load full histories and do not take an atomic snapshot across
+files. This does not add universal runner path validation, log-schema validation,
+constant-memory paging, timestamp/timezone normalization or native filesystem
+validation. Model calls and simulation execution are not involved in these tests.
