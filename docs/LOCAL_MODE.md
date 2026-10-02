@@ -101,8 +101,11 @@ If `.env` already contains configuration you need, back it up first. Open
 
 `check:local` checks Neo4j and the model server, then sends only small synthetic
 JSON, JSON-schema, tool-call and embedding probes. It checks the actual embedding
-dimension. It does not create a graph or download anything, and exits nonzero
-when a required capability fails. It is a contract check, not a quality benchmark.
+dimension and a finite, nonzero norm required for cosine search. Generated JSON
+must use standard JSON values, schema output must preserve boolean types, and
+tool arguments must contain real JSON rather than an empty/missing string.
+It does not create a graph or download anything, and exits nonzero when a required
+capability fails. It is a contract check, not a quality benchmark.
 
 Malformed local numeric limits are reported by setting name before services are
 contacted, rather than failing at import with a traceback. Invalid values are

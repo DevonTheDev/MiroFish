@@ -6,15 +6,36 @@ import json
 import math
 
 
+def _parse_json(value, capability: str):
+    """Validate the generated JSON text, not just its surrounding API envelope."""
+    def reject_constant(_value):
+        raise ValueError("Nonstandard JSON numeric constant")
+
+    if not isinstance(value, str):
+        raise ValueError(f"{capability} capability check did not return JSON text")
+    try:
+        return json.loads(value, parse_constant=reject_constant)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"{capability} capability check returned invalid JSON") from exc
+
+
 def check_embedding(vector, dimensions: int) -> None:
-    if not vector or len(vector) != dimensions:
-        raise ValueError(
-            f"Embedding dimensions must be {dimensions}; got {len(vector)}"
+    if not isinstance(vector, (list, tuple)) or not vector or len(vector) != dimensions:
+        actual = len(vector) if isinstance(vector, (list, tuple)) else "a non-array value"
+        raise ValueError(f"Embedding dimensions must be {dimensions}; got {actual}")
+    try:
+        finite = all(
+            type(value) in (float, int) and math.isfinite(value) for value in vector
         )
-    if not all(
-        type(value) in (float, int) and math.isfinite(value) for value in vector
-    ):
+    except OverflowError:
+        finite = False
+    if not finite:
         raise ValueError("Embedding values must be finite numbers")
+    # Neo4j cosine vectors require a finite, nonzero double-precision L2 norm.
+    # hypot avoids falsely overflowing/underflowing by squaring coordinates.
+    norm = math.hypot(*vector)
+    if norm == 0 or not math.isfinite(norm):
+        raise ValueError("Embedding cosine norm must be finite and nonzero")
 
 
 def probe_model_capabilities(
@@ -28,12 +49,7 @@ def probe_model_capabilities(
         response_format={"type": "json_object"},
         max_tokens=512,
     )
-    try:
-        value = json.loads(response.choices[0].message.content or "")
-    except (TypeError, ValueError) as exc:
-        raise ValueError(
-            "Model did not return usable JSON; choose an instruction/structured-output model"
-        ) from exc
+    value = _parse_json(response.choices[0].message.content, "JSON output")
     if not isinstance(value, dict) or value.get("ready") is not True:
         raise ValueError("JSON capability check failed: expected ready=true")
     response = client.chat.completions.create(
@@ -58,7 +74,8 @@ def probe_model_capabilities(
         },
         max_tokens=512,
     )
-    if json.loads(response.choices[0].message.content or "") != {"ready": True}:
+    value = _parse_json(response.choices[0].message.content, "JSON schema")
+    if not isinstance(value, dict) or set(value) != {"ready"} or value["ready"] is not True:
         raise ValueError(
             "JSON schema capability check failed; Graphiti requires schema-constrained output"
         )
@@ -87,7 +104,7 @@ def probe_model_capabilities(
         raise ValueError(
             "Model did not return a tool call; OASIS requires tool-calling support"
         )
-    if json.loads(calls[0].function.arguments or "{}") != {}:
+    if _parse_json(calls[0].function.arguments, "Tool arguments") != {}:
         raise ValueError("Model returned unexpected capability-check tool arguments")
     response = client.embeddings.create(
         model=embedding_model, input=["Local capability check"]
