@@ -456,6 +456,23 @@ const collapsedSections = ref(new Set())
 const currentSectionIndex = ref(null)
 const profiles = ref([])
 
+// Every async result belongs to one report/simulation context, even on A→B→A.
+let viewGeneration = 0
+let viewController = null
+let disposed = false
+const viewContext = () => ({
+  reportId: props.reportId,
+  simulationId: props.simulationId,
+  generation: viewGeneration,
+  signal: viewController?.signal
+})
+const isCurrentView = (context) => !disposed && !context.signal?.aborted
+  && context.generation === viewGeneration
+  && context.reportId === props.reportId && context.simulationId === props.simulationId
+
+const conversationKey = () => chatTarget.value === 'report_agent'
+  ? 'report_agent' : `agent_${selectedAgentIndex.value}`
+
 // Helper Methods
 const isSectionCompleted = (sectionIndex) => {
   return !!generatedSections.value[sectionIndex]
@@ -514,9 +531,8 @@ const selectReportAgentChat = () => {
 }
 
 const selectSurveyTab = () => {
+  saveChatHistory()
   activeTab.value = 'survey'
-  selectedAgent.value = null
-  selectedAgentIndex.value = null
   showAgentDropdown.value = false
 }
 
@@ -524,7 +540,6 @@ const toggleAgentDropdown = () => {
   showAgentDropdown.value = !showAgentDropdown.value
   if (showAgentDropdown.value) {
     activeTab.value = 'chat'
-    chatTarget.value = 'agent'
   }
 }
 
@@ -558,139 +573,91 @@ const formatTime = (timestamp) => {
 
 // Chat Methods
 const sendMessage = async () => {
-  if (!chatInput.value.trim() || isSending.value) return
-  
+  if (disposed || !props.reportId || !props.simulationId || !chatInput.value.trim() || isSending.value) return
+  if (chatTarget.value === 'agent' && (!selectedAgent.value || selectedAgentIndex.value === null)) return
+
   const message = chatInput.value.trim()
   chatInput.value = ''
-  
-  // Add user message
-  chatHistory.value.push({
-    role: 'user',
-    content: message,
-    timestamp: new Date().toISOString()
-  })
-  
-  scrollToBottom()
+  chatHistory.value = [...chatHistory.value, {
+    role: 'user', content: message, timestamp: new Date().toISOString()
+  }]
+  const request = {
+    ...viewContext(), key: conversationKey(), target: chatTarget.value,
+    agentId: selectedAgentIndex.value, agent: selectedAgent.value,
+    history: chatHistory.value
+  }
+  chatHistoryCache.value[request.key] = request.history
+  const appendReply = (content) => {
+    request.history.push({ role: 'assistant', content, timestamp: new Date().toISOString() })
+    chatHistoryCache.value[request.key] = request.history
+    if (conversationKey() === request.key) chatHistory.value = request.history
+  }
+  scrollToBottom(request)
   isSending.value = true
-  
   try {
-    if (chatTarget.value === 'report_agent') {
-      await sendToReportAgent(message)
-    } else {
-      await sendToAgent(message)
-    }
+    const content = request.target === 'report_agent'
+      ? await sendToReportAgent(message, request) : await sendToAgent(message, request)
+    if (!isCurrentView(request)) return
+    appendReply(content)
+    addLog(request.target === 'report_agent' ? t('log.reportAgentReplied')
+      : t('log.agentReplied', { name: request.agent.username }))
   } catch (err) {
+    if (!isCurrentView(request)) return
     addLog(t('log.sendFailed', { error: err.message }))
-    chatHistory.value.push({
-      role: 'assistant',
-      content: t('step5.errorOccurred', { error: err.message }),
-      timestamp: new Date().toISOString()
-    })
+    appendReply(t('step5.errorOccurred', { error: err.message }))
   } finally {
-    isSending.value = false
-    scrollToBottom()
-    // 自动保存对话记录到缓存
-    saveChatHistory()
+    if (isCurrentView(request)) {
+      isSending.value = false
+      if (conversationKey() === request.key) scrollToBottom(request)
+    }
   }
 }
 
-const sendToReportAgent = async (message) => {
+const sendToReportAgent = async (message, request) => {
   addLog(t('log.sendToReportAgent', { message: message.substring(0, 50) }))
-  
-  // Build chat history for API
-  const historyForApi = chatHistory.value
-    .slice(0, -1)
-    .slice(-10) // Keep last 10 messages
-    .map(msg => ({
-      role: msg.role,
-      content: msg.content
-    }))
-  
+  const historyForApi = request.history.slice(0, -1).slice(-10)
+    .map(msg => ({ role: msg.role, content: msg.content }))
   const res = await chatWithReport({
-    simulation_id: props.simulationId,
-    message: message,
-    chat_history: historyForApi
-  })
-  
+    simulation_id: request.simulationId, message, chat_history: historyForApi
+  }, request.signal)
   if (res.success && res.data) {
-    chatHistory.value.push({
-      role: 'assistant',
-      content: res.data.response || res.data.answer || t('step5.noResponse'),
-      timestamp: new Date().toISOString()
-    })
-    addLog(t('log.reportAgentReplied'))
-  } else {
-    throw new Error(res.error || t('step5.requestFailed'))
+    return res.data.response || res.data.answer || t('step5.noResponse')
   }
+  throw new Error(res.error || t('step5.requestFailed'))
 }
 
-const sendToAgent = async (message) => {
-  if (!selectedAgent.value || selectedAgentIndex.value === null) {
-    throw new Error(t('step5.selectAgentFirst'))
-  }
-  
-  addLog(t('log.sendToAgent', { name: selectedAgent.value.username, message: message.substring(0, 50) }))
-  
-  // Build prompt with chat history
+const sendToAgent = async (message, request) => {
+  addLog(t('log.sendToAgent', { name: request.agent.username, message: message.substring(0, 50) }))
   let prompt = message
-  if (chatHistory.value.length > 1) {
-    const historyContext = chatHistory.value
-      .slice(0, -1)
-      .slice(-6)
-      .map(msg => `${msg.role === 'user' ? '提问者' : '你'}：${msg.content}`)
-      .join('\n')
+  if (request.history.length > 1) {
+    const historyContext = request.history.slice(0, -1).slice(-6)
+      .map(msg => `${msg.role === 'user' ? '提问者' : '你'}：${msg.content}`).join('\n')
     prompt = `以下是我们之前的对话：\n${historyContext}\n\n现在我的新问题是：${message}`
   }
-  
   const res = await interviewAgents({
-    simulation_id: props.simulationId,
-    interviews: [{
-      agent_id: selectedAgentIndex.value,
-      prompt: prompt
-    }]
-  })
-  
+    simulation_id: request.simulationId,
+    interviews: [{ agent_id: request.agentId, prompt }]
+  }, request.signal)
   if (res.success && res.data) {
-    // 正确的数据路径: res.data.result.results 是一个对象字典
-    // 格式: {"twitter_0": {...}, "reddit_0": {...}} 或单平台 {"reddit_0": {...}}
     const resultData = res.data.result || res.data
     const resultsDict = resultData.results || resultData
-    
-    // 将对象字典转换为数组，优先获取 reddit 平台的回复
     let responseContent = null
-    const agentId = selectedAgentIndex.value
-    
     if (typeof resultsDict === 'object' && !Array.isArray(resultsDict)) {
-      // 优先使用 reddit 平台回复，其次 twitter
-      const redditKey = `reddit_${agentId}`
-      const twitterKey = `twitter_${agentId}`
-      const agentResult = resultsDict[redditKey] || resultsDict[twitterKey] || Object.values(resultsDict)[0]
-      if (agentResult) {
-        responseContent = agentResult.response || agentResult.answer
-      }
+      const agentResult = resultsDict[`reddit_${request.agentId}`]
+        || resultsDict[`twitter_${request.agentId}`] || Object.values(resultsDict)[0]
+      if (agentResult) responseContent = agentResult.response || agentResult.answer
     } else if (Array.isArray(resultsDict) && resultsDict.length > 0) {
-      // 兼容数组格式
       responseContent = resultsDict[0].response || resultsDict[0].answer
     }
-    
-    if (responseContent) {
-      chatHistory.value.push({
-        role: 'assistant',
-        content: responseContent,
-        timestamp: new Date().toISOString()
-      })
-      addLog(t('log.agentReplied', { name: selectedAgent.value.username }))
-    } else {
-      throw new Error(t('step5.noResponse'))
-    }
-  } else {
-    throw new Error(res.error || t('step5.requestFailed'))
+    if (responseContent) return responseContent
+    throw new Error(t('step5.noResponse'))
   }
+  throw new Error(res.error || t('step5.requestFailed'))
 }
 
-const scrollToBottom = () => {
+const scrollToBottom = (context = viewContext()) => {
   nextTick(() => {
-    if (chatMessages.value) {
+    if (isCurrentView(context) && chatMessages.value) {
       chatMessages.value.scrollTop = chatMessages.value.scrollHeight
     }
   })
@@ -718,22 +685,26 @@ const clearAgentSelection = () => {
 }
 
 const submitSurvey = async () => {
-  if (selectedAgents.value.size === 0 || !surveyQuestion.value.trim()) return
-  
+  if (disposed || !props.reportId || !props.simulationId || isSurveying.value || selectedAgents.value.size === 0 || !surveyQuestion.value.trim()) return
+  const context = viewContext()
+  const question = surveyQuestion.value.trim()
+  const submittedProfiles = [...profiles.value]
+
   isSurveying.value = true
   addLog(t('log.sendSurvey', { count: selectedAgents.value.size }))
   
   try {
     const interviews = Array.from(selectedAgents.value).map(idx => ({
       agent_id: idx,
-      prompt: surveyQuestion.value.trim()
+      prompt: question
     }))
     
     const res = await interviewAgents({
-      simulation_id: props.simulationId,
+      simulation_id: context.simulationId,
       interviews: interviews
-    })
-    
+    }, context.signal)
+    if (!isCurrentView(context)) return
+
     if (res.success && res.data) {
       // 正确的数据路径: res.data.result.results 是一个对象字典
       // 格式: {"twitter_0": {...}, "reddit_0": {...}, "twitter_1": {...}, ...}
@@ -745,7 +716,7 @@ const submitSurvey = async () => {
       
       for (const interview of interviews) {
         const agentIdx = interview.agent_id
-        const agent = profiles.value[agentIdx]
+        const agent = submittedProfiles[agentIdx]
         
         // 优先使用 reddit 平台回复，其次 twitter
         let responseContent = t('step5.noResponse')
@@ -769,7 +740,7 @@ const submitSurvey = async () => {
           agent_id: agentIdx,
           agent_name: agent?.username || `Agent ${agentIdx}`,
           profession: agent?.profession,
-          question: surveyQuestion.value.trim(),
+          question,
           answer: responseContent
         })
       }
@@ -780,35 +751,37 @@ const submitSurvey = async () => {
       throw new Error(res.error || t('step5.requestFailed'))
     }
   } catch (err) {
-    addLog(t('log.surveySendFailed', { error: err.message }))
+    if (isCurrentView(context)) addLog(t('log.surveySendFailed', { error: err.message }))
   } finally {
-    isSurveying.value = false
+    if (isCurrentView(context)) isSurveying.value = false
   }
 }
 
 // Load Report Data
-const loadReportData = async () => {
-  if (!props.reportId) return
+const loadReportData = async (context) => {
+  if (!context.reportId || !isCurrentView(context)) return
   
   try {
-    addLog(t('log.loadReportData', { id: props.reportId }))
+    addLog(t('log.loadReportData', { id: context.reportId }))
     
     // Get report info
-    const reportRes = await getReport(props.reportId)
+    const reportRes = await getReport(context.reportId, context.signal)
+    if (!isCurrentView(context)) return
     if (reportRes.success && reportRes.data) {
       // Load agent logs to get report outline and sections
-      await loadAgentLogs()
+      await loadAgentLogs(context)
     }
   } catch (err) {
-    addLog(t('log.loadReportFailed', { error: err.message }))
+    if (isCurrentView(context)) addLog(t('log.loadReportFailed', { error: err.message }))
   }
 }
 
-const loadAgentLogs = async () => {
-  if (!props.reportId) return
+const loadAgentLogs = async (context) => {
+  if (!context.reportId || !isCurrentView(context)) return
   
   try {
-    const res = await getAgentLog(props.reportId, 0)
+    const res = await getAgentLog(context.reportId, 0, context.signal)
+    if (!isCurrentView(context)) return
     if (res.success && res.data) {
       const logs = res.data.logs || []
       
@@ -825,21 +798,22 @@ const loadAgentLogs = async () => {
       addLog(t('log.reportDataLoaded'))
     }
   } catch (err) {
-    addLog(t('log.loadReportLogFailed', { error: err.message }))
+    if (isCurrentView(context)) addLog(t('log.loadReportLogFailed', { error: err.message }))
   }
 }
 
-const loadProfiles = async () => {
-  if (!props.simulationId) return
+const loadProfiles = async (context) => {
+  if (!context.simulationId || !isCurrentView(context)) return
   
   try {
-    const res = await getSimulationProfilesRealtime(props.simulationId)
+    const res = await getSimulationProfilesRealtime(context.simulationId, undefined, context.signal)
+    if (!isCurrentView(context)) return
     if (res.success && res.data) {
       profiles.value = res.data.profiles || []
       addLog(t('log.loadedProfiles', { count: profiles.value.length }))
     }
   } catch (err) {
-    addLog(t('log.loadProfilesFailed', { error: err.message }))
+    if (isCurrentView(context)) addLog(t('log.loadProfilesFailed', { error: err.message }))
   }
 }
 
@@ -854,24 +828,41 @@ const handleClickOutside = (e) => {
 // Lifecycle
 onMounted(() => {
   addLog(t('log.step5Init'))
-  loadReportData()
-  loadProfiles()
   document.addEventListener('click', handleClickOutside)
 })
 
 onUnmounted(() => {
+  disposed = true
+  viewController?.abort()
   document.removeEventListener('click', handleClickOutside)
 })
 
-watch(() => props.reportId, (newId) => {
-  if (newId) {
-    loadReportData()
-  }
-}, { immediate: true })
-
-watch(() => props.simulationId, (newId) => {
-  if (newId) {
-    loadProfiles()
+watch(() => [props.reportId, props.simulationId], () => {
+  viewGeneration++
+  viewController?.abort()
+  viewController = new AbortController()
+  reportOutline.value = null
+  generatedSections.value = {}
+  collapsedSections.value = new Set()
+  currentSectionIndex.value = null
+  profiles.value = []
+  activeTab.value = 'chat'
+  chatTarget.value = 'report_agent'
+  showAgentDropdown.value = false
+  selectedAgent.value = null
+  selectedAgentIndex.value = null
+  chatInput.value = ''
+  chatHistory.value = []
+  chatHistoryCache.value = {}
+  isSending.value = false
+  selectedAgents.value = new Set()
+  surveyQuestion.value = ''
+  surveyResults.value = []
+  isSurveying.value = false
+  const context = viewContext()
+  if (context.reportId && context.simulationId) {
+    loadReportData(context)
+    loadProfiles(context)
   }
 }, { immediate: true })
 </script>

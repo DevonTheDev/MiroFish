@@ -27,9 +27,10 @@ export const getPrepareStatus = (data) => {
 /**
  * 获取模拟状态
  * @param {string} simulationId
+ * @param {AbortSignal} [signal] - Optional view cancellation
  */
-export const getSimulation = (simulationId) => {
-  return service.get(`/api/simulation/${simulationId}`)
+export const getSimulation = (simulationId, signal) => {
+  return service.get(`/api/simulation/${simulationId}`, { signal })
 }
 
 /**
@@ -46,10 +47,11 @@ export const getSimulationProfiles = (simulationId, platform) => {
  * 实时获取生成中的 Agent Profiles
  * @param {string} simulationId
  * @param {string} [platform] - 'reddit' | 'twitter'（省略时由后端根据模拟配置自动选择）
+ * @param {AbortSignal} [signal] - Optional view cancellation
  */
-export const getSimulationProfilesRealtime = (simulationId, platform) => {
+export const getSimulationProfilesRealtime = (simulationId, platform, signal) => {
   const params = platform ? { platform } : {}
-  return service.get(`/api/simulation/${simulationId}/profiles/realtime`, { params })
+  return service.get(`/api/simulation/${simulationId}/profiles/realtime`, { params, signal })
 }
 
 /**
@@ -173,9 +175,10 @@ export const getEnvStatus = (data) => {
 /**
  * 批量采访 Agent
  * @param {Object} data - { simulation_id, interviews: [{ agent_id, prompt }] }
+ * @param {AbortSignal} [signal] - Cancels the HTTP request, not server inference
  */
-export const interviewAgents = (data) => {
-  return service.post('/api/simulation/interview/batch', data)
+export const interviewAgents = (data, signal) => {
+  return service.post('/api/simulation/interview/batch', data, { signal })
 }
 
 /**

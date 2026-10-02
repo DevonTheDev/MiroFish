@@ -39,15 +39,17 @@ export const getConsoleLog = (reportId, fromLine = 0, signal) => {
 /**
  * 获取报告详情
  * @param {string} reportId
+ * @param {AbortSignal} [signal] - Optional view cancellation
  */
-export const getReport = (reportId) => {
-  return service.get(`/api/report/${reportId}`)
+export const getReport = (reportId, signal) => {
+  return service.get(`/api/report/${reportId}`, { signal })
 }
 
 /**
  * 与 Report Agent 对话
  * @param {Object} data - { simulation_id, message, chat_history? }
+ * @param {AbortSignal} [signal] - Cancels the HTTP request, not server inference
  */
-export const chatWithReport = (data) => {
-  return service.post('/api/report/chat', data)
+export const chatWithReport = (data, signal) => {
+  return service.post('/api/report/chat', data, { signal })
 }

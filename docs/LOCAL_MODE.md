@@ -274,3 +274,24 @@ Completion stops periodic polling while allowing the already-pending final
 console response to finish. Closing the view does not cancel backend report
 creation. Local frontend tests cover these reactive/lifecycle paths; a full
 browser run with a real model remains a separate integration check.
+
+### Interaction-view request ownership
+
+Step 5 and its parent view scope report, simulation, project, graph and profile
+loads to the current report/simulation context. Navigation clears the old display
+and conversation state, aborts browser requests and ignores late responses,
+including A→B→A navigation. Initial data reads wait for the parent to resolve a
+complete context and are not repeated by mounting. Repeated graph refreshes keep
+only the latest response and its loading state.
+
+Chat replies stay with the conversation that submitted them when switching agents
+or tabs. Changing reports clears that view's conversation cache. Surveys use the
+submitted question and profiles even if the form is edited while waiting; repeated
+submissions are blocked while the current survey is pending. Closing or replacing
+the view also rejects late chat/survey results and errors. Aborting an HTTP request
+does not promise cancellation of server-side model inference or interviews.
+
+The local frontend suite executes actual Vue setup scripts with real reactivity,
+deferred HTTP boundaries and a linked parent/child test. It also checks optional
+API signal/body compatibility. Full browser navigation and real model responses
+remain separate runtime checks.

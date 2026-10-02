@@ -44,23 +44,27 @@ export function getTaskStatus(taskId) {
 /**
  * 获取图谱数据
  * @param {String} graphId - 图谱ID
+ * @param {AbortSignal} [signal] - Optional view cancellation
  * @returns {Promise}
  */
-export function getGraphData(graphId) {
+export function getGraphData(graphId, signal) {
   return service({
     url: `/api/graph/data/${graphId}`,
-    method: 'get'
+    method: 'get',
+    signal
   })
 }
 
 /**
  * 获取项目信息
  * @param {String} projectId - 项目ID
+ * @param {AbortSignal} [signal] - Optional view cancellation
  * @returns {Promise}
  */
-export function getProject(projectId) {
+export function getProject(projectId, signal) {
   return service({
     url: `/api/graph/project/${projectId}`,
-    method: 'get'
+    method: 'get',
+    signal
   })
 }
