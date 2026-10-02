@@ -334,3 +334,25 @@ deletes are tested with the destructive operation intercepted. These are scoped
 project/report path checks, not authentication, crash-safe saves, a complete API
 sandbox, or protection against hostile local filesystem changes between a check
 and access. Native Windows behavior remains a separate runtime check.
+
+### Reusing prepared single-platform simulations
+
+The preparation check reads `SimulationManager.SIMULATION_DATA_DIR` and requires
+profile files only for the saved enabled platforms. Reddit uses JSON profiles;
+Twitter uses CSV rows, including quoted commas/newlines when counting agents.
+Dual-platform simulations keep Reddit as the displayed profile-count default.
+Legacy states without platform flags still require both platforms. Disabled
+platform leftovers are ignored, and `force_regenerate=true` still bypasses reuse.
+
+A valid completed preparation can be reused after the existing ready/running/
+completed/stopped/failed states. The existing preparing-to-ready reconciliation
+runs only after its required artifacts are present and readable. Invalid boolean
+flags, no enabled platform, corrupt/non-object state or config, invalid Reddit
+profile envelopes and missing Twitter headers are not reported ready. This is
+an artifact/envelope check, not full OASIS schema or model-quality validation.
+
+This checker uses the shared path guard and rejects linked descendants and unsafe
+IDs before reading or reconciling files; checking an unknown ID creates no record
+directory. These changes do not harden every SimulationManager/SimulationRunner
+or IPC path, add concurrency-safe reconciliation, or make saves crash-durable.
+Tests use disposable files and Flask requests without inference/background work.
