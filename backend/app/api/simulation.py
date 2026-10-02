@@ -13,7 +13,7 @@ from flask import request, jsonify, send_file
 
 from . import simulation_bp
 from ..config import Config
-from ..storage import storage_path, validate_record_id
+from ..storage import StoragePathError, storage_path, validate_record_id
 from ..services.zep_entity_reader import ZepEntityReader
 from ..services.oasis_profile_generator import OasisProfileGenerator
 from ..services.simulation_manager import SimulationManager, SimulationStatus
@@ -1326,8 +1326,7 @@ def download_simulation_config(simulation_id: str):
     """下载模拟配置文件"""
     try:
         manager = SimulationManager()
-        sim_dir = manager._get_simulation_dir(simulation_id)
-        config_path = os.path.join(sim_dir, "simulation_config.json")
+        config_path = manager._get_simulation_path(simulation_id, "simulation_config.json")
         
         if not os.path.exists(config_path):
             return jsonify({
@@ -1341,6 +1340,8 @@ def download_simulation_config(simulation_id: str):
             download_name="simulation_config.json"
         )
         
+    except StoragePathError as exc:
+        return jsonify({"success": False, "error": str(exc)}), 400
     except Exception as e:
         logger.error(f"下载配置失败: {str(e)}")
         return jsonify({

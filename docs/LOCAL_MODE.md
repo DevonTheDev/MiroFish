@@ -356,3 +356,23 @@ IDs before reading or reconciling files; checking an unknown ID creates no recor
 directory. These changes do not harden every SimulationManager/SimulationRunner
 or IPC path, add concurrency-safe reconciliation, or make saves crash-durable.
 Tests use disposable files and Flask requests without inference/background work.
+
+### Simulation manager storage boundaries
+
+SimulationManager uses the shared ID/component checks for state, JSON/CSV
+profiles, configuration and generated run-instruction paths. Reads do not create
+unknown record directories; only saving a valid state creates its directory.
+Path checks run even before a state-cache hit, and listings skip unsafe aliases
+or unrelated entries. A configured root symlink remains supported for relocation.
+
+Preparation checks its enabled output paths before changing state or calling
+memory/model providers, and validates the paths it supplies to profile/config
+writers. The configuration-download endpoint uses the same guarded file path and
+returns 400 for unsafe IDs/aliases. Normal single/dual-platform formats and the
+existing in-memory state-cache behavior are unchanged.
+
+Tests use disposable files, synthetic preparation providers and real Flask
+requests. This covers the manager and config download, not all direct API,
+SimulationRunner, script or IPC file access. It is not a full filesystem sandbox,
+protection against hostile local path mutation during long-running work, an
+atomic/concurrent state-update mechanism, or proof of native Windows behavior.
