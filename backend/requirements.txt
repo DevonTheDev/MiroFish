@@ -1,7 +1,7 @@
 # ===========================================
 # MiroFish Backend Dependencies
 # ===========================================
-# Python 3.11+ required
+# Python 3.11 required (OASIS/unstructured do not declare Python 3.12 support)
 # Install: pip install -r requirements.txt
 # ===========================================
 

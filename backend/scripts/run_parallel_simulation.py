@@ -157,6 +157,11 @@ def init_logging_for_simulation(simulation_dir: str):
 
 from action_logger import SimulationLogManager, PlatformActionLogger
 
+from app.config import Config
+from app.local_runtime import configure_local_environment
+from app.local_runtime.oasis import create_local_model, platform_for_mode, simulation_concurrency, limit_rounds, validate_agent_count, configure_agent_limits
+configure_local_environment()
+
 try:
     from camel.models import ModelFactory
     from camel.types import ModelPlatformType
@@ -995,6 +1000,9 @@ def create_model(config: Dict[str, Any], use_boost: bool = False):
         config: 模拟配置字典
         use_boost: 是否使用加速 LLM 配置（如果可用）
     """
+    if Config.LOCAL_MODE:
+        return create_local_model()
+
     # 检查是否有加速配置
     boost_api_key = os.environ.get("LLM_BOOST_API_KEY", "")
     boost_base_url = os.environ.get("LLM_BOOST_BASE_URL", "")
@@ -1117,6 +1125,8 @@ async def run_twitter_simulation(
     Returns:
         PlatformSimulation: 包含env和agent_graph的结果对象
     """
+    max_rounds = limit_rounds(max_rounds)
+    validate_agent_count(len(config.get("agent_configs", [])))
     result = PlatformSimulation()
     
     def log_info(msg):
@@ -1140,6 +1150,7 @@ async def run_twitter_simulation(
         model=model,
         available_actions=TWITTER_ACTIONS,
     )
+    configure_agent_limits(result.agent_graph)
     
     # 从配置文件获取 Agent 真实名称映射（使用 entity_name 而非默认的 Agent_X）
     agent_names = get_agent_names_from_config(config)
@@ -1154,9 +1165,9 @@ async def run_twitter_simulation(
     
     result.env = oasis.make(
         agent_graph=result.agent_graph,
-        platform=oasis.DefaultPlatformType.TWITTER,
+        platform=platform_for_mode('twitter', db_path, default_platform=oasis.DefaultPlatformType.TWITTER),
         database_path=db_path,
-        semaphore=30,  # 限制最大并发 LLM 请求数，防止 API 过载
+        semaphore=simulation_concurrency(),  # 限制最大并发 LLM 请求数，防止 API 过载
     )
     
     await result.env.reset()
@@ -1309,6 +1320,8 @@ async def run_reddit_simulation(
     Returns:
         PlatformSimulation: 包含env和agent_graph的结果对象
     """
+    max_rounds = limit_rounds(max_rounds)
+    validate_agent_count(len(config.get("agent_configs", [])))
     result = PlatformSimulation()
     
     def log_info(msg):
@@ -1331,6 +1344,7 @@ async def run_reddit_simulation(
         model=model,
         available_actions=REDDIT_ACTIONS,
     )
+    configure_agent_limits(result.agent_graph)
     
     # 从配置文件获取 Agent 真实名称映射（使用 entity_name 而非默认的 Agent_X）
     agent_names = get_agent_names_from_config(config)
@@ -1347,7 +1361,7 @@ async def run_reddit_simulation(
         agent_graph=result.agent_graph,
         platform=oasis.DefaultPlatformType.REDDIT,
         database_path=db_path,
-        semaphore=30,  # 限制最大并发 LLM 请求数，防止 API 过载
+        semaphore=simulation_concurrency(),  # 限制最大并发 LLM 请求数，防止 API 过载
     )
     
     await result.env.reset()

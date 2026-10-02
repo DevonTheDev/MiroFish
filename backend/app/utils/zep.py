@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 import time
+import threading
 from functools import lru_cache
 from typing import Any, Callable, TypeVar
 
@@ -17,6 +18,7 @@ from .logger import get_logger
 logger = get_logger("mirofish.zep")
 
 T = TypeVar("T")
+_local_client_lock = threading.Lock()
 
 ZEP_CLOUD_BASE_URL = "https://api.getzep.com/api/v2"
 # Keep request behavior aligned with the zep-cloud 3.25.0 SDK default that
@@ -65,6 +67,11 @@ def _cached_zep_client(api_key: str, timeout: float) -> Zep:
 def get_zep_client(api_key: str | None = None, timeout: float | None = None) -> Zep:
     """Return a process-shared, explicitly configured Zep Cloud client."""
 
+    if Config.LOCAL_MODE:
+        # lru_cache alone permits duplicate first constructions across threads.
+        with _local_client_lock:
+            return _get_local_client()
+
     # zep-cloud gives ZEP_API_URL precedence even when base_url is explicit.
     # Reject it so this Cloud-only integration cannot silently target a
     # self-hosted or compatibility endpoint.
@@ -82,6 +89,33 @@ def get_zep_client(api_key: str | None = None, timeout: float | None = None) -> 
         raise ValueError("Zep request timeout must be greater than 0")
     return _cached_zep_client(normalized_key, request_timeout)
 
+
+
+@lru_cache(maxsize=1)
+def _get_local_client():
+    from ..local_runtime import configure_local_environment, get_local_gateway_url
+    configure_local_environment()
+    errors = Config.validate()
+    if errors:
+        raise ValueError('; '.join(errors))
+    from ..memory.local_graphiti import LocalGraphitiClient, LocalMemorySettings
+    gateway_url = get_local_gateway_url()
+    client = LocalGraphitiClient(LocalMemorySettings(
+        graph_uri=Config.LOCAL_GRAPH_URI,
+        graph_user=Config.LOCAL_GRAPH_USER,
+        graph_password=Config.LOCAL_GRAPH_PASSWORD,
+        database=Config.LOCAL_GRAPH_DATABASE,
+        llm_base_url=gateway_url,
+        llm_model=Config.LLM_MODEL_NAME,
+        embedding_base_url=gateway_url,
+        embedding_model=Config.LOCAL_EMBEDDING_MODEL,
+        embedding_dimensions=Config.LOCAL_EMBEDDING_DIMENSIONS,
+        request_timeout=Config.LOCAL_REQUEST_TIMEOUT,
+        max_concurrency=Config.LOCAL_MAX_CONCURRENCY,
+    ))
+    import atexit
+    atexit.register(client.close)
+    return client
 
 def clear_zep_client_cache() -> None:
     """Clear cached clients. Intended for tests and controlled reconfiguration."""

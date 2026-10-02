@@ -17,6 +17,7 @@ from datetime import datetime
 
 from openai import OpenAI
 from ..config import Config
+from ..local_runtime import openai_client_options
 from ..utils.logger import get_logger
 from ..utils.locale import get_language_instruction, get_locale, set_locale, t
 from ..utils.openai_chat_compat import create_chat_completion, extract_chat_completion_text
@@ -252,20 +253,19 @@ class OasisProfileGenerator:
         self.base_url = base_url or Config.LLM_BASE_URL
         self.model_name = model_name or Config.LLM_MODEL_NAME
         
-        if not self.api_key:
+        if not self.api_key and not Config.LOCAL_MODE:
             raise ValueError("LLM_API_KEY 未配置")
         
-        self.client = OpenAI(
-            api_key=self.api_key,
-            base_url=self.base_url
-        )
+        options = dict(api_key=self.api_key, base_url=self.base_url)
+        options.update(openai_client_options(base_url))
+        self.client = OpenAI(**options)
         
         # Zep客户端用于检索丰富上下文
         self.zep_api_key = zep_api_key or Config.ZEP_API_KEY
         self.zep_client = None
         self.graph_id = graph_id
         
-        if self.zep_api_key:
+        if Config.LOCAL_MODE or self.zep_api_key:
             try:
                 self.zep_client = get_zep_client(self.zep_api_key)
             except Exception as e:

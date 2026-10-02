@@ -2,7 +2,7 @@
 name = "mirofish-backend"
 version = "0.1.0"
 description = "MiroFish - 简洁通用的群体智能引擎，预测万物"
-requires-python = ">=3.11,<3.13"
+requires-python = ">=3.11,<3.12"
 license = { text = "AGPL-3.0" }
 authors = [
     { name = "MiroFish Team" }
@@ -36,6 +36,11 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+cloud-gpu = ["torch==2.9.1"]
+local = [
+    "graphiti-core==0.30.2",
+    "torch==2.9.1",
+]
 dev = [
     "pytest>=8.0.0",
     "pytest-asyncio>=0.23.0",
@@ -54,3 +59,27 @@ dev = [
 
 [tool.hatch.build.targets.wheel]
 packages = ["app"]
+
+# OASIS pins an older driver for its optional Neo4j agent-graph path. MiroFish
+# uses igraph there; Graphiti requires >=5.26. Tested against the 5.x driver API.
+# Use uv for local installs; pip cannot express this transitive override.
+[tool.uv]
+conflicts = [[{ extra = "local" }, { extra = "cloud-gpu" }]]
+override-dependencies = ["neo4j==5.28.3"]
+
+# The local extra keeps OASIS on CPU. Ollama/llama.cpp owns GPU inference.
+[tool.uv.sources]
+torch = [
+    { index = "pytorch-cpu", extra = "local", marker = "sys_platform != 'darwin'" },
+    { index = "pypi", extra = "cloud-gpu" },
+]
+
+[[tool.uv.index]]
+name = "pytorch-cpu"
+url = "https://download.pytorch.org/whl/cpu"
+explicit = true
+
+[[tool.uv.index]]
+name = "pypi"
+url = "https://pypi.org/simple"
+default = true

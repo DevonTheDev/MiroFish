@@ -115,6 +115,11 @@ def setup_oasis_logging(log_dir: str):
         logger.propagate = False
 
 
+from app.config import Config
+from app.local_runtime import configure_local_environment
+from app.local_runtime.oasis import create_local_model, platform_for_mode, simulation_concurrency, limit_rounds, validate_agent_count, configure_agent_limits
+configure_local_environment()
+
 try:
     from camel.models import ModelFactory
     from camel.types import ModelPlatformType
@@ -440,6 +445,9 @@ class RedditSimulationRunner:
         - LLM_BASE_URL: API基础URL
         - LLM_MODEL_NAME: 模型名称
         """
+        if Config.LOCAL_MODE:
+            return create_local_model()
+
         # 优先从 .env 读取配置
         llm_api_key = os.environ.get("LLM_API_KEY", "")
         llm_base_url = os.environ.get("LLM_BASE_URL", "")
@@ -526,6 +534,8 @@ class RedditSimulationRunner:
         Args:
             max_rounds: 最大模拟轮数（可选，用于截断过长的模拟）
         """
+        max_rounds = limit_rounds(max_rounds)
+        validate_agent_count(len(self.config.get("agent_configs", [])))
         print("=" * 60)
         print("OASIS Reddit模拟")
         print(f"配置文件: {self.config_path}")
@@ -567,6 +577,7 @@ class RedditSimulationRunner:
             model=model,
             available_actions=self.AVAILABLE_ACTIONS,
         )
+        configure_agent_limits(self.agent_graph)
         
         db_path = self._get_db_path()
         if os.path.exists(db_path):
@@ -578,7 +589,7 @@ class RedditSimulationRunner:
             agent_graph=self.agent_graph,
             platform=oasis.DefaultPlatformType.REDDIT,
             database_path=db_path,
-            semaphore=30,  # 限制最大并发 LLM 请求数，防止 API 过载
+            semaphore=simulation_concurrency(),  # 限制最大并发 LLM 请求数，防止 API 过载
         )
         
         await self.env.reset()

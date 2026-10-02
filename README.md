@@ -24,6 +24,13 @@
 
 </div>
 
+## Local mode: no paid model or memory service
+
+Run this fork on your own PC with Ollama-compatible open-weight models,
+Graphiti/Neo4j memory, and bounded consumer-hardware defaults. Start with the
+[local setup guide](docs/LOCAL_MODE.md), `.env.local.example`, and
+`npm run setup:local`. Existing cloud setup remains available below.
+
 ## ⚡ Overview
 
 **MiroFish** is a next-generation AI prediction engine powered by multi-agent technology. By extracting seed information from the real world (such as breaking news, policy drafts, or financial signals), it automatically constructs a high-fidelity parallel digital world. Within this space, thousands of intelligent agents with independent personalities, long-term memory, and behavioral logic freely interact and undergo social evolution. You can inject variables dynamically from a "God's-eye view" to precisely deduce future trajectories — **rehearse the future in a digital sandbox, and win decisions after countless simulations**.
@@ -99,8 +106,8 @@ Click the image to watch MiroFish's deep prediction of the lost ending based on 
 
 | Tool | Version | Description | Check Installation |
 |------|---------|-------------|-------------------|
-| **Node.js** | 18+ | Frontend runtime, includes npm | `node -v` |
-| **Python** | ≥3.11, ≤3.12 | Backend runtime | `python --version` |
+| **Node.js** | 20.19+ (20.x) / 22.12+ | Frontend runtime, includes npm | `node -v` |
+| **Python** | 3.11.x | Backend runtime | `python --version` |
 | **uv** | Latest | Python package manager | `uv --version` |
 
 #### 1. Configure Environment Variables

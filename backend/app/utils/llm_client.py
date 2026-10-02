@@ -10,6 +10,7 @@ from typing import Optional, Dict, Any, List
 from openai import OpenAI
 
 from ..config import Config
+from ..local_runtime import openai_client_options
 from .openai_chat_compat import create_chat_completion, extract_chat_completion_text
 
 
@@ -101,13 +102,12 @@ class LLMClient:
         self.base_url = base_url or Config.LLM_BASE_URL
         self.model = model or Config.LLM_MODEL_NAME
         
-        if not self.api_key:
+        if not self.api_key and not Config.LOCAL_MODE:
             raise ValueError("LLM_API_KEY 未配置")
         
-        self.client = OpenAI(
-            api_key=self.api_key,
-            base_url=self.base_url
-        )
+        options = dict(api_key=self.api_key, base_url=self.base_url)
+        options.update(openai_client_options(base_url))
+        self.client = OpenAI(**options)
 
     def _create_completion(
         self,

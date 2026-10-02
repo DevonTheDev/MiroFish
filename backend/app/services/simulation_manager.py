@@ -302,6 +302,10 @@ class SimulationManager:
                 enrich_with_edges=True
             )
             
+            from ..local_runtime.oasis import validate_agent_count
+            validate_agent_count(filtered.filtered_count)
+            if Config.LOCAL_MODE:
+                parallel_profile_count = min(parallel_profile_count, Config.LOCAL_MAX_CONCURRENCY)
             state.entities_count = filtered.filtered_count
             state.entity_types = list(filtered.entity_types)
             

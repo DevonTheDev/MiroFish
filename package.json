@@ -9,13 +9,18 @@
     "dev": "concurrently --kill-others -n \"backend,frontend\" -c \"green,cyan\" \"npm run backend\" \"npm run frontend\"",
     "backend": "cd backend && uv run python run.py",
     "frontend": "cd frontend && npm run dev",
-    "build": "cd frontend && npm run build"
+    "build": "cd frontend && npm run build",
+    "setup:local": "npm ci && npm ci --prefix frontend && cd backend && uv sync --extra local --locked",
+    "backend:local": "cd backend && uv run --extra local --locked python run.py",
+    "frontend:local": "cd frontend && npm run dev -- --host 127.0.0.1",
+    "dev:local": "concurrently --kill-others -n \"backend,frontend\" -c \"green,cyan\" \"npm run backend:local\" \"npm run frontend:local\"",
+    "check:local": "cd backend && uv run --extra local --locked python scripts/local_doctor.py --probe"
   },
   "devDependencies": {
     "concurrently": "^9.2.4"
   },
   "engines": {
-    "node": ">=18.0.0"
+    "node": "^20.19.0 || >=22.12.0"
   },
   "license": "AGPL-3.0"
 }

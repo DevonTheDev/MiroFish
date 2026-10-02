@@ -37,7 +37,7 @@ def main():
     app = create_app()
     
     # 获取运行配置
-    host = os.environ.get('FLASK_HOST', '0.0.0.0')
+    host = '127.0.0.1' if Config.LOCAL_MODE else os.environ.get('FLASK_HOST', '0.0.0.0')
     port = int(os.environ.get('FLASK_PORT', 5001))
     debug = Config.DEBUG
     

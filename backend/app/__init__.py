@@ -39,8 +39,25 @@ def create_app(config_class=Config):
         logger.info("MiroFish Backend 启动中...")
         logger.info("=" * 50)
     
-    # 启用CORS
-    CORS(app, resources={r"/api/*": {"origins": "*"}})
+    # Local mode is a single-user loopback app, not an unauthenticated LAN API.
+    if Config.LOCAL_MODE:
+        from .local_runtime import configure_local_environment
+        from .local_runtime.gateway import validate_loopback_url
+        configure_local_environment()
+
+        @app.before_request
+        def require_local_browser():
+            try:
+                validate_loopback_url('http://' + request.host)
+                if request.headers.get('Origin'):
+                    validate_loopback_url(request.headers['Origin'])
+            except ValueError:
+                return {'error': 'Local mode only accepts loopback browser requests'}, 403
+        CORS(app, resources={r"/*": {"origins": [
+            r"^https?://(localhost|127\.0\.0\.1|\[::1\])(?::[0-9]+)?$"
+        ]}})
+    else:
+        CORS(app, resources={r"/api/*": {"origins": "*"}})
     
     # 注册模拟进程清理函数（确保服务器关闭时终止所有模拟进程）
     from .services.simulation_runner import SimulationRunner

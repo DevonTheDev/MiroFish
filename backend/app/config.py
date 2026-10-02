@@ -24,10 +24,31 @@ class Config:
     # JSON配置 - 禁用ASCII转义，让中文直接显示
     JSON_AS_ASCII = False
     
-    # LLM配置（统一使用OpenAI格式）
-    LLM_API_KEY = os.environ.get('LLM_API_KEY')
-    LLM_BASE_URL = os.environ.get('LLM_BASE_URL', 'https://api.openai.com/v1')
-    LLM_MODEL_NAME = os.environ.get('LLM_MODEL_NAME', 'gpt-4o-mini')
+    # Explicit local mode never falls back to a cloud provider.
+    MEMORY_BACKEND = os.environ.get('MEMORY_BACKEND', 'zep').strip().lower()
+    LOCAL_MODE = MEMORY_BACKEND == 'local'
+    LLM_API_KEY = 'local' if LOCAL_MODE else os.environ.get('LLM_API_KEY')
+    LLM_BASE_URL = os.environ.get('LLM_BASE_URL',
+        'http://127.0.0.1:11434/v1' if LOCAL_MODE else 'https://api.openai.com/v1')
+    LLM_MODEL_NAME = os.environ.get('LLM_MODEL_NAME',
+        'mirofish-local' if LOCAL_MODE else 'gpt-4o-mini')
+    LOCAL_EMBEDDING_BASE_URL = os.environ.get('LOCAL_EMBEDDING_BASE_URL', LLM_BASE_URL)
+    LOCAL_EMBEDDING_MODEL = os.environ.get('LOCAL_EMBEDDING_MODEL', 'nomic-embed-text')
+    LOCAL_EMBEDDING_DIMENSIONS = int(os.environ.get('LOCAL_EMBEDDING_DIMENSIONS', '768'))
+    LOCAL_GRAPH_URI = os.environ.get('LOCAL_GRAPH_URI', 'bolt://127.0.0.1:7687')
+    LOCAL_GRAPH_USER = os.environ.get('LOCAL_GRAPH_USER', 'neo4j')
+    LOCAL_GRAPH_PASSWORD = os.environ.get('LOCAL_GRAPH_PASSWORD', '')
+    LOCAL_GRAPH_DATABASE = os.environ.get('LOCAL_GRAPH_DATABASE', 'neo4j')
+    LOCAL_MAX_AGENT_ITERATIONS = int(os.environ.get('LOCAL_MAX_AGENT_ITERATIONS', '3'))
+    LOCAL_MAX_AGENTS = int(os.environ.get('LOCAL_MAX_AGENTS', '10'))
+    LOCAL_MAX_ROUNDS = int(os.environ.get('LOCAL_MAX_ROUNDS', '5'))
+    LOCAL_MAX_CONCURRENCY = int(os.environ.get('LOCAL_MAX_CONCURRENCY', '1'))
+    LOCAL_MAX_QUEUE = int(os.environ.get('LOCAL_MAX_QUEUE', '32'))
+    LOCAL_REQUEST_TIMEOUT = float(os.environ.get('LOCAL_REQUEST_TIMEOUT', '180'))
+    LOCAL_REASONING_EFFORT = os.environ.get('LOCAL_REASONING_EFFORT', 'none').strip() or None
+    LOCAL_MAX_OUTPUT_TOKENS = int(os.environ.get('LOCAL_MAX_OUTPUT_TOKENS', '2048'))
+    LOCAL_CONTEXT_TOKENS = int(os.environ.get('LOCAL_CONTEXT_TOKENS', '8192'))
+    LOCAL_MAX_INPUT_CHARS = int(os.environ.get('LOCAL_MAX_INPUT_CHARS', '24000'))
     
     # Zep配置
     ZEP_API_KEY = os.environ.get('ZEP_API_KEY')
@@ -64,11 +85,32 @@ class Config:
     def validate(cls) -> list[str]:
         """验证必要配置"""
         errors: list[str] = []
+        if cls.MEMORY_BACKEND not in {'zep', 'local'}:
+            errors.append("MEMORY_BACKEND must be 'zep' or 'local'")
+        if cls.LOCAL_MODE:
+            from .local_runtime.gateway import validate_loopback_url
+            for name in ('LLM_BASE_URL', 'LOCAL_EMBEDDING_BASE_URL', 'LOCAL_GRAPH_URI'):
+                try:
+                    schemes = ('bolt',) if name == 'LOCAL_GRAPH_URI' else ('http', 'https')
+                    validate_loopback_url(getattr(cls, name), schemes=schemes)
+                except ValueError as exc:
+                    errors.append(f"{name}: {exc}")
+            for name in ('LOCAL_MAX_AGENT_ITERATIONS', 'LOCAL_MAX_AGENTS', 'LOCAL_MAX_ROUNDS', 'LOCAL_MAX_CONCURRENCY', 'LOCAL_MAX_QUEUE', 'LOCAL_REQUEST_TIMEOUT',
+                         'LOCAL_MAX_OUTPUT_TOKENS', 'LOCAL_CONTEXT_TOKENS',
+                         'LOCAL_MAX_INPUT_CHARS', 'LOCAL_EMBEDDING_DIMENSIONS'):
+                value = getattr(cls, name)
+                import math
+                if not math.isfinite(value) or value <= 0:
+                    errors.append(f"{name} must be positive and finite")
+            if cls.LOCAL_MAX_OUTPUT_TOKENS >= cls.LOCAL_CONTEXT_TOKENS:
+                errors.append("LOCAL_MAX_OUTPUT_TOKENS must be smaller than LOCAL_CONTEXT_TOKENS")
+            if not cls.LLM_MODEL_NAME.strip() or not cls.LOCAL_EMBEDDING_MODEL.strip():
+                errors.append("Local model names must not be empty")
         if not cls.LLM_API_KEY:
             errors.append("LLM_API_KEY 未配置")
-        if not cls.ZEP_API_KEY:
+        if not cls.LOCAL_MODE and not cls.ZEP_API_KEY:
             errors.append("ZEP_API_KEY 未配置")
-        if os.environ.get("ZEP_API_URL"):
+        if not cls.LOCAL_MODE and os.environ.get("ZEP_API_URL"):
             errors.append("ZEP_API_URL 不受支持；MiroFish 仅连接 Zep Cloud")
         if cls.DEBUG:
             import warnings

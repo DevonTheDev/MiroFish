@@ -87,7 +87,7 @@ def get_graph_entities(graph_id: str):
         enrich: 是否获取相关边信息（默认true）
     """
     try:
-        if not Config.ZEP_API_KEY:
+        if not Config.LOCAL_MODE and not Config.ZEP_API_KEY:
             return jsonify({
                 "success": False,
                 "error": t('api.zepApiKeyMissing')
@@ -124,7 +124,7 @@ def get_graph_entities(graph_id: str):
 def get_entity_detail(graph_id: str, entity_uuid: str):
     """获取单个实体的详细信息"""
     try:
-        if not Config.ZEP_API_KEY:
+        if not Config.LOCAL_MODE and not Config.ZEP_API_KEY:
             return jsonify({
                 "success": False,
                 "error": t('api.zepApiKeyMissing')
@@ -157,7 +157,7 @@ def get_entity_detail(graph_id: str, entity_uuid: str):
 def get_entities_by_type(graph_id: str, entity_type: str):
     """获取指定类型的所有实体"""
     try:
-        if not Config.ZEP_API_KEY:
+        if not Config.LOCAL_MODE and not Config.ZEP_API_KEY:
             return jsonify({
                 "success": False,
                 "error": t('api.zepApiKeyMissing')
@@ -1564,6 +1564,9 @@ def start_simulation():
                 "error": "force must be a JSON boolean",
             }), 400
 
+        if Config.LOCAL_MODE and max_rounds is not None and type(max_rounds) is not int:
+            return jsonify({"success": False, "error": "max_rounds must be a JSON integer"}), 400
+
         # 验证 max_rounds 参数
         if max_rounds is not None:
             try:
@@ -1578,6 +1581,9 @@ def start_simulation():
                     "success": False,
                     "error": t('api.maxRoundsInvalid')
                 }), 400
+
+        from ..local_runtime.oasis import limit_rounds
+        max_rounds = limit_rounds(max_rounds)
 
         if platform not in ['twitter', 'reddit', 'parallel']:
             return jsonify({
