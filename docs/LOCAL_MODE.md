@@ -244,3 +244,16 @@ validation. No GPU/RAM fit claim is made without measuring your PC.
 
 MiroFish remains AGPL-3.0. Graphiti and OASIS are Apache-2.0; Neo4j Community is
 GPLv3. Review the relevant licenses if you redistribute a packaged deployment.
+
+### Report and chat rendering
+
+Model responses, uploaded-document extracts, reports and interview answers are
+untrusted text. The report/chat renderer supports the existing small Markdown
+formatting subset, but displays raw HTML literally. It does not turn Markdown
+links or images into active browser elements, so generated content cannot load
+remote images, frames or styles merely by being displayed. The original report
+and chat text remains unchanged in storage and downloads.
+
+Run `npm test --prefix frontend` for rendering regressions; the frontend CI job
+runs these before its production build. This content boundary is separate from
+the model-server trust boundary and is not a general browser/network sandbox.
