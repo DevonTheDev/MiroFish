@@ -17,6 +17,8 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
 from queue import Queue
+from contextlib import closing
+from pathlib import Path
 
 from ..config import Config
 from ..storage import StoragePathError, storage_path, validate_record_id
@@ -1994,32 +1996,42 @@ class SimulationRunner:
         results = []
         
         try:
-            conn = sqlite3.connect(db_path)
-            cursor = conn.cursor()
-            
-            if agent_id is not None:
-                cursor.execute("""
-                    SELECT user_id, info, created_at
-                    FROM trace
-                    WHERE action = 'interview' AND user_id = ?
-                    ORDER BY created_at DESC
-                    LIMIT ?
-                """, (agent_id, limit))
-            else:
-                cursor.execute("""
-                    SELECT user_id, info, created_at
-                    FROM trace
-                    WHERE action = 'interview'
-                    ORDER BY created_at DESC
-                    LIMIT ?
-                """, (limit,))
-            
-            for user_id, info_json, created_at in cursor.fetchall():
+            database_uri = Path(db_path).resolve().as_uri() + "?mode=ro"
+            with closing(sqlite3.connect(database_uri, uri=True)) as conn:
+                cursor = conn.cursor()
+
+                if agent_id is not None:
+                    cursor.execute("""
+                        SELECT user_id, info, created_at
+                        FROM trace
+                        WHERE action = 'interview' AND user_id = ?
+                        ORDER BY created_at DESC
+                        LIMIT ?
+                    """, (agent_id, limit))
+                else:
+                    cursor.execute("""
+                        SELECT user_id, info, created_at
+                        FROM trace
+                        WHERE action = 'interview'
+                        ORDER BY created_at DESC
+                        LIMIT ?
+                    """, (limit,))
+                rows = cursor.fetchall()
+
+            for user_id, info_json, created_at in rows:
+                if isinstance(info_json, bytes):
+                    raw_info = info_json.decode("utf-8", errors="replace")
+                elif info_json is None:
+                    raw_info = ""
+                else:
+                    raw_info = str(info_json)
                 try:
-                    info = json.loads(info_json) if info_json else {}
+                    info = json.loads(raw_info) if raw_info else {}
                 except json.JSONDecodeError:
-                    info = {"raw": info_json}
-                
+                    info = {"raw": raw_info}
+                if not isinstance(info, dict):
+                    info = {"raw": raw_info}
+
                 results.append({
                     "agent_id": user_id,
                     "response": info.get("response", info),
@@ -2027,9 +2039,7 @@ class SimulationRunner:
                     "timestamp": created_at,
                     "platform": platform_name
                 })
-            
-            conn.close()
-            
+
         except Exception as e:
             logger.error(f"读取Interview历史失败 ({platform_name}): {e}")
         
@@ -2058,19 +2068,25 @@ class SimulationRunner:
         Returns:
             Interview历史记录列表
         """
-        sim_dir = os.path.join(cls.RUN_STATE_DIR, simulation_id)
-        
+        simulation_id = validate_record_id(simulation_id)
+        if platform not in (None, "reddit", "twitter"):
+            raise ValueError("platform must be twitter, reddit or null")
+        if type(limit) is not int or not 0 <= limit <= 500:
+            raise ValueError("limit must be an integer between 0 and 500")
+        if agent_id is not None and (
+            type(agent_id) is not int or not 0 <= agent_id <= 2**63 - 1
+        ):
+            raise ValueError("agent_id must be a nonnegative signed-64-bit integer or null")
+
+        platforms = [platform] if platform is not None else ["twitter", "reddit"]
+        # Validate every requested path before reading either platform. Reject
+        # descendant aliases, but continue to support a relocated root itself.
+        databases = [
+            (p, storage_path(cls.RUN_STATE_DIR, simulation_id, f"{p}_simulation.db"))
+            for p in platforms
+        ]
         results = []
-        
-        # 确定要查询的平台
-        if platform in ("reddit", "twitter"):
-            platforms = [platform]
-        else:
-            # 不指定platform时，查询两个平台
-            platforms = ["twitter", "reddit"]
-        
-        for p in platforms:
-            db_path = os.path.join(sim_dir, f"{p}_simulation.db")
+        for p, db_path in databases:
             platform_results = cls._get_interview_history_from_db(
                 db_path=db_path,
                 platform_name=p,
@@ -2080,7 +2096,7 @@ class SimulationRunner:
             results.extend(platform_results)
         
         # 按时间降序排序
-        results.sort(key=lambda x: x.get("timestamp", ""), reverse=True)
+        results.sort(key=lambda x: str(x.get("timestamp") or ""), reverse=True)
         
         # 如果查询了多个平台，限制总数
         if len(platforms) > 1 and len(results) > limit:

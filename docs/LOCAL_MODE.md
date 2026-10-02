@@ -403,3 +403,28 @@ cross-process lock, orphan-process detector, transactional deletion, hostile-loc
 filesystem sandbox or native Windows guarantee. Tests intercept malformed deletes,
 use disposable positive fixtures and synthetic resource owners, and exercise a
 real two-thread startup/cleanup boundary plus the force-restart API failure path.
+
+### Read-only interview history
+
+The interview-history API and public runner reader validate the simulation ID and
+all requested database paths before opening either platform. Descendant aliases
+are rejected; configured root relocation is supported and unknown records create
+no directories or databases. SQLite uses an escaped file URI with `mode=ro`, with
+the connection closed even on query failures. Committed data in a live WAL-backed
+simulation remains readable. This keeps the main database read-only, without
+claiming that SQLite can never require existing WAL/shared-memory sidecar access.
+
+Requests must be JSON objects. `platform` is `twitter`, `reddit` or null/omitted;
+`limit` is a JSON integer from 0 to 500 (default 100); `agent_id` is null/omitted or
+a nonnegative signed-64-bit integer, including zero. Boolean, fractional and string
+numeric values are rejected with HTTP 400 rather than sent to SQLite. Both-platform
+results keep descending timestamp order and a total limit. Query/storage read
+failures retain the existing logged empty-result behavior.
+
+Malformed/non-object trace info is retained as a raw response rather than ending
+processing of later valid entries. Invalid UTF-8 bytes use replacement characters;
+empty info keeps its existing empty-object response. Undated rows sort after dated
+rows. These checks are limited to interview history, not other runner/IPC paths,
+backend-wide authentication, protection against hostile local path mutation or a
+native Windows guarantee. Local tests use Flask and disposable SQLite, including
+read-only enforcement, closure after errors and live WAL commits, without inference.

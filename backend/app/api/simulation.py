@@ -2661,7 +2661,9 @@ def get_interview_history():
         }
     """
     try:
-        data = request.get_json() or {}
+        data = request.get_json(silent=True)
+        if not isinstance(data, dict):
+            raise ValueError("Request body must be a JSON object")
         
         simulation_id = data.get('simulation_id')
         platform = data.get('platform')  # 不指定则返回两个平台的历史
@@ -2688,6 +2690,9 @@ def get_interview_history():
                 "history": history
             }
         })
+
+    except ValueError as e:
+        return jsonify({"success": False, "error": str(e)}), 400
 
     except Exception as e:
         logger.error(f"获取Interview历史失败: {str(e)}")
