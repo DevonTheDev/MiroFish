@@ -182,3 +182,57 @@ def test_local_start_api_rejects_non_integer_rounds(monkeypatch, requested):
     )
     assert response.status_code == 400
     assert "integer" in response.json["error"]
+
+
+@pytest.mark.parametrize('name', [
+    'LOCAL_EMBEDDING_DIMENSIONS', 'LOCAL_MAX_AGENT_ITERATIONS', 'LOCAL_MAX_AGENTS',
+    'LOCAL_MAX_ROUNDS', 'LOCAL_MAX_CONCURRENCY', 'LOCAL_MAX_QUEUE',
+    'LOCAL_MAX_OUTPUT_TOKENS', 'LOCAL_CONTEXT_TOKENS', 'LOCAL_MAX_INPUT_CHARS',
+])
+@pytest.mark.parametrize('value', ['not-an-integer', '', '1.5'])
+def test_malformed_local_integer_is_a_named_validation_error(name, value):
+    result = load_config(MEMORY_BACKEND='local', **{name: value})
+    assert any(name in error and 'integer' in error for error in result['errors'])
+
+
+@pytest.mark.parametrize('value', ['slow', '', 'nan', 'inf'])
+def test_invalid_local_timeout_is_a_named_validation_error(value):
+    result = load_config(MEMORY_BACKEND='local', LOCAL_REQUEST_TIMEOUT=value)
+    assert any('LOCAL_REQUEST_TIMEOUT' in error for error in result['errors'])
+
+
+def test_cloud_mode_does_not_parse_fail_on_unused_local_numbers():
+    result = load_config(MEMORY_BACKEND='zep', LLM_API_KEY='test', ZEP_API_KEY='test',
+                         LOCAL_MAX_AGENTS='unused', LOCAL_REQUEST_TIMEOUT='unused')
+    assert result['errors'] == []
+
+
+def test_doctor_reports_all_malformed_local_numbers_without_traceback_or_raw_values():
+    env = {key: value for key, value in os.environ.items()
+           if not key.startswith(('LLM_', 'LOCAL_', 'ZEP_', 'MEMORY_', 'OPENAI_'))}
+    env.update(PYTHONPATH=str(ROOT), PYTHON_DOTENV_DISABLED='1', MEMORY_BACKEND='local',
+               LOCAL_MAX_AGENTS='invalid-do-not-echo', LOCAL_REQUEST_TIMEOUT='also-invalid')
+    result = subprocess.run([sys.executable, str(ROOT / 'scripts/local_doctor.py')],
+                            env=env, text=True, capture_output=True, timeout=15)
+    assert result.returncode == 1
+    assert 'LOCAL_MAX_AGENTS' in result.stdout and 'LOCAL_REQUEST_TIMEOUT' in result.stdout
+    assert 'Traceback' not in result.stderr
+    assert 'invalid-do-not-echo' not in result.stdout + result.stderr
+
+
+@pytest.mark.parametrize('inherited', [None, 'http://127.0.0.1:12345/v1'])
+def test_invalid_local_limit_cannot_start_or_inherit_a_gateway(monkeypatch, inherited):
+    from app import local_runtime
+    from app.local_runtime import gateway
+
+    monkeypatch.setattr(Config, 'LOCAL_MODE', True)
+    monkeypatch.setattr(Config, 'LOCAL_MAX_AGENTS', None)
+    monkeypatch.setattr(local_runtime, '_gateway', None)
+    if inherited:
+        monkeypatch.setenv('MIROFISH_LOCAL_GATEWAY_URL', inherited)
+    else:
+        monkeypatch.delenv('MIROFISH_LOCAL_GATEWAY_URL', raising=False)
+    monkeypatch.setattr(gateway, 'LocalInferenceGateway',
+                        lambda *args, **kwargs: pytest.fail('invalid settings started inference'))
+    with pytest.raises(ValueError, match='LOCAL_MAX_AGENTS'):
+        local_runtime.get_local_gateway_url()

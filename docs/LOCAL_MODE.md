@@ -104,6 +104,11 @@ JSON, JSON-schema, tool-call and embedding probes. It checks the actual embeddin
 dimension. It does not create a graph or download anything, and exits nonzero
 when a required capability fails. It is a contract check, not a quality benchmark.
 
+Malformed local numeric limits are reported by setting name before services are
+contacted, rather than failing at import with a traceback. Invalid values are
+not silently replaced by defaults. Fix every reported local setting and rerun
+`npm run check:local`; unused local-only numbers do not block cloud mode.
+
 Use **uv** for the local dependency environment. OASIS 0.2.5 pins Neo4j's Python
 driver to 5.23.0, while Graphiti 0.30.2 needs at least 5.26. OASIS and its unstructured dependency also declare Python below 3.12, so this
 project pins Python 3.11 even though earlier versions advertised 3.12. The lockfile explicitly

@@ -55,14 +55,16 @@ def get_local_gateway_url() -> str:
         raise ValueError("Local gateway requires MEMORY_BACKEND=local")
     from .gateway import GatewaySettings, LocalInferenceGateway, validate_loopback_url
 
+    # Child processes must reject their own invalid limits too, even when
+    # they share an already-running gateway owned by the parent.
+    errors = Config.validate()
+    if errors:
+        raise ValueError("; ".join(errors))
     inherited = os.environ.get(_GATEWAY_ENV)
     if inherited:
         return validate_loopback_url(inherited)
     with _gateway_lock:
         if _gateway is None:
-            errors = Config.validate()
-            if errors:
-                raise ValueError("; ".join(errors))
             configure_local_environment()
             _gateway = LocalInferenceGateway(
                 GatewaySettings(

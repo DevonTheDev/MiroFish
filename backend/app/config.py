@@ -1,6 +1,7 @@
 """\n配置管理\n统一从项目根目录的 .env 文件加载配置\n"""
 
 import os
+import math
 from dotenv import load_dotenv
 
 # 加载项目根目录的 .env 文件
@@ -12,6 +13,18 @@ if os.path.exists(project_root_env):
 else:
     # 如果根目录没有 .env，尝试加载环境变量（用于生产环境）
     load_dotenv(override=True)
+
+
+def _numeric_env(name: str, default: str, kind):
+    """Defer malformed local values to validation without echoing raw input.
+
+    None is deliberately invalid, rather than silently applying a resource
+    default. Cloud mode can still ignore unused local-only settings.
+    """
+    try:
+        return kind(os.environ.get(name, default))
+    except (ValueError, OverflowError):
+        return None
 
 
 class Config:
@@ -34,21 +47,21 @@ class Config:
         'mirofish-local' if LOCAL_MODE else 'gpt-4o-mini')
     LOCAL_EMBEDDING_BASE_URL = os.environ.get('LOCAL_EMBEDDING_BASE_URL', LLM_BASE_URL)
     LOCAL_EMBEDDING_MODEL = os.environ.get('LOCAL_EMBEDDING_MODEL', 'nomic-embed-text')
-    LOCAL_EMBEDDING_DIMENSIONS = int(os.environ.get('LOCAL_EMBEDDING_DIMENSIONS', '768'))
+    LOCAL_EMBEDDING_DIMENSIONS = _numeric_env('LOCAL_EMBEDDING_DIMENSIONS', '768', int)
     LOCAL_GRAPH_URI = os.environ.get('LOCAL_GRAPH_URI', 'bolt://127.0.0.1:7687')
     LOCAL_GRAPH_USER = os.environ.get('LOCAL_GRAPH_USER', 'neo4j')
     LOCAL_GRAPH_PASSWORD = os.environ.get('LOCAL_GRAPH_PASSWORD', '')
     LOCAL_GRAPH_DATABASE = os.environ.get('LOCAL_GRAPH_DATABASE', 'neo4j')
-    LOCAL_MAX_AGENT_ITERATIONS = int(os.environ.get('LOCAL_MAX_AGENT_ITERATIONS', '3'))
-    LOCAL_MAX_AGENTS = int(os.environ.get('LOCAL_MAX_AGENTS', '10'))
-    LOCAL_MAX_ROUNDS = int(os.environ.get('LOCAL_MAX_ROUNDS', '5'))
-    LOCAL_MAX_CONCURRENCY = int(os.environ.get('LOCAL_MAX_CONCURRENCY', '1'))
-    LOCAL_MAX_QUEUE = int(os.environ.get('LOCAL_MAX_QUEUE', '32'))
-    LOCAL_REQUEST_TIMEOUT = float(os.environ.get('LOCAL_REQUEST_TIMEOUT', '180'))
+    LOCAL_MAX_AGENT_ITERATIONS = _numeric_env('LOCAL_MAX_AGENT_ITERATIONS', '3', int)
+    LOCAL_MAX_AGENTS = _numeric_env('LOCAL_MAX_AGENTS', '10', int)
+    LOCAL_MAX_ROUNDS = _numeric_env('LOCAL_MAX_ROUNDS', '5', int)
+    LOCAL_MAX_CONCURRENCY = _numeric_env('LOCAL_MAX_CONCURRENCY', '1', int)
+    LOCAL_MAX_QUEUE = _numeric_env('LOCAL_MAX_QUEUE', '32', int)
+    LOCAL_REQUEST_TIMEOUT = _numeric_env('LOCAL_REQUEST_TIMEOUT', '180', float)
     LOCAL_REASONING_EFFORT = os.environ.get('LOCAL_REASONING_EFFORT', 'none').strip() or None
-    LOCAL_MAX_OUTPUT_TOKENS = int(os.environ.get('LOCAL_MAX_OUTPUT_TOKENS', '2048'))
-    LOCAL_CONTEXT_TOKENS = int(os.environ.get('LOCAL_CONTEXT_TOKENS', '8192'))
-    LOCAL_MAX_INPUT_CHARS = int(os.environ.get('LOCAL_MAX_INPUT_CHARS', '24000'))
+    LOCAL_MAX_OUTPUT_TOKENS = _numeric_env('LOCAL_MAX_OUTPUT_TOKENS', '2048', int)
+    LOCAL_CONTEXT_TOKENS = _numeric_env('LOCAL_CONTEXT_TOKENS', '8192', int)
+    LOCAL_MAX_INPUT_CHARS = _numeric_env('LOCAL_MAX_INPUT_CHARS', '24000', int)
     
     # Zep配置
     ZEP_API_KEY = os.environ.get('ZEP_API_KEY')
@@ -95,14 +108,18 @@ class Config:
                     validate_loopback_url(getattr(cls, name), schemes=schemes)
                 except ValueError as exc:
                     errors.append(f"{name}: {exc}")
-            for name in ('LOCAL_MAX_AGENT_ITERATIONS', 'LOCAL_MAX_AGENTS', 'LOCAL_MAX_ROUNDS', 'LOCAL_MAX_CONCURRENCY', 'LOCAL_MAX_QUEUE', 'LOCAL_REQUEST_TIMEOUT',
+            for name in ('LOCAL_MAX_AGENT_ITERATIONS', 'LOCAL_MAX_AGENTS', 'LOCAL_MAX_ROUNDS', 'LOCAL_MAX_CONCURRENCY', 'LOCAL_MAX_QUEUE',
                          'LOCAL_MAX_OUTPUT_TOKENS', 'LOCAL_CONTEXT_TOKENS',
                          'LOCAL_MAX_INPUT_CHARS', 'LOCAL_EMBEDDING_DIMENSIONS'):
                 value = getattr(cls, name)
-                import math
-                if not math.isfinite(value) or value <= 0:
-                    errors.append(f"{name} must be positive and finite")
-            if cls.LOCAL_MAX_OUTPUT_TOKENS >= cls.LOCAL_CONTEXT_TOKENS:
+                if type(value) is not int or value <= 0:
+                    errors.append(f"{name} must be a positive integer")
+            timeout = cls.LOCAL_REQUEST_TIMEOUT
+            if type(timeout) not in (int, float) or not math.isfinite(timeout) or timeout <= 0:
+                errors.append("LOCAL_REQUEST_TIMEOUT must be positive and finite")
+            if (type(cls.LOCAL_MAX_OUTPUT_TOKENS) is int
+                    and type(cls.LOCAL_CONTEXT_TOKENS) is int
+                    and cls.LOCAL_MAX_OUTPUT_TOKENS >= cls.LOCAL_CONTEXT_TOKENS):
                 errors.append("LOCAL_MAX_OUTPUT_TOKENS must be smaller than LOCAL_CONTEXT_TOKENS")
             if not cls.LLM_MODEL_NAME.strip() or not cls.LOCAL_EMBEDDING_MODEL.strip():
                 errors.append("Local model names must not be empty")
