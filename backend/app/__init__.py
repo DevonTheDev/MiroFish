@@ -46,6 +46,8 @@ def create_app(config_class=Config):
         configure_local_environment()
         from .local_runtime.readiness import register_readiness_shutdown
         register_readiness_shutdown()
+        from .local_runtime.prompt_trials import register_prompt_trials_shutdown
+        register_prompt_trials_shutdown()
 
         @app.before_request
         def require_local_browser():
@@ -73,11 +75,13 @@ def create_app(config_class=Config):
         logger = get_logger('mirofish.request')
         logger.debug(f"请求: {request.method} {request.path}")
         if (request.content_type and 'json' in request.content_type
-                and not request.path.startswith(('/api/runtime/readiness', '/api/run-captures'))):
+                and not request.path.startswith(('/api/runtime/readiness', '/api/runtime/trials', '/api/run-captures'))):
             logger.debug(f"请求体: {request.get_json(silent=True)}")
     
     @app.after_request
     def log_response(response):
+        if request.path.startswith('/api/runtime/trials'):
+            response.headers['Cache-Control'] = 'no-store'
         logger = get_logger('mirofish.request')
         logger.debug(f"响应: {response.status_code}")
         return response

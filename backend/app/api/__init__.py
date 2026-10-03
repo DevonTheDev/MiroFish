@@ -14,4 +14,5 @@ from . import graph  # noqa: E402, F401
 from . import simulation  # noqa: E402, F401
 from . import report  # noqa: E402, F401
 from . import runtime  # noqa: E402, F401
+from . import prompt_trials  # noqa: E402, F401
 from . import run_captures  # noqa: E402, F401

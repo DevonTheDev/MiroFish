@@ -210,6 +210,87 @@ Flask/Axios/compiled-Vue interactions. It does not use pretrained model weights,
 user documents, paid services, or hosted tests. Native browser layout and Windows
 behavior remain unverified.
 
+## Try prompts with your local model
+
+Open **Local prompt trials** from Home or Runtime monitor. This workspace lets
+you try short prompts against the backend's configured chat model before building
+a graph or running a simulation. Opening or refreshing it only observes the
+latest trial; inference starts only when you explicitly choose **Run trial**.
+
+1. Give the trial a label, enter an optional system prompt and a required user
+   prompt, then choose a temperature and requested output-token limit.
+2. Run the trial and inspect the exact returned text, finish reason, available
+   server-reported token counts and observed duration. A provider's length cutoff
+   is labeled truncated. An actual empty reply differs from unavailable output;
+   model failures, timeouts, refusals and unsupported replies remain explicit.
+3. Pin terminal observations while you iterate, then choose two pinned trials to
+   compare side by side. Reuse a captured prompt/settings explicitly when useful.
+   Reusing a prompt does not itself run it.
+4. Download captured trial data before leaving. Downloads include your prompts
+   and model replies. They use the already accepted snapshots and do not make
+   another inference request.
+
+Pinned trials exist only in the open page's memory, with at most ten retained
+snapshots. They remain downloadable if a later request fails or the backend
+becomes unavailable. Navigation, reload or closing the page loses them. The backend holds
+only its latest trial until another replaces it or the backend restarts. This is
+not a persistent experiment library or an importable trial archive.
+
+The captured model name and reasoning policy describe the loaded configuration;
+they do not verify particular weight files. Temperature and output tokens are
+requested settings, which a model server may handle differently. Reported token
+counts are optional provider observations, not independently counted tokens.
+Request duration includes shared-queue waiting and transport; overall elapsed
+time also includes startup and cleanup. Comparing one or two replies does not
+establish model quality, statistical significance or GPU performance.
+
+The page accepts a label up to 80 characters, system text up to 1,000 and user
+text up to 4,000. Temperature must be between 0 and 1, and requested output tokens
+between 1 and 512, further constrained by the loaded local budget. The gateway's
+existing input/context and concurrency limits still apply. One backend process
+admits one trial at a time, with no queue of trials; simulations and setup checks
+continue to share the same inference gateway budget.
+
+Gateway startup has up to five seconds and the completion request up to sixty,
+within an overall sixty-five-second operation budget. Owned-client cleanup has
+a separate allowance of ten seconds plus bounded drain overhead. These are
+cooperative application deadlines, not a guarantee that a model server or GPU
+stops computing. There is no user cancellation control for this single bounded
+request. Leaving the page stops observation, while an accepted backend request
+may continue. A lost Start response is reconciled using its exact request ID,
+without automatically repeating inference. If that result has been replaced or
+the backend has restarted, it may be unavailable.
+An authoritative admission refusal leaves the draft intact for an explicit
+refresh before another attempt. For an unresolved lost response, **Release this
+observation** clears only the page's observation and reads the latest status;
+it does not cancel earlier work or submit another trial. A new inference request
+still requires an explicit **Run trial**.
+
+Responses are limited to 64 KiB and accepted reply/refusal text to 16,384
+characters. Oversized or malformed output fails explicitly rather than being
+silently shortened by the app. Embedded reasoning wrappers remain literal text;
+the workbench does not strip them, render generated HTML, execute returned tools
+or make a follow-up model call. It never connects to Neo4j, installs a model,
+changes settings or selects another model/endpoint. Keep the model server's own
+local-only configuration: loopback transport alone cannot prove that a server
+does not delegate inference remotely.
+
+The trial page uses the local UI's `/api` proxy. The normal `npm run dev:local`
+setup provides this; a separately served production build needs an equivalent
+same-origin proxy. Existing API clients retain their configured routing. Trial
+endpoints reject ordinary cross-site browser requests and exclude prompt bodies
+from the app's request-body logger. Responses are `no-store`, with fixed fields
+and safe errors. This protects the scoped browser workflow; it is not
+authentication against other native processes on the same computer or a
+multi-user remote service. Cloud mode does not expose trial results or run them.
+
+Local verification uses actual Flask, the shared gateway and synthetic loopback
+model responses, plus compiled Vue and real Axios requests. It covers request
+ownership, lost replies, literal results and exact snapshot downloads. The Vite
+proxy's forwarding of supplied Origin/Fetch Metadata is also checked. No real
+model weights or GPU, private documents, paid service, hosted test, native
+browser-generated headers or Windows behavior is established by these tests.
+
 ## Explore latest saved activity
 
 In History, open a saved simulation and choose **Saved activity**. The dedicated
