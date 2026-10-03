@@ -10,6 +10,71 @@ PC's RAM, disk, compute and electricity. Small-model accuracy is not equivalent
 to a large hosted model. Generated simulations are exploratory, not validated
 forecasts or a basis for consequential decisions.
 
+## Monitor local runtime activity
+
+Choose **Runtime monitor** on Home, or open `/runtime`. The English/Chinese page
+shows the backend's loaded local model names, validated loopback endpoints,
+embedding dimensions and resource limits. It also shows the current gateway
+instance's activity when this backend owns that instance. Use **Refresh** for a
+new observation, or enable automatic refresh every five seconds after the prior
+request finishes. Leaving the page stops its observation requests.
+
+Opening or refreshing this page does not start the gateway, call a model, probe
+Neo4j, construct memory, change settings, download anything or run the doctor.
+`not_running` is a normal lazy-start state. A running gateway means its transport
+has started; it does not prove that the model server or database is reachable,
+that a model supports required capabilities, or that a simulation will succeed.
+Use the explicit doctor command in the setup instructions for capability checks.
+
+The monitor separates three kinds of activity:
+
+- **Admitted connections** are sockets using the gateway's admission budget.
+  They include header/body reading, health requests and response delivery
+- **Queued requests** are validated forwarding tasks waiting for an inference
+  slot. **Active requests** have acquired that slot for the upstream operation.
+  Chat, embedding and model-list requests use these counters
+- **Succeeded, failed, timed out and cancelled** count completed forwarding
+  tasks once each. A success requires a complete valid upstream response.
+  Malformed requests refused before forwarding do not increment these outcomes.
+  Admission rejections count connections, separately from forwarded requests
+
+These gauges are not agent counts or GPU utilization. In particular, subtracting
+active requests from admitted connections does not give the queue length.
+Timeout/cancellation labels describe the forwarding task's observed result, not
+necessarily the HTTP status seen by its caller. A disconnected caller may retain
+its slot until the existing deadline or completion, and an upstream model may
+continue computing after cancellation.
+
+Counters belong to one gateway instance and reset when it is replaced. Each
+independent backend process has its own owner and budgets. A process using an
+inherited gateway cannot inspect that owner's counters here; its values stay
+unavailable rather than showing zero. During startup/shutdown, a busy owner can
+appear as transitioning. A refresh does not wait for that lifecycle operation.
+
+Loaded configuration and an existing gateway's actual limits are displayed
+separately. Editing `.env` does not reconfigure a running instance; restart the
+backend after a deliberate configuration change. The configured context limit
+is an application budget, not proof of the model server's context capacity.
+Validation covers the displayed local settings, not every application setting or
+startup requirement. Issues are field/code labels, never raw configuration exceptions.
+Cloud mode shows that local monitoring is inapplicable and omits cloud settings.
+
+**Download observation JSON** saves the accepted, dated observation displayed by
+the page as `mirofish-local-runtime-status.json`. It makes no second status
+request. Refreshing or a refresh failure disables download until a new
+observation is accepted; a previous observation retained after failure is marked
+stale. The response and download use fixed field lists. They exclude API keys,
+graph authentication, inherited gateway addresses, local paths and request or
+response content. This is an observation, not continuous telemetry or a permanent
+history. The read-only endpoint is `GET /api/runtime/status` with no query
+parameters and `Cache-Control: no-store`.
+
+The monitor checks MiroFish's configured loopback boundary; it cannot establish
+whether an arbitrary model server delegates work remotely. Keep the model
+server's own local-only settings described below. Local tests use synthetic
+loopback traffic, real Flask/Axios and compiled Vue views. They do not establish
+model quality, GPU performance, native browser layout or Windows behavior.
+
 ## Explore latest saved activity
 
 In History, open a saved simulation and choose **Saved activity**. The dedicated

@@ -13,22 +13,44 @@ from __future__ import annotations
 import asyncio
 import concurrent.futures
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from http.cookiejar import CookieJar, DefaultCookiePolicy
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import ipaddress
 import json
 import math
+import os
 import re
 import socket
 import threading
 import time
 from urllib.parse import urlsplit, urlunsplit
+from uuid import uuid4
 
 import httpx
 
 
 MAX_REQUEST_BYTES = 1024 * 1024
 MAX_RESPONSE_BYTES = 8 * 1024 * 1024
+MAX_SAFE_INTEGER = 2**53 - 1
+
+
+def unavailable_gateway_snapshot(state):
+    """Unknown telemetry is distinct from an observed zero."""
+    return {"state": state, "instance_id": None, "started_at": None,
+            "uptime_seconds": None, "limits": None, "metrics": None}
+
+
+def safe_integer(value, minimum=1):
+    return value if type(value) is int and minimum <= value <= MAX_SAFE_INTEGER else None
+
+
+def safe_positive_number(value):
+    if type(value) is int:
+        return safe_integer(value)
+    if type(value) is float and math.isfinite(value) and value > 0:
+        return value
+    return None
 
 
 def validate_loopback_url(url: str, schemes=("http", "https")) -> str:
@@ -189,6 +211,7 @@ class _BoundedHTTPServer(ThreadingHTTPServer):
 
     def process_request(self, request, client_address):
         if not self.admission.acquire(blocking=False):
+            self.gateway._change_metrics(rejected_connections=1)
             body = _error_body("Local inference queue is full; retry later")
             response = (f"HTTP/1.1 429 Too Many Requests\r\nContent-Type: application/json\r\n"
                         f"Content-Length: {len(body)}\r\nRetry-After: 1\r\nConnection: close\r\n\r\n").encode() + body
@@ -200,6 +223,7 @@ class _BoundedHTTPServer(ThreadingHTTPServer):
             finally:
                 self.shutdown_request(request)
             return
+        self.gateway._change_metrics(admitted_connections=1)
         with self.connections_lock:
             self.connections.add(request)
         try:
@@ -207,6 +231,7 @@ class _BoundedHTTPServer(ThreadingHTTPServer):
         except BaseException:
             with self.connections_lock:
                 self.connections.discard(request)
+            self.gateway._change_metrics(admitted_connections=-1)
             self.admission.release()
             raise
 
@@ -216,6 +241,7 @@ class _BoundedHTTPServer(ThreadingHTTPServer):
         finally:
             with self.connections_lock:
                 self.connections.discard(request)
+            self.gateway._change_metrics(admitted_connections=-1)
             self.admission.release()
 
     def close_connections(self):
@@ -374,11 +400,78 @@ class LocalInferenceGateway:
     def __init__(self, settings: GatewaySettings):
         self.settings = settings
         self._lock = threading.Lock()
+        # Never use lifecycle locks or semaphore internals to observe activity.
+        # This lock only protects small scalar copies/counter transitions.
+        self._metrics_lock = threading.Lock()
+        self._owner_pid = os.getpid()
+        self._instance_id = str(uuid4())
+        self._state = "not_running"
+        self._started_at = None
+        self._started_monotonic = None
+        self._stopped_monotonic = None
+        self._metrics = dict.fromkeys((
+            "admitted_connections", "rejected_connections", "queued_requests", "active_requests",
+            "started_requests", "succeeded_requests", "failed_requests", "timed_out_requests",
+            "cancelled_requests",
+        ), 0)
         self._closed = False
         self._server = None
         self._loop = None
         self._client = None
         self._base_url = None
+
+    def _change_metrics(self, **changes):
+        with self._metrics_lock:
+            for name, change in changes.items():
+                self._metrics[name] += change
+
+    def _set_state(self, state):
+        with self._metrics_lock:
+            self._state = state
+            if state == "running":
+                self._started_at = datetime.now(timezone.utc).isoformat()
+                self._started_monotonic = time.monotonic()
+                self._stopped_monotonic = None
+            elif state in ("closed", "failed"):
+                self._stopped_monotonic = time.monotonic()
+
+    def snapshot(self):
+        """Return a passive process-owned observation; no lifecycle wait or I/O."""
+        # A fork copies locks/counters, but does not inherit the serving threads.
+        # Check PID before even touching a possibly locked inherited mutex.
+        if self._owner_pid != os.getpid():
+            return unavailable_gateway_snapshot("inherited")
+        with self._metrics_lock:
+            state = self._state
+            started_at = self._started_at
+            started_monotonic = self._started_monotonic
+            stopped_monotonic = self._stopped_monotonic
+            metrics = {name: safe_integer(value, minimum=0) for name, value in self._metrics.items()}
+            # is_alive() is nonblocking. Keep this check with the state copy so
+            # ordinary close cannot stop threads between observation and check.
+            unexpectedly_stopped = state == "running" and (
+                not self._loop_thread.is_alive() or not self._server_thread.is_alive())
+        if state == "not_running":
+            return unavailable_gateway_snapshot(state)
+        uptime = None if started_monotonic is None else max(
+            0.0, (time.monotonic() if stopped_monotonic is None else stopped_monotonic) - started_monotonic)
+        if unexpectedly_stopped:
+            state = "failed"
+            uptime = None  # The exact time an unexpected thread exit occurred is unknown.
+        return {
+            "state": state,
+            "instance_id": self._instance_id,
+            "started_at": started_at,
+            "uptime_seconds": uptime,
+            "limits": {
+                "max_concurrency": safe_integer(self.settings.max_concurrency),
+                "max_queue": safe_integer(self.settings.max_queue, minimum=0),
+                "request_timeout": safe_positive_number(self.settings.request_timeout),
+                "max_output_tokens": safe_integer(self.settings.max_output_tokens),
+                "max_input_chars": safe_integer(self.settings.max_input_chars),
+            },
+            "metrics": metrics,
+        }
 
     async def _initialize(self):
         self._budget = asyncio.Semaphore(self.settings.max_concurrency)
@@ -399,9 +492,14 @@ class LocalInferenceGateway:
                 raise RuntimeError("A closed local inference gateway cannot be restarted")
             if self._server is not None:
                 return self._base_url
-            self._loop = asyncio.new_event_loop()
-            self._loop_thread = threading.Thread(target=self._loop.run_forever, name="local-inference-io", daemon=True)
-            self._loop_thread.start()
+            self._set_state("starting")
+            try:
+                self._loop = asyncio.new_event_loop()
+                self._loop_thread = threading.Thread(target=self._loop.run_forever, name="local-inference-io", daemon=True)
+                self._loop_thread.start()
+            except BaseException:
+                self._set_state("failed")
+                raise
             try:
                 asyncio.run_coroutine_threadsafe(self._initialize(), self._loop).result(timeout=5)
                 self._server = _BoundedHTTPServer(self)
@@ -411,20 +509,27 @@ class LocalInferenceGateway:
                                                        name="local-inference-http", daemon=True)
                 self._server_thread.start()
             except BaseException:
+                self._set_state("failed")
                 if self._client is not None:
                     asyncio.run_coroutine_threadsafe(self._client.aclose(), self._loop).result(timeout=5)
                 self._loop.call_soon_threadsafe(self._loop.stop)
                 self._loop_thread.join(5)
                 self._loop.close()
                 raise
+            self._set_state("running")
             return self._base_url
 
     async def _forward(self, path, payload, remaining):
-        base = self.settings.embedding_base_url if path == "/v1/embeddings" else self.settings.llm_base_url
-        url = base.rstrip("/") + ("/v1" if not urlsplit(base).path else "") + path.removeprefix("/v1")
+        self._change_metrics(started_requests=1, queued_requests=1)
+        active = False
+        outcome = "failed_requests"
         try:
+            base = self.settings.embedding_base_url if path == "/v1/embeddings" else self.settings.llm_base_url
+            url = base.rstrip("/") + ("/v1" if not urlsplit(base).path else "") + path.removeprefix("/v1")
             async with asyncio.timeout(remaining):
                 async with self._budget:
+                    self._change_metrics(queued_requests=-1, active_requests=1)
+                    active = True
                     async with self._client.stream("POST" if payload is not None else "GET", url, json=payload) as response:
                         if not 200 <= response.status_code < 300:
                             raise _GatewayError(502, "Local model server rejected the request")
@@ -444,11 +549,20 @@ class LocalInferenceGateway:
                             json.loads(body, parse_constant=lambda _: (_ for _ in ()).throw(ValueError()))
                         except (ValueError, UnicodeError, RecursionError):
                             raise _GatewayError(502, "Local model server returned invalid JSON") from None
-                        return response.status_code, bytes(body)
+            result = response.status_code, bytes(body)
+            outcome = "succeeded_requests"
+            return result
+        except asyncio.CancelledError:
+            # This describes the coroutine's outcome, not the browser status.
+            outcome = "cancelled_requests"
+            raise
         except (TimeoutError, httpx.TimeoutException):
+            outcome = "timed_out_requests"
             raise _GatewayError(504, "Local inference request timed out") from None
         except httpx.HTTPError:
             raise _GatewayError(502, "Local model server is unavailable") from None
+        finally:
+            self._change_metrics(**{"active_requests" if active else "queued_requests": -1, outcome: 1})
 
     async def _shutdown(self):
         tasks = [task for task in asyncio.all_tasks() if task is not asyncio.current_task()]
@@ -463,15 +577,22 @@ class LocalInferenceGateway:
             if self._closed:
                 return
             self._closed = True
+            self._set_state("closing")
             if self._server is None:
+                self._set_state("closed")
                 return
-            self._server.shutdown()
-            self._server.server_close()
-            self._server.close_connections()
-            self._server_thread.join(5)
             try:
-                asyncio.run_coroutine_threadsafe(self._shutdown(), self._loop).result(timeout=5)
-            finally:
-                self._loop.call_soon_threadsafe(self._loop.stop)
-                self._loop_thread.join(5)
-                self._loop.close()
+                self._server.shutdown()
+                self._server.server_close()
+                self._server.close_connections()
+                self._server_thread.join(5)
+                try:
+                    asyncio.run_coroutine_threadsafe(self._shutdown(), self._loop).result(timeout=5)
+                finally:
+                    self._loop.call_soon_threadsafe(self._loop.stop)
+                    self._loop_thread.join(5)
+                    self._loop.close()
+            except BaseException:
+                self._set_state("failed")
+                raise
+            self._set_state("closed")

@@ -31,6 +31,15 @@ Graphiti/Neo4j memory, and bounded consumer-hardware defaults. Start with the
 [local setup guide](docs/LOCAL_MODE.md), `.env.local.example`, and
 `npm run setup:local`. Existing cloud setup remains available below.
 
+## Monitor local runtime activity
+
+Open **Runtime monitor** from Home to see loaded model settings, resource limits,
+and the backend's shared gateway activity. Refresh manually, enable periodic
+refresh, or download the displayed observation as JSON. The monitor is passive:
+opening it does not start a gateway, call a model or connect to Neo4j. Gateway
+activity is separate from model readiness. See the
+[runtime monitor guide](docs/LOCAL_MODE.md#monitor-local-runtime-activity).
+
 ## Explore saved activity
 
 Open a simulation in History and choose **Saved activity** to inspect its latest

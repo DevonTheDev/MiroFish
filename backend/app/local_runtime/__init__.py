@@ -17,6 +17,28 @@ _gateway = None
 _gateway_lock = threading.Lock()
 
 
+def get_local_gateway_snapshot() -> dict:
+    """Observe an existing owner without starting it or waiting on lifecycle I/O."""
+    from .gateway import unavailable_gateway_snapshot
+
+    if not Config.LOCAL_MODE:
+        return unavailable_gateway_snapshot("disabled")
+    if os.environ.get(_GATEWAY_ENV):
+        return unavailable_gateway_snapshot("inherited")
+    # An inherited owner has no live serving threads in this process. Its
+    # module lock may also have been copied while locked in another thread.
+    owner = _gateway
+    if owner is not None and owner._owner_pid != os.getpid():
+        return unavailable_gateway_snapshot("inherited")
+    if not _gateway_lock.acquire(blocking=False):
+        return unavailable_gateway_snapshot("transitioning")
+    try:
+        owner = _gateway
+    finally:
+        _gateway_lock.release()
+    return unavailable_gateway_snapshot("not_running") if owner is None else owner.snapshot()
+
+
 def configure_local_environment() -> None:
     """Disable dependency telemetry, implicit downloads and inherited proxies."""
     if not Config.LOCAL_MODE:

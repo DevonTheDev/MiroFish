@@ -7,8 +7,14 @@ import ReportView from '../views/ReportView.vue'
 import InteractionView from '../views/InteractionView.vue'
 import SavedActivityView from '../views/SavedActivityView.vue'
 import SimulationComparisonView from '../views/SimulationComparisonView.vue'
+import RuntimeStatusView from '../views/RuntimeStatusView.vue'
 
 const routes = [
+  {
+    path: '/runtime',
+    name: 'RuntimeStatus',
+    component: RuntimeStatusView
+  },
   {
     path: '/simulation/:simulationId/activity',
     name: 'SavedActivity',

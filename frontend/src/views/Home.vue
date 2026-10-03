@@ -4,6 +4,7 @@
     <nav class="navbar">
       <div class="nav-brand">MIROFISH</div>
       <div class="nav-links">
+        <RouterLink to="/runtime" class="github-link" data-testid="runtime-link">{{ $t('runtime.navTitle') }}</RouterLink>
         <LanguageSwitcher />
         <a href="https://github.com/666ghj/MiroFish" target="_blank" class="github-link">
           {{ $t('nav.visitGithub') }} <span class="arrow">↗</span>
@@ -27,7 +28,7 @@
           
           <div class="hero-desc">
             <p>
-              <i18n-t keypath="home.heroDesc" tag="span">
+              <i18n-t keypath="home.heroDesc" tag="span" scope="global">
                 <template #brand><span class="highlight-bold">{{ $t('home.heroDescBrand') }}</span></template>
                 <template #agentScale><span class="highlight-orange">{{ $t('home.heroDescAgentScale') }}</span></template>
                 <template #optimalSolution><span class="highlight-code">{{ $t('home.heroDescOptimalSolution') }}</span></template>
@@ -58,12 +59,12 @@
         <!-- 左栏：状态与步骤 -->
         <div class="left-panel">
           <div class="panel-header">
-            <span class="status-dot">■</span> {{ $t('home.systemStatus') }}
+            <span class="status-dot">■</span> {{ $t('home.workspaceLabel') }}
           </div>
           
-          <h2 class="section-title">{{ $t('home.systemReady') }}</h2>
+          <h2 class="section-title">{{ $t('home.workspaceTitle') }}</h2>
           <p class="section-desc">
-            {{ $t('home.systemReadyDesc') }}
+            {{ $t('home.workspaceDesc') }}
           </p>
           
           <!-- 数据指标卡片 -->
@@ -213,7 +214,7 @@
 
 <script setup>
 import { ref, computed } from 'vue'
-import { useRouter } from 'vue-router'
+import { RouterLink, useRouter } from 'vue-router'
 import HistoryDatabase from '../components/HistoryDatabase.vue'
 import LanguageSwitcher from '../components/LanguageSwitcher.vue'
 
@@ -374,6 +375,11 @@ const startSimulation = () => {
 
 .github-link:hover {
   opacity: 0.8;
+}
+
+@media (max-width: 640px) {
+  .navbar { height: auto; min-height: 60px; padding: 16px 20px; flex-wrap: wrap; gap: 16px; }
+  .nav-links { flex-wrap: wrap; gap: 14px; }
 }
 
 .arrow {
