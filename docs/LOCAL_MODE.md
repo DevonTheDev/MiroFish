@@ -574,8 +574,10 @@ first save leaves no partial final text. Formatting and section ordering remain.
 Each file is independent. A later outline or Markdown failure does not roll back
 already saved report metadata. In particular, `get_report` may return new complete
 Markdown embedded in `meta.json` while the separate `.md` file still contains its
-previous version. The download endpoint's legacy reconstruction of a missing
-Markdown file and append-only logs keep their existing behavior. This does not add
+previous version. Downloads without a separate Markdown file serve the embedded
+text as an in-memory UTF-8 attachment, including legacy flat JSON reports, without
+leaving temporary files. Existing `.md` files retain download precedence and
+append-only logs keep their existing behavior. This does not add
 multi-file transactions, writer version locks, power-loss durability or protection
 against hostile local path changes. Local tests exercise real report readers,
 downloads and the Flask progress endpoint during writes, failed first/repeated

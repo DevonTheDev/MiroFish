@@ -6,6 +6,7 @@ Report API路由
 import os
 import traceback
 import threading
+from io import BytesIO
 from flask import request, jsonify, send_file
 
 from . import report_bp
@@ -545,14 +546,9 @@ def download_report(report_id: str):
         md_path = ReportManager._get_report_markdown_path(report_id)
         
         if not os.path.exists(md_path):
-            # 如果MD文件不存在，生成一个临时文件
-            import tempfile
-            with tempfile.NamedTemporaryFile(mode='w', suffix='.md', delete=False) as f:
-                f.write(report.markdown_content)
-                temp_path = f.name
-            
+            # Stream metadata-only reports without leaving temporary files behind.
             return send_file(
-                temp_path,
+                BytesIO(report.markdown_content.encode('utf-8')),
                 as_attachment=True,
                 download_name=f"{report_id}.md"
             )
