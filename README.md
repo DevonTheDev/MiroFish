@@ -74,6 +74,17 @@ without starting simulations or making inference requests. Missing or damaged
 observations are marked explicitly rather than treated as zero. See the
 [comparison guide and limits](docs/LOCAL_MODE.md#compare-latest-saved-simulations).
 
+## Keep and compare run captures
+
+Open **Run captures** in History to preview a saved simulation, give its observed
+result a label and note, and explicitly save an immutable aggregate capture.
+Capture it again after another run, then compare the two captures even when they
+belong to the same simulation or the original logs have been replaced. Browse
+earlier captures, inspect their saved context and coverage, and download an
+individual capture or the displayed comparison as JSON. This records observed
+activity counts without loading models or copying raw posts and credentials.
+See the [run capture workflow and limits](docs/LOCAL_MODE.md#keep-and-compare-run-captures).
+
 ## ⚡ Overview
 
 **MiroFish** is a next-generation AI prediction engine powered by multi-agent technology. By extracting seed information from the real world (such as breaking news, policy drafts, or financial signals), it automatically constructs a high-fidelity parallel digital world. Within this space, thousands of intelligent agents with independent personalities, long-term memory, and behavioral logic freely interact and undergo social evolution. You can inject variables dynamically from a "God's-eye view" to precisely deduce future trajectories — **rehearse the future in a digital sandbox, and win decisions after countless simulations**.

@@ -10,7 +10,14 @@ import SimulationComparisonView from '../views/SimulationComparisonView.vue'
 import RuntimeStatusView from '../views/RuntimeStatusView.vue'
 import SavedReportsView from '../views/SavedReportsView.vue'
 
+import RunCapturesView from '../views/RunCapturesView.vue'
+
 const routes = [
+  {
+    path: '/captures',
+    name: 'RunCaptures',
+    component: RunCapturesView
+  },
   {
     path: '/reports',
     name: 'SavedReports',

@@ -328,7 +328,9 @@ comparison before loading another. The page is available in English and Chinese.
 The workflow reads existing saved files only. It does not start simulations,
 generate reports, load a model or make inference requests. Restarting a simulation
 replaces its run files, so this compares the latest saved run under each distinct
-ID, not multiple historical attempts under one ID.
+ID, not multiple historical attempts under one ID. To keep observations before
+restarting and compare repeated runs of the same simulation, use
+[Run captures](#keep-and-compare-run-captures).
 
 The page shows saved scenario, configured model/profile count, requested rounds,
 last saved round, saved status/timestamps, and these observed metrics:
@@ -1028,3 +1030,115 @@ cancellation; this does not undo an already-submitted close/stop. Local tests us
 the actual Vue Router and compiled parent/child templates with controlled replies,
 plus loopback HTTP cancellation. Native browser interaction and real model runs
 remain unverified.
+
+## Keep and compare run captures
+
+Open **Run captures** from History, or from a saved simulation's History details.
+This dedicated `/captures` page lets you preserve aggregate observations before
+another run replaces the simulation's latest files. The page is available in
+English and Chinese.
+
+1. Choose a saved simulation and explicitly **Preview** its current observation.
+   Inspect its saved status, source timestamps, configuration context, counts,
+   completeness and warnings. Only saved completed/stopped/failed states can be
+   captured; a missing readable log remains unavailable, while an admitted empty
+   log can establish zero.
+2. Enter a label and optional note, then choose **Save capture**. The backend
+   checks the source revision again and creates a new immutable record. If the
+   source changed after Preview, refresh the preview before saving. Saving does
+   not run, stop, prepare or repair the simulation.
+3. Run the simulation again through the normal execution workflow, then return
+   here and save another observation. Earlier captures remain readable if the
+   original latest files or simulation directory are later replaced or removed.
+4. Browse the capture library, open an individual capture, or choose left and
+   right captures. Two different capture IDs may refer to the same simulation.
+   Compare recorded actions, rounds with actions, per-platform activity and
+   active-agent counts, plus action types. Differences are always **right minus
+   left**, with the same partial/unavailable rules as latest-run comparison.
+5. Download an individual capture or the accepted comparison as JSON. Downloads
+   contain exactly the displayed accepted objects, including their label/note,
+   captured and observed timestamps, source revision, saved context and warnings.
+   Refreshing the source simulation cannot rewrite an earlier capture.
+
+A capture is an observation of saved files, not a replayable run archive or proof
+that a process has exited. A saved terminal state can coexist with an interview
+process. **Saved status** stays visibly qualified. The configured model and
+scenario reflect saved configuration at observation time; they do not certify
+which model or settings actually executed. Counts include unsuccessful recorded
+attempts. Agent IDs are not matched between captures, and differences do not
+establish causation, prediction accuracy, model quality or a better outcome.
+Source fingerprints detect ordinary saves during reading and between Preview
+and Save, rather than supplying an atomic multi-file filesystem snapshot or a
+content-authenticity signature. Warnings about unreadable run metadata and
+fallback saved status remain part of the capture.
+
+Only allowlisted context and aggregates are stored. Raw posts, action arguments,
+results, full configuration, model credentials and simulation SQLite databases
+are excluded. Labels and notes are user text and are displayed literally.
+Captured scenario text and configured model names remain saved context, so treat
+exports as containing the context and notes you chose to preserve.
+
+The dedicated local SQLite store is
+`<configured UPLOAD_FOLDER>/run_captures/run_captures.sqlite3`, outside individual
+simulation directories. Read requests do not create it. Explicit Save creates
+storage and uses a transaction to add a record; existing captures are never
+updated. This increment provides no edit, delete or import operation. The store
+holds at most 500 captures, each at most 256 KiB of encoded JSON. Labels allow
+1–120 Unicode code points and must be nonblank; notes allow up to 2,000. Both
+reject invalid Unicode/control characters, with newline/tab allowed in notes.
+Oversized observations are refused without truncation. Existing source limits
+(state/run metadata, configuration and logs) still apply. Library pages contain
+1–50 captures, with 20 shown by default.
+
+Save requests use a unique capture ID and an immutable request body. Repeating
+the same ID/body returns its existing saved record, including after source files
+change or the library reaches capacity. Different contents under that ID are a
+conflict. The UI submits once, then checks that ID after an ambiguous response;
+it never automatically retries a write. An explicit retry retains the same ID
+and body. A pending ID stays in the URL so a reload can look it up, but unsaved
+form text is not recovered after reload. Leaving a page or aborting HTTP does not
+undo a save already accepted by the backend. Check a pending capture before
+starting a separate save if its outcome was uncertain.
+
+The API is under `/api/run-captures`: `GET /preview?simulation_id=...`,
+`GET /records?offset=0&limit=20`, `GET /records/<capture_id>`,
+`POST /records/<capture_id>`, `GET /compare?left=...&right=...`, and
+`POST /recover` with an empty JSON object.
+Capture IDs are 32 lowercase hexadecimal characters. Save POST accepts exactly
+`simulation_id`, `source_revision`, `label` and `note`, with a 16 KiB body limit.
+Unknown/repeated query parameters, duplicate JSON keys and invalid types are
+rejected. Responses are strict JSON and marked `no-store`; request-body debug
+logging excludes these endpoints. There are no model/provider requests.
+
+Path checks cover the capture directory, database and potential journal/WAL/shared
+memory sidecars; linked or nonregular descendants are refused. Reads use a
+read-only SQLite connection, writes use rollback-journal transactions and a
+two-second SQLite lock wait. A WAL-formatted store is refused before connecting,
+so a read does not create its WAL/shared-memory files. The database file/page
+budget is 160 MiB. The storage schema and capture JSON are validated before use. These
+checks do not protect against a hostile local process replacing paths during
+access, and they do not turn the whole app into a multi-user storage service.
+Keep a separate backup of captures that matter to you.
+
+If an interrupted write left a SQLite rollback journal, reads report that
+recovery is required and leave the files unchanged. Choose **Recover interrupted
+save** to explicitly let SQLite restore committed pages, then refresh the saved
+observations. This works without the original simulation files. It creates no
+capture, and an absent or healthy store needs no recovery. Retrying an existing
+Save request can perform the same narrow recovery before its idempotency check.
+There is no automatic recovery POST or automatic save retry. Recovery requires
+this store's application/schema header and refuses foreign or WAL databases;
+it is not a general database repair tool. SQLite restores pages and removes its
+hot journal before record validation can run, so previously committed corruption
+may still be reported after an authorized rollback has changed those files.
+If the recovery response is lost, read again to check availability; leaving the
+page does not undo rollback already performed by SQLite.
+
+Local validation exercises real saved log writers, disposable SQLite storage,
+source changes and deletion, idempotent recovery, concurrency, corruption and
+read-only paths. The real Flask API, production Axios wrappers and compiled Vue
+page are exercised together for capture → rerun → capture → compare → reopen,
+including partial observations, a lost successful response, and explicit recovery
+after a real disposable writer process crashes. Native browser
+layout/download dialogs, Windows storage behavior and real-model quality remain
+unverified; no pretrained weights or hosted tests are used.

@@ -73,7 +73,7 @@ def create_app(config_class=Config):
         logger = get_logger('mirofish.request')
         logger.debug(f"请求: {request.method} {request.path}")
         if (request.content_type and 'json' in request.content_type
-                and not request.path.startswith('/api/runtime/readiness')):
+                and not request.path.startswith(('/api/runtime/readiness', '/api/run-captures'))):
             logger.debug(f"请求体: {request.get_json(silent=True)}")
     
     @app.after_request
@@ -83,11 +83,12 @@ def create_app(config_class=Config):
         return response
     
     # 注册蓝图
-    from .api import graph_bp, simulation_bp, report_bp, runtime_bp
+    from .api import graph_bp, simulation_bp, report_bp, runtime_bp, run_captures_bp
     app.register_blueprint(graph_bp, url_prefix='/api/graph')
     app.register_blueprint(simulation_bp, url_prefix='/api/simulation')
     app.register_blueprint(report_bp, url_prefix='/api/report')
     app.register_blueprint(runtime_bp, url_prefix='/api/runtime')
+    app.register_blueprint(run_captures_bp, url_prefix='/api/run-captures')
     
     # 健康检查
     @app.route('/health')

@@ -15,6 +15,7 @@
       <div class="section-line"></div>
       <span class="section-title">{{ $t('history.title') }}</span>
       <button type="button" class="history-compare-btn" data-testid="history-compare" @click="goToComparison()">{{ $t('comparison.historyEntry') }}</button>
+      <button type="button" class="history-compare-btn" data-testid="history-captures" @click="goToCaptures()">{{ $t('runCaptures.historyEntry') }}</button>
       <div class="section-line"></div>
     </div>
 
@@ -181,6 +182,7 @@
               </button>
             </div>
             <div class="comparison-entry">
+              <button type="button" class="history-compare-btn" data-testid="history-captures-selected" @click="goToCaptures(selectedProject.simulation_id)">{{ $t('runCaptures.historySelectedEntry') }}</button>
               <button type="button" class="history-compare-btn" data-testid="history-saved-activity" @click="goToSavedActivity(selectedProject.simulation_id)">{{ $t('savedActivity.historyEntry') }}</button>
               <button type="button" class="history-compare-btn" data-testid="history-compare-selected" @click="goToComparison(selectedProject.simulation_id)">{{ $t('comparison.historySelectedEntry') }}</button>
             </div>
@@ -416,6 +418,11 @@ const closeModal = () => {
 
 const goToSavedActivity = (simulationId) => {
   router.push({ name: 'SavedActivity', params: { simulationId } })
+  closeModal()
+}
+
+const goToCaptures = (simulationId) => {
+  router.push({ name: 'RunCaptures', query: simulationId ? { simulation: simulationId } : {} })
   closeModal()
 }
 
