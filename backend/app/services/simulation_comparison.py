@@ -214,10 +214,10 @@ def _invalid(observations, platform):
         observations["unknown_invalid"] += 1
 
 
-def _read_log(path, platform):
+def _read_log(path, platform, *, on_action=None):
     """Read once, returning bounded observations or refusing the whole source."""
     observations = _observations()
-    records = total_bytes = 0
+    records = total_bytes = line_number = 0
     with _open_source(path) as stream:
         if os.fstat(stream.fileno()).st_size > MAX_LOG_BYTES:
             raise _SourceTooLarge()
@@ -225,6 +225,7 @@ def _read_log(path, platform):
             line = stream.readline(MAX_LINE_BYTES + 1)
             if not line:
                 break
+            line_number += 1
             total_bytes += len(line)
             if len(line) > MAX_LINE_BYTES or total_bytes > MAX_LOG_BYTES:
                 raise _SourceTooLarge()
@@ -266,10 +267,18 @@ def _read_log(path, platform):
             observations["types"][action_type] += 1
             if len(observations["types"]) > MAX_ACTION_TYPES:
                 raise _SourceTooLarge()
+            if on_action is not None:
+                on_action(row, row_platform, line_number)
     return observations
 
 
-def _summary(paths, simulation_id, before):
+def _summary(paths, simulation_id, before, *, collector=None):
+    """Apply saved-source admission, optionally collecting admitted action pages.
+
+    A collector stages each source independently: a late read/limit failure must
+    discard its rows and cursor contribution. Global type refusal clears every
+    source. The ordinary comparison path does not create or retain payloads.
+    """
     summary, enabled = _context(paths, simulation_id, before)
     status = summary["status"]
     if status in _ACTIVE:
@@ -295,13 +304,20 @@ def _summary(paths, simulation_id, before):
     for source in selected:
         platform = source if source in _PLATFORMS else None
         warning_scope = {"platform": platform} if platform else {}
+        if collector is not None:
+            collector.begin(source)
         try:
-            observations = _read_log(paths[source], platform)
+            observations = (_read_log(paths[source], platform) if collector is None else
+                            _read_log(paths[source], platform, on_action=collector.collect))
         except (OSError, _SourceUnreadable):
+            if collector is not None:
+                collector.discard()
             summary["warnings"].append({"code": "source_unreadable", **warning_scope})
             global_partial = True
             continue
         except _SourceTooLarge:
+            if collector is not None:
+                collector.discard()
             summary["warnings"].append({"code": "source_too_large", **warning_scope})
             global_partial = True
             continue
@@ -311,7 +327,11 @@ def _summary(paths, simulation_id, before):
             # This is a per-side response budget, including both platforms.
             summary["warnings"].append({"code": "source_too_large"})
             summary["metrics"] = _unavailable_metrics()
+            if collector is not None:
+                collector.clear()
             return summary
+        if collector is not None:
+            collector.commit()
         rounds.update(observations["rounds"])
         covered = [platform] if platform else [
             name for name in _PLATFORMS

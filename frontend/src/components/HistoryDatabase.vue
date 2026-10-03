@@ -181,6 +181,7 @@
               </button>
             </div>
             <div class="comparison-entry">
+              <button type="button" class="history-compare-btn" data-testid="history-saved-activity" @click="goToSavedActivity(selectedProject.simulation_id)">{{ $t('savedActivity.historyEntry') }}</button>
               <button type="button" class="history-compare-btn" data-testid="history-compare-selected" @click="goToComparison(selectedProject.simulation_id)">{{ $t('comparison.historySelectedEntry') }}</button>
             </div>
             <!-- 不可回放提示 -->
@@ -413,6 +414,11 @@ const closeModal = () => {
   selectedProject.value = null
 }
 
+const goToSavedActivity = (simulationId) => {
+  router.push({ name: 'SavedActivity', params: { simulationId } })
+  closeModal()
+}
+
 const goToComparison = (simulationId) => {
   router.push({ name: 'SimulationComparison', query: simulationId ? { left: simulationId } : {} })
   closeModal()
@@ -589,7 +595,8 @@ onUnmounted(() => {
 .history-compare-btn { cursor: pointer; border: 1px solid #cbd1d9; border-radius: 6px; padding: 9px 14px; background: #fff; color: #354153; font: inherit; font-size: 12px; white-space: nowrap; }
 .history-compare-btn:hover { background: #f1f4f8; }
 .history-compare-btn:focus-visible { outline: 3px solid #5b8bc9; outline-offset: 3px; }
-.comparison-entry { padding: 0 24px 8px; text-align: center; }
+.comparison-entry { display: flex; flex-wrap: wrap; justify-content: center; gap: 10px; padding: 0 24px 8px; text-align: center; }
+.comparison-entry .history-compare-btn { min-height: 44px; white-space: normal; }
 @media (max-width: 600px) {
   .history-database .section-header { flex-wrap: wrap; gap: 14px; padding: 0 20px; }
   .section-header .section-line { display: none; }

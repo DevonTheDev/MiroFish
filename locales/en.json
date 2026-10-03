@@ -75,7 +75,13 @@
     "layoutGraph": "Graph",
     "layoutSplit": "Split",
     "layoutWorkbench": "Workbench",
-    "stepNames": ["Graph Build", "Env Setup", "Run Simulation", "Report Generation", "Deep Interaction"]
+    "stepNames": [
+      "Graph Build",
+      "Env Setup",
+      "Run Simulation",
+      "Report Generation",
+      "Deep Interaction"
+    ]
   },
   "step1": {
     "ontologyGeneration": "Ontology Generation",
@@ -766,6 +772,71 @@
       "source_too_large": "A saved action source exceeds the supported reading limits. Its observations are unavailable.",
       "no_action_logs": "No saved action logs are available.",
       "generic": "Some saved data could not be fully verified."
+    }
+  },
+  "savedActivity": {
+    "title": "Saved activity",
+    "historyEntry": "Explore saved activity",
+    "scope": "Explore the latest saved run for this simulation ID. Restarting replaces its saved files; previous attempts are not archived here.",
+    "filtersTitle": "Filter saved action attempts",
+    "platform": "Platform",
+    "allPlatforms": "All platforms",
+    "agentId": "Exact agent ID",
+    "round": "Exact round",
+    "actionType": "Exact action type",
+    "pageSize": "Page size",
+    "any": "Any",
+    "filterNote": "Filters match exactly. Agent and round IDs are nonnegative whole numbers; zero is valid. Apply changes to read a page.",
+    "apply": "Apply filters",
+    "refresh": "Refresh latest saved files",
+    "download": "Download this page JSON",
+    "orderNote": "Saved source/file order: Twitter then Reddit, each in forward file order; legacy combined files keep their own file order. This is not a merged timestamp timeline.",
+    "attemptNote": "Each row is a recorded attempt, including failed and unknown outcomes. Identical attempts remain separate.",
+    "draftNote": "Filters have changed. Apply filters to read matching activity; the previous page is no longer displayed.",
+    "loading": "Reading saved activity…",
+    "resultsTitle": "Recorded saved action attempts",
+    "contextTitle": "Latest saved context",
+    "statusNote": "Saved status describes the files observed, not verified ownership of a live process.",
+    "observedAt": "Observed at {time}",
+    "matchedCount": "Matching recorded attempts: {count}",
+    "pagePosition": "Page offset {offset} · {count} displayed",
+    "partialNote": "Partial counts cover only readable, valid observations. An em dash means unavailable, not zero. Downloads contain only this displayed page.",
+    "tableCaption": "Saved action attempts in source/file order",
+    "details": "View saved JSON",
+    "unavailable": "Saved observations are unavailable for this selection. Refresh when saved files are available.",
+    "noMatches": "No matching recorded attempts in the readable saved sources.",
+    "outOfRange": "This page is beyond the matching recorded attempts. Return to the first page.",
+    "pagination": "Saved activity pages",
+    "first": "First page",
+    "previous": "Previous",
+    "next": "Next",
+    "columns": {
+      "platform": "Platform",
+      "round": "Round",
+      "agent": "Agent ID / saved name",
+      "actionType": "Action type",
+      "timestamp": "Saved timestamp",
+      "outcome": "Saved outcome",
+      "details": "Literal details"
+    },
+    "outcomes": {
+      "success": "Succeeded",
+      "failed": "Failed",
+      "unknown": "Unknown"
+    },
+    "errors": {
+      "generic": "Saved activity could not be loaded. Apply filters or Refresh to try again.",
+      "invalid_selection": "The URL contains an invalid saved selection. Use one simulation ID and one value for each supported filter.",
+      "invalid_filters": "Enter a supported platform, up to 64 decimal digits for agent and round IDs, and a nonblank action type up to 256 characters without control or line-break characters.",
+      "invalid_pagination": "Use a page size from 1 to 100 and an offset from 0 to 500000. Apply filters to start at the first page.",
+      "invalid_revision": "The saved revision in this URL is invalid. Refresh to read the latest saved files.",
+      "revision_required": "This page needs its saved revision. Refresh to start from the first page.",
+      "unsafe_path": "This saved record cannot be safely read. Return to history and choose another simulation.",
+      "simulation_not_found": "This saved simulation no longer exists. Return to history and choose another simulation.",
+      "simulation_unreadable": "This saved simulation record could not be read. Refresh to try again.",
+      "simulation_active": "The saved run is marked active. Wait until it has stopped, then Refresh.",
+      "sources_changed": "The saved files changed. Refresh to read the latest files from the first page.",
+      "response_too_large": "This page is too large to return safely. Choose a smaller page size, including 1, then Apply filters."
     }
   }
 }

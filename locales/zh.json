@@ -75,7 +75,13 @@
     "layoutGraph": "图谱",
     "layoutSplit": "双栏",
     "layoutWorkbench": "工作台",
-    "stepNames": ["图谱构建", "环境搭建", "开始模拟", "报告生成", "深度互动"]
+    "stepNames": [
+      "图谱构建",
+      "环境搭建",
+      "开始模拟",
+      "报告生成",
+      "深度互动"
+    ]
   },
   "step1": {
     "ontologyGeneration": "本体生成",
@@ -766,6 +772,71 @@
       "source_too_large": "保存的动作数据源超出支持的读取限制，其观测不可用。",
       "no_action_logs": "没有可用的保存动作日志。",
       "generic": "部分保存数据无法完整核实。"
+    }
+  },
+  "savedActivity": {
+    "title": "已保存活动",
+    "historyEntry": "查看已保存活动",
+    "scope": "查看此模拟 ID 最新一次已保存运行。重新启动会替换已保存文件；此处不保留之前的运行记录。",
+    "filtersTitle": "筛选已保存的动作尝试",
+    "platform": "平台",
+    "allPlatforms": "全部平台",
+    "agentId": "精确 Agent ID",
+    "round": "精确轮次",
+    "actionType": "精确动作类型",
+    "pageSize": "每页条数",
+    "any": "不限",
+    "filterNote": "筛选条件按精确值匹配。Agent ID 和轮次必须为非负整数，支持零。应用筛选后读取页面。",
+    "apply": "应用筛选",
+    "refresh": "刷新最新已保存文件",
+    "download": "下载本页 JSON",
+    "orderNote": "按已保存来源和文件顺序排列：先 Twitter，后 Reddit，各自按文件正序；旧版合并文件保留自身顺序。这不是合并后的时间线。",
+    "attemptNote": "每行均为已记录的动作尝试，包括失败和未知结果。完全相同的尝试仍分别保留。",
+    "draftNote": "筛选条件已修改。请应用筛选以读取匹配活动；之前的页面已清除。",
+    "loading": "正在读取已保存活动…",
+    "resultsTitle": "已保存的动作尝试",
+    "contextTitle": "最新已保存上下文",
+    "statusNote": "已保存状态仅描述观察到的文件，不能验证实时进程的归属或状态。",
+    "observedAt": "观察时间：{time}",
+    "matchedCount": "匹配的动作尝试：{count}",
+    "pagePosition": "页面偏移 {offset} · 显示 {count} 条",
+    "partialNote": "部分计数仅包含可读取的有效记录。破折号表示不可用，并非零。下载仅包含当前显示页面。",
+    "tableCaption": "按来源和文件顺序排列的已保存动作尝试",
+    "details": "查看已保存 JSON",
+    "unavailable": "当前选择的已保存记录不可用。保存文件可用后请刷新。",
+    "noMatches": "可读取的已保存来源中没有匹配的动作尝试。",
+    "outOfRange": "本页超出匹配的动作尝试范围。请返回第一页。",
+    "pagination": "已保存活动分页",
+    "first": "第一页",
+    "previous": "上一页",
+    "next": "下一页",
+    "columns": {
+      "platform": "平台",
+      "round": "轮次",
+      "agent": "Agent ID / 已保存名称",
+      "actionType": "动作类型",
+      "timestamp": "已保存时间戳",
+      "outcome": "已保存结果",
+      "details": "原始详情"
+    },
+    "outcomes": {
+      "success": "成功",
+      "failed": "失败",
+      "unknown": "未知"
+    },
+    "errors": {
+      "generic": "无法加载已保存活动。请应用筛选或刷新重试。",
+      "invalid_selection": "URL 中的已保存选择无效。请使用一个模拟 ID，每个支持的筛选条件只能有一个值。",
+      "invalid_filters": "请选择支持的平台，Agent ID 和轮次最多为 64 位十进制数字；动作类型须为最多 256 个字符的非空文本，不能含控制符或换行符。",
+      "invalid_pagination": "每页条数须为 1 至 100，偏移须为 0 至 500000。应用筛选可返回第一页。",
+      "invalid_revision": "此 URL 中的已保存版本无效。请刷新以读取最新已保存文件。",
+      "revision_required": "此页需要对应的已保存版本。请刷新并从第一页开始。",
+      "unsafe_path": "无法安全读取此已保存记录。请返回历史记录并选择其他模拟。",
+      "simulation_not_found": "此已保存模拟已不存在。请返回历史记录并选择其他模拟。",
+      "simulation_unreadable": "无法读取此已保存模拟记录。请刷新重试。",
+      "simulation_active": "已保存运行被标记为活动状态。请在停止后刷新。",
+      "sources_changed": "已保存文件发生变化。请刷新，从第一页读取最新文件。",
+      "response_too_large": "本页数据过大，无法安全返回。请选择更小的每页条数（支持 1 条），然后应用筛选。"
     }
   }
 }

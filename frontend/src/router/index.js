@@ -5,9 +5,15 @@ import SimulationView from '../views/SimulationView.vue'
 import SimulationRunView from '../views/SimulationRunView.vue'
 import ReportView from '../views/ReportView.vue'
 import InteractionView from '../views/InteractionView.vue'
+import SavedActivityView from '../views/SavedActivityView.vue'
 import SimulationComparisonView from '../views/SimulationComparisonView.vue'
 
 const routes = [
+  {
+    path: '/simulation/:simulationId/activity',
+    name: 'SavedActivity',
+    component: SavedActivityView
+  },
   {
     path: '/compare',
     name: 'SimulationComparison',

@@ -9,7 +9,7 @@ import sqlite3
 import traceback
 from pathlib import Path
 from contextlib import closing, nullcontext
-from flask import request, jsonify, send_file
+from flask import current_app, request, jsonify, send_file
 
 from . import simulation_bp
 from ..config import Config
@@ -22,6 +22,8 @@ from ..services.simulation_comparison import (
     compare_saved_simulations,
     list_comparison_candidates,
 )
+from ..services import saved_activity
+from ..services.saved_activity import read_saved_activity, parse_saved_activity_query
 from ..services.simulation_runner import (
     SimulationRunner,
     RunnerStatus,
@@ -953,6 +955,42 @@ def get_saved_simulation_comparison():
         return jsonify({
             "success": False, "error": "The saved simulation comparison could not be read.",
             "error_code": "comparison_unavailable",
+        }), 500
+
+
+@simulation_bp.route('/<simulation_id>/saved-actions', methods=['GET'])
+def get_saved_simulation_actions(simulation_id: str):
+    """Inspect bounded pages of saved attempts without consulting live services."""
+    try:
+        query = parse_saved_activity_query(request.args)
+        data = read_saved_activity(
+            SimulationManager.SIMULATION_DATA_DIR, SimulationRunner.RUN_STATE_DIR,
+            simulation_id, **query,
+        )
+        # Saved JSON can contain escaped lone surrogates. Preserve those literal
+        # values even when the application's normal JSON provider emits Unicode.
+        encoded = current_app.json.dumps(
+            {"success": True, "data": data}, ensure_ascii=True,
+            allow_nan=False, separators=(",", ":"),
+        )
+        response = current_app.response_class(encoded, mimetype="application/json")
+        if len(response.get_data()) > saved_activity.MAX_RESPONSE_BYTES:
+            raise saved_activity.response_too_large()
+        return response
+    except ComparisonError as error:
+        return jsonify({
+            "success": False, "error": str(error), "error_code": error.code,
+        }), error.status_code
+    except StoragePathError:
+        return jsonify({
+            "success": False, "error": "The saved storage path is not safe to read.",
+            "error_code": "unsafe_path",
+        }), 400
+    except Exception:
+        logger.exception("Could not read saved simulation actions")
+        return jsonify({
+            "success": False, "error": "The saved activity could not be read.",
+            "error_code": "activity_unavailable",
         }), 500
 
 

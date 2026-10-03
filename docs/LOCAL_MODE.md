@@ -10,6 +10,69 @@ PC's RAM, disk, compute and electricity. Small-model accuracy is not equivalent
 to a large hosted model. Generated simulations are exploratory, not validated
 forecasts or a basis for consequential decisions.
 
+## Explore latest saved activity
+
+In History, open a saved simulation and choose **Saved activity**. The dedicated
+route `/simulation/<id>/activity` reads its latest saved run without mounting the
+execution screen, restarting a simulation, preparing an environment, querying
+graphs or calling a model. The page is available in English and Chinese.
+
+1. Browse recorded attempts, including unsuccessful attempts. Expand a row to
+   read its parsed saved record as literal canonical JSON text. Unknown success
+   stays unknown. A missing round uses the existing round-zero default; the JSON
+   details preserve the original field's absence.
+2. Filter by platform, round number, agent ID or an exact action-type label, then
+   apply the filters. Round and agent zero are valid. Repeated identical records
+   remain separate attempts.
+3. Choose a page size and use First, Previous and Next. Rows follow the saved
+   file order: Twitter then Reddit, each in forward line order, or the legacy
+   combined file's order. Recorded timestamps are labels, not a merged chronology.
+4. Use **Download this page JSON** to save the exact displayed observation,
+   including filters, page/count metadata, source revision, warnings and rows.
+   It exports this page only, not every matching record. Numeric identifiers are
+   decimal strings; original JSON details remain text to preserve large integers.
+
+Applied filters, page and revision stay in the URL for reload and Back/Forward.
+Editing filters retires earlier rows and export controls. Pages remain tied to
+the observed files: if an append, replacement, removal or newly appearing source
+changes them, the page asks for **Refresh**. Refresh reads current files from the
+first page. A revision is an observation fingerprint, not a permanent run ID or
+archive; restarting the same simulation can replace its files.
+
+Availability is separate from the saved run status. Missing sources are
+unavailable, while readable empty files can establish zero matches. Malformed
+rows leave valid neighbors visible as partial observations. Counts describe valid
+matching rows from admitted sources; a source refused for a limit or read failure
+contributes neither rows nor pagination positions. Filtering an absent platform
+does not invent a complete zero. Modern logs take precedence over legacy leftovers.
+Saved active states return a conflict, and absent terminal evidence leaves action
+observations unavailable. Saved status does not verify current process ownership.
+
+The read-only API is `GET /api/simulation/<id>/saved-actions`, with optional
+`platform`, `agent_id`, `round_num`, `action_type`, `offset`, `limit` and `revision`.
+Repeated/unknown/invalid parameters are errors. Page size is 1–100 (default 50),
+offset is at most 500,000, decimal ID/round filters accept at most 64 digits, and an
+action-type filter accepts at most 256 characters. Later pages require the accepted
+revision. The existing live `/actions` endpoint retains its previous behavior.
+
+The saved-reader file/path and log budgets described below also apply here.
+Retained encoded action-page data is limited to 2 MiB and the JSON response to
+4 MiB. An oversized response is refused rather than truncated; choose a smaller
+page size, down to one, or narrow the filters. A single oversized record may
+still be too large for this view. File fingerprints detect ordinary concurrent changes,
+including changes during failed reads; they do not provide an atomic filesystem
+snapshot or protection from hostile local filesystem mutation. Full configuration
+and its credentials are excluded. Expanded records and downloads intentionally
+contain the saved action payloads you chose to inspect.
+
+Local tests cover actual log writers, file admission, filters, pagination,
+revision conflicts and current-page exports. A loopback integration runs the real
+Flask route, production Axios client and compiled Vue view, including a change
+between pages followed by Refresh. The Vue test renderer exercises scripts,
+templates and routing; native browser layout/download dialogs and Windows storage
+behavior remain separate platform checks. No model weights or paid services are
+used.
+
 ## Compare latest saved simulations
 
 Use **Compare simulations** in the homepage history section, or the comparison
