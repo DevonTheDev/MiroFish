@@ -45,8 +45,11 @@ Open **Runtime monitor** from Home to see loaded model settings, resource limits
 and the backend's shared gateway activity. Refresh manually, enable periodic
 refresh, or download the displayed observation as JSON. The monitor is passive:
 opening it does not start a gateway, call a model or connect to Neo4j. Gateway
-activity is separate from model readiness. See the
-[runtime monitor guide](docs/LOCAL_MODE.md#monitor-local-runtime-activity).
+activity is separate from model readiness. Explicitly choose **Run local setup
+check** to test the database and required model capabilities with small synthetic
+requests, inspect step results, stop remaining checks, or download the result.
+See the [local setup check guide](docs/LOCAL_MODE.md#check-local-setup-in-the-app)
+and [runtime monitor guide](docs/LOCAL_MODE.md#monitor-local-runtime-activity).
 
 ## Explore saved activity
 

@@ -2,6 +2,14 @@ import service from './index'
 
 export const getRuntimeStatus = (signal) => service.get('/api/runtime/status', { signal })
 
+// Aborting observation does not cancel an accepted backend check.
+export const getLocalReadiness = (signal) => service.get('/api/runtime/readiness', { signal, timeout: 15000 })
+export const startLocalReadiness = (signal) => service.post('/api/runtime/readiness', {}, { signal, timeout: 15000 })
+export const cancelLocalReadiness = (runId, signal) => {
+  if (!readinessUuid(runId)) return invalid()
+  return service.post(`/api/runtime/readiness/${runId}/cancel`, {}, { signal, timeout: 15000 })
+}
+
 const states = ['disabled', 'inherited', 'not_running', 'transitioning', 'starting', 'running', 'closing', 'closed', 'failed']
 const limitFields = ['max_concurrency', 'max_queue', 'request_timeout', 'max_output_tokens', 'max_input_chars']
 const integerFields = ['embedding_dimensions', 'context_tokens', 'max_agents', 'max_rounds', 'max_agent_iterations']
@@ -90,4 +98,58 @@ export function acceptRuntimeSnapshot(envelope) {
       uptime_seconds: unobserved ? null : number(source.uptime_seconds, 0, false),
       limits: unobserved ? null : limits(source.limits), metrics },
   }
+}
+
+export const readinessStepIds = ['configuration', 'dependencies', 'database', 'gateway', 'json_output', 'json_schema', 'tool_call', 'embedding', 'cleanup']
+const readinessStates = ['running', 'stopping', 'passed', 'failed', 'cancelled', 'timed_out']
+const readinessStepStates = ['pending', 'running', 'passed', 'failed', 'timed_out', 'skipped']
+const readinessCodes = ['ok', 'invalid_configuration', 'dependency_unavailable', 'database_unavailable', 'invalid_database_response', 'gateway_unavailable', 'gateway_unsupported', 'gateway_busy', 'model_unavailable', 'capability_unsupported', 'embedding_invalid', 'step_timeout', 'budget_exhausted', 'prerequisite_failed', 'stopped', 'cleanup_failed', 'internal_failure']
+const readinessUnavailable = ['local_mode_required', 'backend_closing', 'cleanup_failed', 'inherited_process']
+const readinessBudget = { overall_ms: 300000, model_step_ms: 60000, database_step_ms: 10000, gateway_step_ms: 5000, cleanup_ms: 10000 }
+const readinessUuid = value => typeof value === 'string' && /^[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}$/.test(value)
+const requiredNumber = (value, minimum = 0) => value === null ? invalid() : number(value, minimum)
+
+// The UI and download share a detached, fixed-shape projection. Unknown fields
+// (including credentials, prompts and raw errors) are never retained.
+export function acceptReadinessSnapshot(envelope) {
+  const data = envelope?.data
+  if (envelope?.success !== true || !object(data) || data.schema_version !== 1 ||
+    data.kind !== 'mirofish_local_readiness' || !['local', 'cloud'].includes(data.mode) ||
+    typeof data.available !== 'boolean' || !(data.unavailable_code === null || readinessUnavailable.includes(data.unavailable_code))) return invalid()
+  const observedAt = timestamp(data.observed_at)
+  if (!observedAt || data.available !== (data.unavailable_code === null) ||
+    (data.mode === 'cloud' && (data.available || data.unavailable_code !== 'local_mode_required' || data.run !== null))) return invalid()
+  let run = null
+  if (data.run !== null) {
+    const source = data.run
+    if (!object(source) || !readinessUuid(source.id) || !readinessStates.includes(source.state) ||
+      typeof source.cancel_requested !== 'boolean' || !object(source.configuration) || !object(source.budget) ||
+      !(source.current_step === null || readinessStepIds.includes(source.current_step)) ||
+      !Array.isArray(source.steps) || source.steps.length !== readinessStepIds.length) return invalid()
+    const active = ['running', 'stopping'].includes(source.state)
+    const startedAt = timestamp(source.started_at), finishedAt = timestamp(source.finished_at)
+    if (!startedAt || (active ? finishedAt !== null : finishedAt === null || source.current_step !== null) ||
+      (finishedAt !== null && Date.parse(finishedAt) < Date.parse(startedAt)) ||
+      (source.state === 'stopping' && !source.cancel_requested)) return invalid()
+    const budget = Object.fromEntries(Object.entries(readinessBudget).map(([key, maximum]) => {
+      const value = requiredNumber(source.budget[key], 1)
+      if (value > maximum) return invalid()
+      return [key, value]
+    }))
+    const configuration = { chat_model: text(source.configuration.chat_model), embedding_model: text(source.configuration.embedding_model),
+      embedding_dimensions: number(source.configuration.embedding_dimensions, 1) }
+    if (['chat_model', 'embedding_model'].some(key => /(?::|-)(?:cloud)$/i.test(configuration[key] ?? ''))) return invalid()
+    const steps = source.steps.map((step, index) => {
+      if (!object(step) || step.id !== readinessStepIds[index] || !readinessStepStates.includes(step.state) ||
+        !(step.code === null || readinessCodes.includes(step.code)) ||
+        (!active && ['pending', 'running'].includes(step.state)) ||
+        (source.state === 'passed' && (step.state !== 'passed' || step.code !== 'ok'))) return invalid()
+      return { id: step.id, state: step.state, code: step.code, duration_ms: number(step.duration_ms) }
+    })
+    run = { id: source.id, state: source.state, started_at: startedAt, finished_at: finishedAt,
+      elapsed_ms: requiredNumber(source.elapsed_ms), current_step: source.current_step, budget, configuration,
+      cancel_requested: source.cancel_requested, steps }
+  }
+  return { schema_version: 1, kind: 'mirofish_local_readiness', observed_at: observedAt, mode: data.mode,
+    available: data.available, unavailable_code: data.unavailable_code, run }
 }

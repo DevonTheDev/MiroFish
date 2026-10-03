@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import asyncio
 import concurrent.futures
+from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from http.cookiejar import CookieJar, DefaultCookiePolicy
@@ -33,6 +34,35 @@ import httpx
 MAX_REQUEST_BYTES = 1024 * 1024
 MAX_RESPONSE_BYTES = 8 * 1024 * 1024
 MAX_SAFE_INTEGER = 2**53 - 1
+DEADLINE_CAP_HEADER = "X-MiroFish-Timeout-Ms"
+
+
+class GatewayStartupCleanupError(RuntimeError):
+    """A failed shared startup still owns resources and cannot be replaced."""
+
+
+def _startup_timeout(deadline_monotonic, maximum=5.0):
+    if deadline_monotonic is None:
+        return maximum
+    if type(deadline_monotonic) not in (int, float) or not math.isfinite(deadline_monotonic):
+        raise ValueError("Local gateway startup deadline must be finite")
+    remaining = deadline_monotonic - time.monotonic()
+    if remaining <= 0:
+        raise TimeoutError("Local gateway startup deadline expired")
+    return remaining if maximum is None else min(maximum, remaining)
+
+
+@contextmanager
+def _startup_lock(lock, deadline_monotonic):
+    if deadline_monotonic is None:
+        lock.acquire()
+    elif not lock.acquire(timeout=_startup_timeout(deadline_monotonic, None)):
+        raise TimeoutError("Local gateway startup deadline expired")
+    try:
+        _startup_timeout(deadline_monotonic)
+        yield
+    finally:
+        lock.release()
 
 
 def unavailable_gateway_snapshot(state):
@@ -263,8 +293,9 @@ class _Handler(BaseHTTPRequestHandler):
     protocol_version = "HTTP/1.0"  # One request per admitted socket; no keepalive bypass.
 
     def setup(self):
+        self.connection_started_at = time.monotonic()
         super().setup()
-        self.deadline = time.monotonic() + self.server.gateway.settings.request_timeout
+        self.deadline = self.connection_started_at + self.server.gateway.settings.request_timeout
         self.connection.settimeout(self.server.gateway.settings.request_timeout)
         # A drip-fed request line/header cannot hold a worker indefinitely.
         self.header_timer = threading.Timer(self.server.gateway.settings.request_timeout, self._expire_headers)
@@ -279,9 +310,39 @@ class _Handler(BaseHTTPRequestHandler):
 
     def parse_request(self):
         try:
-            return super().parse_request()
+            if not super().parse_request():
+                return False
+            try:
+                self._apply_deadline_cap()
+            except _GatewayError as exc:
+                self._reply(exc.status, _error_body(exc.message))
+                return False
+            return True
         finally:
             self.header_timer.cancel()
+
+    def _apply_deadline_cap(self):
+        """Shorten the existing lifetime once the full HTTP headers are known.
+
+        Until parsing finishes only the configured header deadline is available.
+        A cap includes time already spent receiving headers, so an expired cap
+        rejects immediately here, before receiving a body or scheduling a forward.
+        Incoming headers are never copied to the upstream client.
+        """
+        values = self.headers.get_all(DEADLINE_CAP_HEADER, [])
+        if not values:
+            return
+        if len(values) != 1 or not re.fullmatch(r"[0-9]+", values[0]):
+            raise _GatewayError(400, "Invalid local request deadline cap")
+        # Bound conversion too: extremely long digit strings must be safe 400s.
+        digits = values[0].lstrip("0")
+        if not digits or len(digits) > 7 or int(digits) > 3_600_000:
+            raise _GatewayError(400, "Invalid local request deadline cap")
+        self.deadline = min(self.deadline, self.connection_started_at + int(digits) / 1000)
+        remaining = self.deadline - time.monotonic()
+        if remaining <= 0:
+            raise _GatewayError(408, "Local request deadline expired")
+        self.connection.settimeout(remaining)
 
     def finish(self):
         self.header_timer.cancel()
@@ -370,14 +431,20 @@ class _Handler(BaseHTTPRequestHandler):
             if self.command != allowed[self.path]:
                 raise _GatewayError(405, "Unsupported method for local gateway endpoint")
             if self.path == "/health":
-                self._reply(200, b'{"status":"ok","service":"local-inference-gateway"}')
+                self._reply(200, json.dumps({
+                    "status": "ok", "service": "local-inference-gateway",
+                    "request_deadline_cap": DEADLINE_CAP_HEADER,
+                }).encode())
                 return
             gateway = self.server.gateway
             payload = _prepare_payload(self.path, self._read_payload(), gateway.settings) if self.command == "POST" else None
             remaining = self.deadline - time.monotonic()
             if remaining <= 0:
                 raise _GatewayError(408, "Request body timed out")
-            future = asyncio.run_coroutine_threadsafe(gateway._forward(self.path, payload, remaining), gateway._loop)
+            future = asyncio.run_coroutine_threadsafe(gateway._forward(
+                self.path, payload, remaining,
+                deadline=self.deadline if DEADLINE_CAP_HEADER in self.headers else None,
+            ), gateway._loop)
             try:
                 status, body = future.result(timeout=remaining + 0.25)
             except concurrent.futures.TimeoutError:
@@ -416,9 +483,14 @@ class LocalInferenceGateway:
         ), 0)
         self._closed = False
         self._server = None
+        self._server_thread = None
         self._loop = None
+        self._loop_thread = None
         self._client = None
         self._base_url = None
+        self._startup_failed = False
+        self._startup_cleanup_future = None
+        self._startup_cleanup_succeeded = False
 
     def _change_metrics(self, **changes):
         with self._metrics_lock:
@@ -486,44 +558,104 @@ class LocalInferenceGateway:
             timeout=self.settings.request_timeout,
         )
 
-    def start(self) -> str:
-        with self._lock:
+    def _run_loop(self):
+        # The existing I/O worker owns its loop even when a caller runs out of
+        # startup budget. Never close a loop that may still be running elsewhere.
+        try:
+            self._loop.run_forever()
+        finally:
+            self._loop.close()
+
+    @property
+    def startup_cleanup_complete(self):
+        if self._loop is None:
+            return True
+        return (self._startup_cleanup_succeeded and self._loop.is_closed()
+                and (self._loop_thread is None or not self._loop_thread.is_alive()))
+
+    async def _cleanup_failed_start(self):
+        try:
+            if self._server is not None:
+                # A failed Thread.start must not call shutdown on a listener
+                # whose serve_forever never ran: that would wait forever.
+                if self._server_thread is not None and self._server_thread.is_alive():
+                    self._server.shutdown()
+                self._server.server_close()
+                self._server.close_connections()
+        finally:
+            # Cancel and drain initialization before closing its client. Its
+            # cancellation finally block may allocate that client late.
+            await self._shutdown()
+        self._startup_cleanup_succeeded = True
+
+    def _wait_startup_cleanup(self, deadline_monotonic=None):
+        if self._startup_cleanup_future is not None:
+            self._startup_cleanup_future.result(timeout=_startup_timeout(deadline_monotonic))
+        if self._loop_thread is not None and self._loop_thread.ident is not None:
+            self._loop_thread.join(_startup_timeout(deadline_monotonic))
+            if self._loop_thread.is_alive():
+                raise TimeoutError("Local gateway startup cleanup did not finish")
+
+    def start(self, *, deadline_monotonic: float | None = None) -> str:
+        """Acquire/start within an optional absolute monotonic caller budget."""
+        if self._owner_pid != os.getpid():
+            raise RuntimeError("An inherited local inference gateway cannot be started")
+        with _startup_lock(self._lock, deadline_monotonic):
             if self._closed:
                 raise RuntimeError("A closed local inference gateway cannot be restarted")
+            if self._startup_failed:
+                raise GatewayStartupCleanupError("Local gateway startup cleanup requires a new owner")
             if self._server is not None:
+                if not self._loop_thread.is_alive() or not self._server_thread.is_alive():
+                    raise RuntimeError("Local inference gateway is not running")
                 return self._base_url
             self._set_state("starting")
             try:
                 self._loop = asyncio.new_event_loop()
-                self._loop_thread = threading.Thread(target=self._loop.run_forever, name="local-inference-io", daemon=True)
+                self._loop_thread = threading.Thread(target=self._run_loop, name="local-inference-io", daemon=True)
                 self._loop_thread.start()
-            except BaseException:
-                self._set_state("failed")
-                raise
-            try:
-                asyncio.run_coroutine_threadsafe(self._initialize(), self._loop).result(timeout=5)
+                asyncio.run_coroutine_threadsafe(self._initialize(), self._loop).result(
+                    timeout=_startup_timeout(deadline_monotonic))
+                _startup_timeout(deadline_monotonic)
                 self._server = _BoundedHTTPServer(self)
                 self._base_url = f"http://127.0.0.1:{self._server.server_port}/v1"
                 self._server_thread = threading.Thread(target=self._server.serve_forever,
                                                        kwargs={"poll_interval": 0.05},
                                                        name="local-inference-http", daemon=True)
+                _startup_timeout(deadline_monotonic)
                 self._server_thread.start()
             except BaseException:
+                self._startup_failed = True
                 self._set_state("failed")
-                if self._client is not None:
-                    asyncio.run_coroutine_threadsafe(self._client.aclose(), self._loop).result(timeout=5)
-                self._loop.call_soon_threadsafe(self._loop.stop)
-                self._loop_thread.join(5)
-                self._loop.close()
+                if self._loop_thread is not None and self._loop_thread.is_alive():
+                    self._startup_cleanup_future = asyncio.run_coroutine_threadsafe(
+                        self._cleanup_failed_start(), self._loop)
+                    self._startup_cleanup_future.add_done_callback(
+                        lambda _future: self._loop.call_soon_threadsafe(self._loop.stop))
+                    try:
+                        self._wait_startup_cleanup(deadline_monotonic)
+                    except BaseException:
+                        # Preserve the start error; retain ownership and the
+                        # cleanup future for shutdown or the next acquisition.
+                        pass
+                elif self._loop is not None:
+                    self._loop.close()
+                    self._startup_cleanup_succeeded = True
                 raise
             self._set_state("running")
             return self._base_url
 
-    async def _forward(self, path, payload, remaining):
+    async def _forward(self, path, payload, remaining, *, deadline=None):
         self._change_metrics(started_requests=1, queued_requests=1)
         active = False
         outcome = "failed_requests"
         try:
+            if deadline is not None:
+                # Thread-to-event-loop scheduling must not restart a cap's
+                # lifetime or allow an already expired probe to reach a model.
+                remaining = min(remaining, deadline - time.monotonic())
+                if remaining <= 0:
+                    raise TimeoutError
             base = self.settings.embedding_base_url if path == "/v1/embeddings" else self.settings.llm_base_url
             url = base.rstrip("/") + ("/v1" if not urlsplit(base).path else "") + path.removeprefix("/v1")
             async with asyncio.timeout(remaining):
@@ -570,11 +702,24 @@ class LocalInferenceGateway:
             task.cancel()
         if tasks:
             await asyncio.gather(*tasks, return_exceptions=True)
-        await self._client.aclose()
+        if self._client is not None:
+            await self._client.aclose()
 
     def close(self):
+        if self._owner_pid != os.getpid():
+            return
         with self._lock:
             if self._closed:
+                return
+            if self._startup_failed:
+                try:
+                    self._wait_startup_cleanup()
+                except BaseException:
+                    raise GatewayStartupCleanupError("Local gateway startup cleanup did not finish") from None
+                if not self.startup_cleanup_complete:
+                    raise GatewayStartupCleanupError("Local gateway startup cleanup did not finish")
+                self._closed = True
+                self._set_state("closed")
                 return
             self._closed = True
             self._set_state("closing")

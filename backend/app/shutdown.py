@@ -5,7 +5,7 @@ import threading
 from typing import Callable
 
 
-_PHASES = ("simulations", "memory", "gateway")
+_PHASES = ("readiness", "simulations", "memory", "gateway")
 _callbacks: dict[str, list[Callable[[], None]]] = {phase: [] for phase in _PHASES}
 _registration_lock = threading.Lock()
 _registered = False

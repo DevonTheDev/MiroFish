@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import { readFileSync } from 'node:fs'
+import { readFileSync, existsSync } from 'node:fs'
 import vm from 'node:vm'
 import { parse as parseJavaScript } from '@babel/parser'
 import { parse, compileScript, compileTemplate } from '@vue/compiler-sfc'
@@ -60,7 +60,7 @@ function renderer() {
   return { host, root, body }
 }
 
-export async function mountRuntime({ api, initialPath = '/runtime', locale = 'en', timers = fakeTimers() } = {}) {
+export async function mountRuntime({ api, initialPath = '/runtime', locale = 'en', timers = fakeTimers(), includeReadiness = false } = {}) {
   const requests = api ? null : deferredApi()
   api = { ...runtimeApi(), ...(api ?? requests.api) }
   const warnings = [], downloads = [], revokedUrls = []
@@ -112,6 +112,9 @@ export async function mountRuntime({ api, initialPath = '/runtime', locale = 'en
     const value = evaluate(script.content)
     value.render = evaluate(template.code, 'render')
     return value
+  }
+  if (includeReadiness && existsSync(new URL('../../src/components/LocalReadinessPanel.vue', import.meta.url))) {
+    components['../components/LocalReadinessPanel.vue'] = component('components/LocalReadinessPanel.vue')
   }
   components['../views/RuntimeStatusView.vue'] = component('views/RuntimeStatusView.vue')
   components['../views/Home.vue'] = component('views/Home.vue')

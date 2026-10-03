@@ -89,7 +89,8 @@ Neo4j, construct memory, change settings, download anything or run the doctor.
 `not_running` is a normal lazy-start state. A running gateway means its transport
 has started; it does not prove that the model server or database is reachable,
 that a model supports required capabilities, or that a simulation will succeed.
-Use the explicit doctor command in the setup instructions for capability checks.
+Use **Run local setup check** below, or the explicit doctor command in the setup
+instructions, for capability checks.
 
 The monitor separates three kinds of activity:
 
@@ -139,6 +140,75 @@ whether an arbitrary model server delegates work remotely. Keep the model
 server's own local-only settings described below. Local tests use synthetic
 loopback traffic, real Flask/Axios and compiled Vue views. They do not establish
 model quality, GPU performance, native browser layout or Windows behavior.
+
+## Check local setup in the app
+
+Open **Runtime monitor** and use **Run local setup check**. Opening the page or
+refreshing either observation does not start diagnostics. This explicit action
+checks the currently loaded configuration and installed dependencies, performs a
+read-only Neo4j `RETURN 1`, and sends four small synthetic requests through the
+same inference gateway used by simulations: JSON output, JSON-schema output,
+tool-call formatting, and an embedding with the configured dimensions. The tool
+call is inspected as data; no tool is executed.
+
+The check can start the backend's shared gateway and cause an already-installed
+model to load and use local CPU/GPU resources. It does not install models,
+construct graph memory, add graph data, change settings, or close the shared
+gateway. There is one active check per backend process, with no queue of checks.
+The page shows each step and retains the latest result until another check
+starts or the backend restarts. Cloud mode disables this feature.
+
+**Stop remaining checks** prevents later probes from starting. An active probe
+keeps its existing deadline, then the check closes only its own database and
+HTTP clients. The page can therefore show **Stopping** before **Cancelled**.
+Leaving the page cancels browser observation, while the bounded backend check
+continues. Neither browser cancellation nor a transport timeout proves that an
+upstream model server has stopped computing. A lost Start response is reconciled
+by reading the current check, without automatically submitting another Start.
+
+The default overall probe budget is five minutes: each model probe has at most
+60 seconds, the database step 10 seconds, and gateway health five seconds. An
+individual probe also uses the remaining overall budget. Owned-client cleanup
+has a separate allowance of up to 10 seconds. These are cooperative application
+deadlines, with ordinary scheduling and cleanup overhead, not a hard real-time
+execution guarantee. A busy shared inference queue consumes the same probe
+budget. The gateway's own configured deadline remains an upper limit.
+
+The check requires the gateway's shorter-deadline capability marker. An inherited
+older gateway is reported as unsupported before model probes; restart/update its
+owning backend. The cap becomes knowable only after complete HTTP headers; an
+already-expired cap is then rejected before the body is read or forwarded.
+Malformed, duplicated, or lengthening timeout values cannot expand the gateway's
+configured request lifetime. The timeout header is never sent upstream.
+
+A passed result means these synthetic capabilities worked at the recorded time.
+It does not establish model quality, GPU capacity, useful simulation output, or
+that every future prompt/schema will work. Database failure can coexist with
+successful model checks, and one failed model capability does not suppress all
+remaining diagnostics. A timeout is distinct from an unsupported response.
+If owned-client cleanup cannot be confirmed, further checks are disabled until
+the backend restarts, avoiding repeated unconfirmed resource ownership.
+
+**Download check JSON** saves the accepted terminal result as
+`local_readiness_check.json`, without rerunning a probe. It includes fixed step
+states/codes, dates, budgets, and sanitized model names/dimensions. It excludes
+model prompts/responses, vectors, API keys, database credentials/name, local
+paths, raw exception text, and package/model inventories. Keep the model
+server's own local-only settings below: loopback transport alone cannot prove
+that an arbitrary server never delegates inference elsewhere.
+
+The HTTP boundary is `GET /api/runtime/readiness`, `POST` to the same path to
+start, and `POST /api/runtime/readiness/<run_id>/cancel` to stop remaining checks.
+Both actions require an empty JSON object. These endpoints reject query
+parameters, caller-supplied prompts/settings/budgets, and noncanonical run IDs,
+and send `Cache-Control: no-store`. This is the existing single-user local app,
+not a multi-user authentication or remote administration interface.
+
+Local verification uses actual async SDK requests through the gateway with
+synthetic loopback responses, a disposable Neo4j database, and actual
+Flask/Axios/compiled-Vue interactions. It does not use pretrained model weights,
+user documents, paid services, or hosted tests. Native browser layout and Windows
+behavior remain unverified.
 
 ## Explore latest saved activity
 

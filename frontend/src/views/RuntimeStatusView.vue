@@ -10,6 +10,7 @@
         <h1>{{ t('runtime.title') }}</h1>
         <p>{{ t('runtime.scope') }}</p>
       </header>
+      <LocalReadinessPanel />
       <section class="toolbar" :aria-label="t('runtime.observationControls')">
         <button type="button" class="primary" data-testid="refresh" :disabled="loading" @click="refresh">{{ t('runtime.refresh') }}</button>
         <label class="auto-control"><input type="checkbox" data-testid="auto-refresh" :checked="autoRefresh" @change="setAutoRefresh($event.target.checked)">{{ t('runtime.autoRefresh') }}</label>
@@ -85,6 +86,7 @@ import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { RouterLink } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import LanguageSwitcher from '../components/LanguageSwitcher.vue'
+import LocalReadinessPanel from '../components/LocalReadinessPanel.vue'
 import { acceptRuntimeSnapshot, getRuntimeStatus } from '../api/runtime'
 
 const { t, locale } = useI18n()

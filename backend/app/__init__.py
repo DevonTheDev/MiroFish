@@ -44,6 +44,8 @@ def create_app(config_class=Config):
         from .local_runtime import configure_local_environment
         from .local_runtime.gateway import validate_loopback_url
         configure_local_environment()
+        from .local_runtime.readiness import register_readiness_shutdown
+        register_readiness_shutdown()
 
         @app.before_request
         def require_local_browser():
@@ -70,7 +72,8 @@ def create_app(config_class=Config):
     def log_request():
         logger = get_logger('mirofish.request')
         logger.debug(f"请求: {request.method} {request.path}")
-        if request.content_type and 'json' in request.content_type:
+        if (request.content_type and 'json' in request.content_type
+                and not request.path.startswith('/api/runtime/readiness')):
             logger.debug(f"请求体: {request.get_json(silent=True)}")
     
     @app.after_request

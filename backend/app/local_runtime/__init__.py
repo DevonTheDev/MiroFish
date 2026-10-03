@@ -14,6 +14,7 @@ from ..shutdown import register_shutdown_callback
 
 _GATEWAY_ENV = "MIROFISH_LOCAL_GATEWAY_URL"
 _gateway = None
+_gateway_starting = None
 _gateway_lock = threading.Lock()
 
 
@@ -27,13 +28,13 @@ def get_local_gateway_snapshot() -> dict:
         return unavailable_gateway_snapshot("inherited")
     # An inherited owner has no live serving threads in this process. Its
     # module lock may also have been copied while locked in another thread.
-    owner = _gateway
+    owner = _gateway or _gateway_starting
     if owner is not None and owner._owner_pid != os.getpid():
         return unavailable_gateway_snapshot("inherited")
     if not _gateway_lock.acquire(blocking=False):
         return unavailable_gateway_snapshot("transitioning")
     try:
-        owner = _gateway
+        owner = _gateway or _gateway_starting
     finally:
         _gateway_lock.release()
     return unavailable_gateway_snapshot("not_running") if owner is None else owner.snapshot()
@@ -70,12 +71,21 @@ def configure_local_environment() -> None:
         os.environ.pop(name, None)
 
 
-def get_local_gateway_url() -> str:
-    """Get this app's single bounded gateway, or the inherited parent gateway."""
-    global _gateway
+def get_local_gateway_url(*, deadline_monotonic: float | None = None) -> str:
+    """Get the shared gateway within an optional absolute monotonic deadline.
+
+    Failed partial starts remain owned for shutdown. No later caller can create
+    another worker until their cleanup has been confirmed.
+    """
+    global _gateway, _gateway_starting
     if not Config.LOCAL_MODE:
         raise ValueError("Local gateway requires MEMORY_BACKEND=local")
-    from .gateway import GatewaySettings, LocalInferenceGateway, validate_loopback_url
+    from .gateway import (
+        GatewaySettings, GatewayStartupCleanupError, LocalInferenceGateway,
+        _startup_lock, _startup_timeout, validate_loopback_url,
+    )
+
+    _startup_timeout(deadline_monotonic)
 
     # Child processes must reject their own invalid limits too, even when
     # they share an already-running gateway owned by the parent.
@@ -85,10 +95,17 @@ def get_local_gateway_url() -> str:
     inherited = os.environ.get(_GATEWAY_ENV)
     if inherited:
         return validate_loopback_url(inherited)
-    with _gateway_lock:
+    owner = _gateway or _gateway_starting
+    if owner is not None and getattr(owner, "_owner_pid", os.getpid()) != os.getpid():
+        raise RuntimeError("An inherited local inference gateway cannot be started")
+    with _startup_lock(_gateway_lock, deadline_monotonic):
         if _gateway is None:
+            if _gateway_starting is not None:
+                if not _gateway_starting.startup_cleanup_complete:
+                    raise GatewayStartupCleanupError("Local gateway startup cleanup did not finish")
+                _gateway_starting = None
             configure_local_environment()
-            _gateway = LocalInferenceGateway(
+            owner = LocalInferenceGateway(
                 GatewaySettings(
                     llm_base_url=Config.LLM_BASE_URL,
                     embedding_base_url=Config.LOCAL_EMBEDDING_BASE_URL,
@@ -100,18 +117,29 @@ def get_local_gateway_url() -> str:
                     reasoning_effort=Config.LOCAL_REASONING_EFFORT,
                 )
             )
-            _gateway.start()
+            # Register before any workers start, including partial failures.
             register_shutdown_callback("gateway", close_local_gateway)
-        return _gateway.start()
+            _gateway_starting = owner
+            url = owner.start() if deadline_monotonic is None else owner.start(deadline_monotonic=deadline_monotonic)
+            _gateway = owner
+            _gateway_starting = None
+            return url
+        return _gateway.start() if deadline_monotonic is None else _gateway.start(deadline_monotonic=deadline_monotonic)
 
 
 def close_local_gateway() -> None:
     """Release only a gateway owned by this process, never the parent's one."""
-    global _gateway
+    global _gateway, _gateway_starting
+    owner = _gateway or _gateway_starting
+    if owner is not None and getattr(owner, "_owner_pid", os.getpid()) != os.getpid():
+        return
     with _gateway_lock:
         if _gateway is not None:
             _gateway.close()
             _gateway = None
+        if _gateway_starting is not None:
+            _gateway_starting.close()
+            _gateway_starting = None
 
 
 def child_environment() -> dict[str, str]:

@@ -1047,5 +1047,97 @@
       "library_unavailable": "已保存报告库暂不可用，请重试刷新。",
       "generic": "无法读取已保存报告，请重试刷新。"
     }
+  },
+  "readiness": {
+    "title": "检查本地设置",
+    "scope": "使用固定的合成提示词和只读数据库查询执行小型检查。这可能启动共享网关、加载已安装的模型并使用本地计算资源。",
+    "limits": "不会下载模型或写入图数据。通过只说明显示时间点的能力检查成功，不代表速度、模型质量或完整模拟已验证。",
+    "start": "运行本地设置检查",
+    "refresh": "刷新检查",
+    "stop": "停止后续检查",
+    "download": "下载检查结果",
+    "sending": "正在发送请求…",
+    "loading": "正在读取最新检查…",
+    "error": "无法读取有效的检查结果。后端可能仍在工作，请刷新以再次查看。",
+    "exportError": "无法下载此结果，请重试。",
+    "idle": "此后端尚无检查记录。刷新只会读取当前状态。",
+    "observedAt": "最近观测时间（UTC）：",
+    "startedAt": "开始时间（UTC）",
+    "finishedAt": "结束时间（UTC）",
+    "elapsed": "已用时间",
+    "chatModel": "聊天模型",
+    "embeddingModel": "嵌入模型",
+    "embeddingDimensions": "嵌入维度",
+    "unknown": "暂无数据",
+    "stale": "上次已知状态",
+    "seconds": "{value} 秒",
+    "budgets": "时间预算：总计 {overall}；每个模型检查 {model}；数据库 {database}；网关 {gateway}；独立清理预算 {cleanup}。调度和清理可能增加实际耗时。",
+    "stepsLabel": "本地设置检查步骤",
+    "runningNote": "离开此页面后，检查仍会在后端继续。停止后续检查会阻止新的探测；正在执行的模型操作可能继续到截止时间。",
+    "stoppingNote": "正在停止后续检查，等待当前有时限的操作及自有资源清理完成。共享网关会保持开启。",
+    "pollingPaused": "自动观测已达到限定窗口并暂停。这不会停止后端工作，请刷新以读取当前结果。",
+    "alreadyRunning": "已有检查正在执行，现显示当前共享检查。",
+    "startReconciled": "启动请求的响应未确认。只读刷新发现了此正在执行的检查，未重试启动请求。",
+    "startUncertain": "启动请求的响应未确认，无法确认有正在执行的检查。决定是否重新运行前，请先刷新。",
+    "stopReconciled": "停止请求的响应未确认。只读刷新发现该检查正在停止或已结束。",
+    "stopUncertain": "无法确认停止请求，当前操作可能仍在运行。再次停止后续检查前，请先刷新。",
+    "states": {
+      "running": "运行中",
+      "stopping": "正在停止后续检查",
+      "passed": "已通过",
+      "failed": "需要处理",
+      "cancelled": "已取消",
+      "timed_out": "已超时"
+    },
+    "stepStates": {
+      "pending": "待执行",
+      "running": "运行中",
+      "passed": "已通过",
+      "failed": "失败",
+      "timed_out": "已超时",
+      "skipped": "已跳过"
+    },
+    "results": {
+      "passed": "此时所有必要检查和清理均已通过。这仅是小型能力检查，不是完整模拟或质量测试。",
+      "failed": "部分检查需要处理。请查看步骤结果并检查本地配置和服务，准备好后重新运行。",
+      "cancelled": "当前操作和清理结束后，后续检查已取消。此结果不能确认所有本地能力。",
+      "timed_out": "某个检查达到了时间预算。请检查本地服务的可用性或负载，准备好后重试。"
+    },
+    "unavailable": {
+      "local_mode_required": "本地设置检查仅在本地模式下可用。",
+      "backend_closing": "后端正在关闭，无法启动新的检查。",
+      "cleanup_failed": "无法确认资源清理已完成。再次检查前，请重启后端。",
+      "inherited_process": "此后端继承了其他进程的状态。运行检查前，请重启后端。"
+    },
+    "steps": {
+      "configuration": "配置",
+      "dependencies": "本地依赖",
+      "database": "只读数据库访问",
+      "gateway": "网关及截止时间支持",
+      "json_output": "JSON 输出",
+      "json_schema": "JSON 模式",
+      "tool_call": "工具调用",
+      "embedding": "嵌入响应",
+      "cleanup": "自有资源清理"
+    },
+    "codes": {
+      "ok": "检查通过。",
+      "invalid_configuration": "本地配置无效。重试前请检查本地设置。",
+      "dependency_unavailable": "缺少必要的本地依赖，请检查本地安装。",
+      "database_unavailable": "无法读取已配置的本地数据库，请检查服务和连接设置。",
+      "invalid_database_response": "数据库未返回预期的合成结果。",
+      "gateway_unavailable": "本地网关不可用，请检查本地服务及其设置。",
+      "gateway_unsupported": "网关不支持检查的截止时间限制，请使用当前版本重启后端。",
+      "gateway_busy": "网关繁忙，请等待现有请求完成后重试。",
+      "model_unavailable": "无法访问配置的模型，请确认模型已安装且本地服务器可用。",
+      "capability_unsupported": "模型响应未满足此能力检查，请检查模型和服务器配置。",
+      "embedding_invalid": "嵌入响应与配置的维度或要求的格式不符。",
+      "step_timeout": "此步骤已达到时间预算。",
+      "budget_exhausted": "检查的总体时间预算已耗尽。",
+      "prerequisite_failed": "因前置检查失败而跳过。",
+      "stopped": "因收到停止后续检查的请求而跳过。",
+      "cleanup_failed": "无法确认清理已完成，再次检查前请重启后端。",
+      "internal_failure": "检查遇到内部问题。请检查本地设置，必要时重启后再试。"
+    }
   }
 }

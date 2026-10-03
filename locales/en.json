@@ -1047,5 +1047,97 @@
       "library_unavailable": "The saved report library is unavailable. Try Refresh again.",
       "generic": "Saved reports could not be read. Try Refresh again."
     }
+  },
+  "readiness": {
+    "title": "Check local setup",
+    "scope": "Run a small check with fixed synthetic prompts and a read-only database query. This may start the shared gateway, load already-installed models and use local compute.",
+    "limits": "No model downloads or graph writes. A pass checks capabilities at the displayed time; it does not measure speed, model quality or a full simulation.",
+    "start": "Run local setup check",
+    "refresh": "Refresh check",
+    "stop": "Stop remaining checks",
+    "download": "Download check result",
+    "sending": "Sending request…",
+    "loading": "Reading latest check…",
+    "error": "Could not read a valid check result. The backend may still be working. Refresh to observe it again.",
+    "exportError": "Could not download this result. Try again.",
+    "idle": "No check has been recorded by this backend. Refresh only reads its current state.",
+    "observedAt": "Last observed (UTC):",
+    "startedAt": "Started (UTC)",
+    "finishedAt": "Finished (UTC)",
+    "elapsed": "Elapsed",
+    "chatModel": "Chat model",
+    "embeddingModel": "Embedding model",
+    "embeddingDimensions": "Embedding dimensions",
+    "unknown": "Not available",
+    "stale": "Last known observation",
+    "seconds": "{value} s",
+    "budgets": "Budgets: overall {overall}; each model check {model}; database {database}; gateway {gateway}; separate cleanup allowance {cleanup}. Scheduling and cleanup can add elapsed time.",
+    "stepsLabel": "Local setup check steps",
+    "runningNote": "Checks continue on the backend if you leave this page. Stop remaining checks prevents later probes; a model operation already in progress may continue until its deadline.",
+    "stoppingNote": "Stopping remaining checks. Waiting for the current bounded operation and owned-resource cleanup; the shared gateway stays open.",
+    "pollingPaused": "Automatic observation has paused after its bounded window. This does not stop backend work. Refresh to read the current result.",
+    "alreadyRunning": "Another check is already active. Showing the current shared check.",
+    "startReconciled": "The start reply was not confirmed. A passive refresh found this active check; no start request was retried.",
+    "startUncertain": "The start reply was not confirmed. No active check could be confirmed. Refresh before deciding whether to run a new check.",
+    "stopReconciled": "The stop reply was not confirmed. A passive refresh found the check stopping or finished.",
+    "stopUncertain": "The stop request could not be confirmed. The current operation may still be running. Refresh before trying Stop remaining checks again.",
+    "states": {
+      "running": "Running",
+      "stopping": "Stopping remaining checks",
+      "passed": "Passed",
+      "failed": "Needs attention",
+      "cancelled": "Cancelled",
+      "timed_out": "Timed out"
+    },
+    "stepStates": {
+      "pending": "Pending",
+      "running": "Running",
+      "passed": "Passed",
+      "failed": "Failed",
+      "timed_out": "Timed out",
+      "skipped": "Skipped"
+    },
+    "results": {
+      "passed": "All required checks and cleanup passed at this time. This is a small capability check, not a full simulation or quality benchmark.",
+      "failed": "Some checks need attention. Review the step results, check your local configuration and services, then run a new check when ready.",
+      "cancelled": "Remaining checks were cancelled after the current operation and cleanup. This result does not confirm all local capabilities.",
+      "timed_out": "A check reached its time budget. Check local service availability or load, then try again when ready."
+    },
+    "unavailable": {
+      "local_mode_required": "Local setup checks are available only in local mode.",
+      "backend_closing": "The backend is shutting down and cannot start another check.",
+      "cleanup_failed": "Resource cleanup could not be confirmed. Restart the backend before running another check.",
+      "inherited_process": "This backend inherited another process’s state. Restart it before running a check."
+    },
+    "steps": {
+      "configuration": "Configuration",
+      "dependencies": "Local dependencies",
+      "database": "Read-only database access",
+      "gateway": "Gateway and deadline support",
+      "json_output": "JSON output",
+      "json_schema": "JSON schema",
+      "tool_call": "Tool calls",
+      "embedding": "Embedding response",
+      "cleanup": "Owned-resource cleanup"
+    },
+    "codes": {
+      "ok": "Check passed.",
+      "invalid_configuration": "Local configuration is invalid. Review the local settings before retrying.",
+      "dependency_unavailable": "A required local dependency is unavailable. Check the local installation.",
+      "database_unavailable": "Could not read the configured local database. Check its service and connection settings.",
+      "invalid_database_response": "The database did not return the expected synthetic result.",
+      "gateway_unavailable": "The local gateway is unavailable. Check the local service and its settings.",
+      "gateway_unsupported": "The gateway does not support bounded check deadlines. Restart the backend with the current version.",
+      "gateway_busy": "The gateway is busy. Let existing requests finish before retrying.",
+      "model_unavailable": "The configured model could not be reached. Check that it is installed and its local server is available.",
+      "capability_unsupported": "The model response did not satisfy this capability check. Check the model and server configuration.",
+      "embedding_invalid": "The embedding response did not match the configured dimensions or required format.",
+      "step_timeout": "This step reached its time budget.",
+      "budget_exhausted": "The overall check budget was exhausted.",
+      "prerequisite_failed": "Skipped because a prerequisite check failed.",
+      "stopped": "Skipped after a request to stop remaining checks.",
+      "cleanup_failed": "Cleanup could not be confirmed. Restart the backend before another check.",
+      "internal_failure": "The check encountered an internal problem. Review local setup and retry after restarting if needed."
+    }
   }
 }

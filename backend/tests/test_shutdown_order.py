@@ -306,3 +306,15 @@ register_shutdown_callback("memory", lambda: record("memory"))
         "memory",
         "gateway",
     ]
+
+
+def test_readiness_drains_before_all_existing_phases(lifecycle):
+    from app.shutdown import register_shutdown_callback
+
+    events = []
+    register_shutdown_callback("gateway", lambda: events.append("gateway"))
+    register_shutdown_callback("memory", lambda: events.append("memory"))
+    register_shutdown_callback("simulations", lambda: events.append("simulations"))
+    register_shutdown_callback("readiness", lambda: events.append("readiness"))
+    assert lifecycle.exit() == []
+    assert events == ["readiness", "simulations", "memory", "gateway"]
