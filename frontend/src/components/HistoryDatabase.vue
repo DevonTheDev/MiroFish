@@ -14,6 +14,7 @@
     <div class="section-header">
       <div class="section-line"></div>
       <span class="section-title">{{ $t('history.title') }}</span>
+      <button type="button" class="history-compare-btn" data-testid="history-compare" @click="goToComparison()">{{ $t('comparison.historyEntry') }}</button>
       <div class="section-line"></div>
     </div>
 
@@ -178,6 +179,9 @@
                 <span class="btn-icon">◆</span>
                 <span class="btn-text">{{ $t('history.step4Button') }}</span>
               </button>
+            </div>
+            <div class="comparison-entry">
+              <button type="button" class="history-compare-btn" data-testid="history-compare-selected" @click="goToComparison(selectedProject.simulation_id)">{{ $t('comparison.historySelectedEntry') }}</button>
             </div>
             <!-- 不可回放提示 -->
             <div class="modal-playback-hint">
@@ -409,6 +413,11 @@ const closeModal = () => {
   selectedProject.value = null
 }
 
+const goToComparison = (simulationId) => {
+  router.push({ name: 'SimulationComparison', query: simulationId ? { left: simulationId } : {} })
+  closeModal()
+}
+
 // 导航到图谱构建页面（Project）
 const goToProject = () => {
   if (selectedProject.value?.project_id) {
@@ -577,6 +586,15 @@ onUnmounted(() => {
 </script>
 
 <style scoped>
+.history-compare-btn { cursor: pointer; border: 1px solid #cbd1d9; border-radius: 6px; padding: 9px 14px; background: #fff; color: #354153; font: inherit; font-size: 12px; white-space: nowrap; }
+.history-compare-btn:hover { background: #f1f4f8; }
+.history-compare-btn:focus-visible { outline: 3px solid #5b8bc9; outline-offset: 3px; }
+.comparison-entry { padding: 0 24px 8px; text-align: center; }
+@media (max-width: 600px) {
+  .history-database .section-header { flex-wrap: wrap; gap: 14px; padding: 0 20px; }
+  .section-header .section-line { display: none; }
+}
+
 /* 容器 */
 .history-database {
   position: relative;

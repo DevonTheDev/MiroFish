@@ -17,6 +17,11 @@ from ..storage import StoragePathError, storage_path, validate_record_id
 from ..services.zep_entity_reader import ZepEntityReader
 from ..services.oasis_profile_generator import OasisProfileGenerator
 from ..services.simulation_manager import SimulationManager, SimulationStatus
+from ..services.simulation_comparison import (
+    ComparisonError,
+    compare_saved_simulations,
+    list_comparison_candidates,
+)
 from ..services.simulation_runner import (
     SimulationRunner,
     RunnerStatus,
@@ -886,6 +891,69 @@ def _get_report_id_for_simulation(simulation_id: str) -> str:
     except Exception as e:
         logger.warning(f"查找 simulation {simulation_id} 的 report 失败: {e}")
         return None
+
+
+@simulation_bp.route('/comparison/candidates', methods=['GET'])
+def get_comparison_candidates():
+    """List saved comparison choices without creating storage or loading models."""
+    try:
+        data = list_comparison_candidates(
+            SimulationManager.SIMULATION_DATA_DIR, SimulationRunner.RUN_STATE_DIR,
+        )
+        return jsonify({"success": True, "data": data})
+    except ComparisonError as error:
+        return jsonify({
+            "success": False, "error": str(error), "error_code": error.code,
+        }), error.status_code
+    except StoragePathError:
+        return jsonify({
+            "success": False, "error": "The saved storage path is not safe to read.",
+            "error_code": "unsafe_path",
+        }), 400
+    except Exception:
+        logger.exception("Could not list saved simulation comparison choices")
+        return jsonify({
+            "success": False, "error": "The saved simulation list could not be read.",
+            "error_code": "comparison_unavailable",
+        }), 500
+
+
+@simulation_bp.route('/comparison', methods=['GET'])
+def get_saved_simulation_comparison():
+    """Compare two distinct simulations' latest saved run files, read-only."""
+    left_values, right_values = request.args.getlist("left"), request.args.getlist("right")
+    try:
+        if len(left_values) != 1 or len(right_values) != 1:
+            raise StoragePathError("Expected one ID per side")
+        left, right = validate_record_id(left_values[0]), validate_record_id(right_values[0])
+        if left == right:
+            raise StoragePathError("Expected distinct IDs")
+    except StoragePathError:
+        return jsonify({
+            "success": False, "error": "Select two distinct saved simulation IDs.",
+            "error_code": "invalid_selection",
+        }), 400
+    try:
+        data = compare_saved_simulations(
+            SimulationManager.SIMULATION_DATA_DIR, SimulationRunner.RUN_STATE_DIR,
+            left, right,
+        )
+        return jsonify({"success": True, "data": data})
+    except ComparisonError as error:
+        return jsonify({
+            "success": False, "error": str(error), "error_code": error.code,
+        }), error.status_code
+    except StoragePathError:
+        return jsonify({
+            "success": False, "error": "The saved storage path is not safe to read.",
+            "error_code": "unsafe_path",
+        }), 400
+    except Exception:
+        logger.exception("Could not compare saved simulations")
+        return jsonify({
+            "success": False, "error": "The saved simulation comparison could not be read.",
+            "error_code": "comparison_unavailable",
+        }), 500
 
 
 @simulation_bp.route('/history', methods=['GET'])

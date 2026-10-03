@@ -10,6 +10,79 @@ PC's RAM, disk, compute and electricity. Small-model accuracy is not equivalent
 to a large hosted model. Generated simulations are exploratory, not validated
 forecasts or a basis for consequential decisions.
 
+## Compare latest saved simulations
+
+Use **Compare simulations** in the homepage history section, or the comparison
+button in a saved simulation's details. Select two distinct simulation IDs to
+inspect their latest saved runs side by side. The route `/compare?left=...&right=...`
+keeps the pair through reload and browser Back/Forward; **Swap** reverses it and
+**Refresh** reads current saved files. Selection changes clear the previous
+comparison before loading another. The page is available in English and Chinese.
+
+The workflow reads existing saved files only. It does not start simulations,
+generate reports, load a model or make inference requests. Restarting a simulation
+replaces its run files, so this compares the latest saved run under each distinct
+ID, not multiple historical attempts under one ID.
+
+The page shows saved scenario, configured model/profile count, requested rounds,
+last saved round, saved status/timestamps, and these observed metrics:
+
+- Recorded actions, including unsuccessful attempts
+- Distinct round numbers containing recorded actions, rather than completed rounds
+- Recorded actions and distinct active-agent counts separately for Twitter and Reddit
+- Action-type counts and signed differences, consistently **right minus left**
+
+Saved configuration is context, not proof of the model or platform actually used.
+Agent IDs are not matched across simulations. Differences describe recorded
+activity; they do not establish causal effects, prediction accuracy, model quality
+or a better outcome. A stopped or failed run can still have readable recorded logs;
+its saved status stays visible. Saved status does not establish current process
+ownership. Saved starting/running/paused/stopping states return a retryable conflict
+instead of a comparison.
+
+Data availability is separate from run status. Missing sources produce unavailable
+values (an em dash); a readable empty source can establish zero. Damaged rows are
+counted and reported, while valid neighboring observations remain visible as
+partial data. Global differences require complete observations on both sides.
+Per-platform differences may still be available when that platform is complete
+on both sides. An absent action type on an incomplete side is unavailable, not
+zero. Unknown platforms are never counted as Reddit.
+
+Modern per-platform logs take precedence over the legacy combined log, even when
+the modern log is empty or damaged. Configured disabled platforms with no log do
+not prevent an otherwise complete comparison, but their own values remain
+unavailable. Missing/malformed configuration or run metadata is visibly qualified;
+without saved terminal status evidence, observations are unavailable.
+
+The reader validates both selected paths beneath the configured storage roots,
+rejects descendant symlinks/aliases and returns only allowlisted context and
+aggregate counts. It does not return model credentials, raw action arguments,
+post text or raw results. It checks file fingerprints before/after inspection;
+ordinary replacement, deletion or modification triggers a **Refresh and retry**
+conflict rather than a mixed comparison. These checks are not a filesystem-wide
+atomic snapshot or protection against hostile local path mutation.
+
+Resource limits are explicit: state/run JSON is limited to 1 MiB, configuration
+JSON to 8 MiB, each selected log to 64 MiB and 250,000 nonblank records, and each
+line to 1 MiB. Each side supports at most 256 action types; action labels longer
+than 256 characters are invalid rows. Over-limit sources are refused and marked
+unavailable rather than silently truncated. The comparison does not repair or
+rewrite existing files.
+
+The two read-only APIs are `GET /api/simulation/comparison/candidates` and
+`GET /api/simulation/comparison?left=<id>&right=<id>`. A missing/invalid pair is a
+client error, missing simulations return 404, and active/changing saved sources
+return 409 with stable error codes. The UI can retry while retaining the pair.
+
+Local verification covers real log writers, disposable saved files and actual
+Flask routes. A cross-layer test runs the production Axios client/interceptors
+and compiled Vue page against those routes on loopback, checking the visible
+counts, swapped differences, missing observations and GET-only requests. It needs
+Node and the installed frontend dependencies, otherwise it explicitly skips.
+The custom Vue renderer exercises scripts/templates and routing; native browser
+layout, keyboard interaction, and native Windows storage behavior remain separate
+platform checks. No model weights or paid services are used by these tests.
+
 ## 1. Install the tools
 
 - Python 3.11, [uv](https://docs.astral.sh/uv/getting-started/installation/)

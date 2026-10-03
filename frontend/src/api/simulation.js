@@ -199,3 +199,13 @@ export const interviewAgents = (data, signal) => {
 export const getSimulationHistory = (limit = 20) => {
   return service.get('/api/simulation/history', { params: { limit } })
 }
+
+/** List saved simulation metadata without starting or modifying a run. */
+export const getComparisonCandidates = (signal) => {
+  return service.get('/api/simulation/comparison/candidates', { signal })
+}
+
+/** Compare each simulation's latest saved run; differences are right minus left. */
+export const compareSavedSimulations = (left, right, signal) => {
+  return service.get('/api/simulation/comparison', { params: { left, right }, signal })
+}

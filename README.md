@@ -31,6 +31,17 @@ Graphiti/Neo4j memory, and bounded consumer-hardware defaults. Start with the
 [local setup guide](docs/LOCAL_MODE.md), `.env.local.example`, and
 `npm run setup:local`. Existing cloud setup remains available below.
 
+## Compare saved simulations
+
+Open **Compare simulations** in the home history section, or choose a saved
+simulation and use its comparison button. The new page compares the **latest
+saved run of two distinct simulations**: scenario/configuration context, recorded
+activity, platform counts and action types, with right-minus-left differences.
+Selections stay in the URL and can be swapped or refreshed. It reads saved files
+without starting simulations or making inference requests. Missing or damaged
+observations are marked explicitly rather than treated as zero. See the
+[comparison guide and limits](docs/LOCAL_MODE.md#compare-latest-saved-simulations).
+
 ## ⚡ Overview
 
 **MiroFish** is a next-generation AI prediction engine powered by multi-agent technology. By extracting seed information from the real world (such as breaking news, policy drafts, or financial signals), it automatically constructs a high-fidelity parallel digital world. Within this space, thousands of intelligent agents with independent personalities, long-term memory, and behavioral logic freely interact and undergo social evolution. You can inject variables dynamically from a "God's-eye view" to precisely deduce future trajectories — **rehearse the future in a digital sandbox, and win decisions after countless simulations**.
