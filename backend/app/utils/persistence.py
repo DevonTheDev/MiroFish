@@ -1,14 +1,20 @@
-"""Per-file JSON replacement for paths already validated by their owning manager."""
+"""Per-file replacement for paths already validated by their owning manager."""
 
 import json
 import logging
 import os
 from pathlib import Path
 import tempfile
-from typing import Any
+from typing import Any, Callable, TextIO
 
 
-def write_json_atomic(path: str, payload: Any, *, logger: logging.Logger) -> None:
+def _write_atomic(
+    path: str,
+    serialize: Callable[[TextIO], Any],
+    *,
+    logger: logging.Logger,
+    format_name: str,
+) -> None:
     """Serialize beside an existing parent, close, then replace the final file.
 
     This creates no parent directories or locks and adds no path validation.
@@ -26,7 +32,7 @@ def write_json_atomic(path: str, payload: Any, *, logger: logging.Logger) -> Non
             delete=False,
         ) as stream:
             temporary_path = stream.name
-            json.dump(payload, stream, ensure_ascii=False, indent=2)
+            serialize(stream)
         os.replace(temporary_path, destination)
     finally:
         if temporary_path is not None:
@@ -36,7 +42,27 @@ def write_json_atomic(path: str, payload: Any, *, logger: logging.Logger) -> Non
                 pass
             except OSError:
                 logger.warning(
-                    "Could not remove temporary JSON file %s",
+                    f"Could not remove temporary {format_name} file %s",
                     temporary_path,
                     exc_info=True,
                 )
+
+
+def write_json_atomic(path: str, payload: Any, *, logger: logging.Logger) -> None:
+    """Preserve the existing UTF-8, unescaped Unicode and indented JSON format."""
+    _write_atomic(
+        path,
+        lambda stream: json.dump(payload, stream, ensure_ascii=False, indent=2),
+        logger=logger,
+        format_name="JSON",
+    )
+
+
+def write_text_atomic(path: str, text: str, *, logger: logging.Logger) -> None:
+    """Replace a complete UTF-8 text file without changing its content/newlines."""
+    _write_atomic(
+        path,
+        lambda stream: stream.write(text),
+        logger=logger,
+        format_name="text",
+    )

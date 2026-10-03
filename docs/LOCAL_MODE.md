@@ -557,7 +557,7 @@ normally. They cover lazy creation order, gateway-only use, inherited gateways,
 signal-before-exit cleanup and failed callbacks. No OS signal is sent, and these
 tests do not run models or live simulation subprocesses.
 
-### Complete report JSON snapshots
+### Complete report file snapshots
 
 Report metadata (`meta.json`), outline and progress updates now use the existing
 same-directory JSON staging helper. Readers see the previous complete file until
@@ -566,13 +566,21 @@ file, and a failed first save leaves no partial final JSON. In particular, progr
 polling no longer reads a temporarily truncated file during an ordinary update.
 The existing ID/path checks, directory creation, fields and Unicode formatting remain.
 
-Each JSON file is independent. A later outline or Markdown failure does not roll
-back already saved report metadata. Markdown/section writes and append-only logs
-keep their existing behavior; this does not add multi-file transactions, writer
-version locks, power-loss durability or protection against hostile local path
-changes. Local tests exercise real report readers and the Flask progress endpoint
-during serialization, failed first/repeated saves, retry and path aliases using
-disposable files. Native Windows and live model generation remain unverified.
+Section Markdown saves, assembled reports and the full Markdown file written by
+`save_report` use the same closed-file replacement lifecycle. An interrupted write
+keeps the previous `.md` file available to section readers and downloads; a failed
+first save leaves no partial final text. Formatting and section ordering remain.
+
+Each file is independent. A later outline or Markdown failure does not roll back
+already saved report metadata. In particular, `get_report` may return new complete
+Markdown embedded in `meta.json` while the separate `.md` file still contains its
+previous version. The download endpoint's legacy reconstruction of a missing
+Markdown file and append-only logs keep their existing behavior. This does not add
+multi-file transactions, writer version locks, power-loss durability or protection
+against hostile local path changes. Local tests exercise real report readers,
+downloads and the Flask progress endpoint during writes, failed first/repeated
+saves, retry and path aliases using disposable files. Native Windows and live
+model generation remain unverified.
 
 ### Preparation view request lifetime
 

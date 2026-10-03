@@ -22,7 +22,7 @@ from ..config import Config
 from ..storage import StoragePathError, storage_path, validate_record_id
 from ..utils.llm_client import LLMClient
 from ..utils.logger import get_logger
-from ..utils.persistence import write_json_atomic
+from ..utils.persistence import write_json_atomic, write_text_atomic
 from ..utils.locale import get_language_instruction, t
 from .zep_tools import (
     ZepToolsService, 
@@ -2166,8 +2166,7 @@ class ReportManager:
         # 保存文件
         file_suffix = f"section_{section_index:02d}.md"
         file_path = cls._get_section_path(report_id, section_index)
-        with open(file_path, 'w', encoding='utf-8') as f:
-            f.write(md_content)
+        write_text_atomic(file_path, md_content, logger=logger)
 
         logger.info(t('report.sectionFileSaved', reportId=report_id, fileSuffix=file_suffix))
         return file_path
@@ -2339,8 +2338,7 @@ class ReportManager:
         
         # 保存完整报告
         full_path = cls._get_report_markdown_path(report_id)
-        with open(full_path, 'w', encoding='utf-8') as f:
-            f.write(md_content)
+        write_text_atomic(full_path, md_content, logger=logger)
         
         logger.info(t('report.fullReportAssembled', reportId=report_id))
         return md_content
@@ -2485,8 +2483,7 @@ class ReportManager:
         
         # 保存完整Markdown报告
         if report.markdown_content:
-            with open(cls._get_report_markdown_path(report.report_id), 'w', encoding='utf-8') as f:
-                f.write(report.markdown_content)
+            write_text_atomic(cls._get_report_markdown_path(report.report_id), report.markdown_content, logger=logger)
         
         logger.info(t('report.reportSaved', reportId=report.report_id))
     
