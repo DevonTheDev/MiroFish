@@ -556,3 +556,20 @@ cleanup with synthetic resources, plus a separate Python interpreter exiting
 normally. They cover lazy creation order, gateway-only use, inherited gateways,
 signal-before-exit cleanup and failed callbacks. No OS signal is sent, and these
 tests do not run models or live simulation subprocesses.
+
+### Complete report JSON snapshots
+
+Report metadata (`meta.json`), outline and progress updates now use the existing
+same-directory JSON staging helper. Readers see the previous complete file until
+the replacement succeeds. A failed serialization or replacement preserves that
+file, and a failed first save leaves no partial final JSON. In particular, progress
+polling no longer reads a temporarily truncated file during an ordinary update.
+The existing ID/path checks, directory creation, fields and Unicode formatting remain.
+
+Each JSON file is independent. A later outline or Markdown failure does not roll
+back already saved report metadata. Markdown/section writes and append-only logs
+keep their existing behavior; this does not add multi-file transactions, writer
+version locks, power-loss durability or protection against hostile local path
+changes. Local tests exercise real report readers and the Flask progress endpoint
+during serialization, failed first/repeated saves, retry and path aliases using
+disposable files. Native Windows and live model generation remain unverified.

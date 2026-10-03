@@ -22,6 +22,7 @@ from ..config import Config
 from ..storage import StoragePathError, storage_path, validate_record_id
 from ..utils.llm_client import LLMClient
 from ..utils.logger import get_logger
+from ..utils.persistence import write_json_atomic
 from ..utils.locale import get_language_instruction, t
 from .zep_tools import (
     ZepToolsService, 
@@ -2130,8 +2131,7 @@ class ReportManager:
         """
         cls._ensure_report_folder(report_id)
         
-        with open(cls._get_outline_path(report_id), 'w', encoding='utf-8') as f:
-            json.dump(outline.to_dict(), f, ensure_ascii=False, indent=2)
+        write_json_atomic(cls._get_outline_path(report_id), outline.to_dict(), logger=logger)
         
         logger.info(t('report.outlineSaved', reportId=report_id))
     
@@ -2266,8 +2266,7 @@ class ReportManager:
             "updated_at": datetime.now().isoformat()
         }
         
-        with open(cls._get_progress_path(report_id), 'w', encoding='utf-8') as f:
-            json.dump(progress_data, f, ensure_ascii=False, indent=2)
+        write_json_atomic(cls._get_progress_path(report_id), progress_data, logger=logger)
     
     @classmethod
     def get_progress(cls, report_id: str) -> Optional[Dict[str, Any]]:
@@ -2478,8 +2477,7 @@ class ReportManager:
         cls._ensure_report_folder(report.report_id)
         
         # 保存元信息JSON
-        with open(cls._get_report_path(report.report_id), 'w', encoding='utf-8') as f:
-            json.dump(report.to_dict(), f, ensure_ascii=False, indent=2)
+        write_json_atomic(cls._get_report_path(report.report_id), report.to_dict(), logger=logger)
         
         # 保存大纲
         if report.outline:
