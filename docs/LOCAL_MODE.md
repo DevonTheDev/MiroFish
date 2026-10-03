@@ -594,3 +594,26 @@ route or the separate Step3 simulation screen. Local tests execute the actual Vu
 setup/reactivity with deferred replies and verify cancellation through real Axios
 requests to a disposable loopback server. Browser rendering and model execution
 remain separate validation work.
+
+### Simulation view request lifetime
+
+Step3 binds start/stop/report actions and status/detail reads to the mounted
+simulation and run. Leaving, changing simulation or explicitly restarting retires
+the previous requests. Late replies cannot restart timers, replace the new run's
+display or navigate to an old report. Each polling stream and action allows one
+pending request at a time; normal startup payloads and report generation from a
+completed view remain supported.
+
+Terminal runner status stops ordinary polling and requests a fresh final action
+snapshot after any older detail request settles. A failed final detail read is
+best-effort and does not reverse the terminal status. While the run remains
+nonterminal, pending or unsuccessful Stop requests keep polling active; a pending
+response alone does not clear an already observed failure. An accepted Stop can reflect recovery
+from an older failed-status snapshot, with a new final detail refresh; older
+refreshes cannot publish over that recovery.
+
+HTTP cancellation does not stop backend simulation, stopping/finalization work or
+report generation already accepted by the server. The parent route's ID handling
+and backend finalization rules are unchanged. Local tests execute actual Vue setup
+and reactivity with controlled replies and loopback HTTP cancellation. Browser
+rendering, real model runs and native OS process behavior remain unverified here.

@@ -360,6 +360,55 @@ const redditElapsedTime = computed(() => {
   return formatElapsedTime(runStatus.value.reddit_current_round || 0)
 })
 
+// View actions outlive polling completion, but never their original run/view.
+let mounted = false
+let runContext = null
+const ownsView = context => !!context && mounted && context === runContext && props.simulationId === context.id
+const isObserving = context => ownsView(context) && context.started && !context.terminal
+const canStop = context => ownsView(context) && context.started && context.terminal !== 'completed'
+
+const singleFlight = (context, stream, operation) => {
+  if (!ownsView(context)) return Promise.resolve()
+  if (context.requests[stream]) return context.requests[stream]
+  const pending = Promise.resolve().then(() => {
+    if (ownsView(context)) return operation()
+  }).finally(() => {
+    if (context.requests[stream] === pending) delete context.requests[stream]
+  })
+  context.requests[stream] = pending
+  return pending
+}
+
+const retireRun = () => {
+  if (runContext) {
+    // Abort HTTP observation only, not backend simulation/report work.
+    runContext.actions.abort()
+    runContext.polling.abort()
+  }
+  runContext = null
+  resetAllState()
+}
+
+const finishRun = (context, status) => {
+  if (!ownsView(context) || !context.started || context.terminal === 'completed') return
+  if (context.terminal === 'error' && status !== 'completed') return
+  context.terminal = status
+  context.detailRevision++
+  phase.value = 2
+  stopPolling()
+  context.polling.abort()
+  emit('update-status', status)
+  refreshFinalActions(context, context.detailRevision)
+}
+
+const refreshFinalActions = (context, revision) => singleFlight(context, `finalDetail:${revision}`, async () => {
+  // A pre-completion snapshot may miss the final actions. Retire it, wait for
+  // its HTTP request to settle, then obtain one fresh snapshot without overlap.
+  if (context.requests.detail) await context.requests.detail
+  if (!ownsView(context) || context.detailRevision !== revision) return
+  await fetchRunStatusDetail(context, revision)
+})
+
 // Methods
 const addLog = (msg) => {
   emit('add-log', msg)
@@ -376,110 +425,122 @@ const resetAllState = () => {
   startError.value = null
   isStarting.value = false
   isStopping.value = false
+  isGeneratingReport.value = false
   stopPolling()  // 停止之前可能存在的轮询
 }
 
 // 启动模拟
-const doStartSimulation = async () => {
-  if (!props.simulationId) {
-    addLog(t('log.errorMissingSimId'))
-    return
+const doStartSimulation = () => {
+  if (!mounted || !props.simulationId) return Promise.resolve()
+  if (ownsView(runContext) && runContext.requests.start) return runContext.requests.start
+  retireRun()
+  const context = {
+    id: props.simulationId, requests: {}, started: false, terminal: null, detailRevision: 0,
+    actions: new AbortController(), polling: new AbortController(),
   }
-
-  // 先重置所有状态，确保不会受到上一次模拟的影响
-  resetAllState()
+  runContext = context
+  return singleFlight(context, 'start', async () => {
+    isStarting.value = true
+    startError.value = null
+    addLog(t('log.startingDualSim'))
+    emit('update-status', 'processing')
   
-  isStarting.value = true
-  startError.value = null
-  addLog(t('log.startingDualSim'))
-  emit('update-status', 'processing')
-  
-  try {
-    const params = {
-      simulation_id: props.simulationId,
-      platform: 'parallel',
-      force: true,  // 强制重新开始
-      enable_graph_memory_update: true  // 开启动态图谱更新
-    }
-    
-    if (props.maxRounds) {
-      params.max_rounds = props.maxRounds
-      addLog(t('log.setMaxRounds', { rounds: props.maxRounds }))
-    }
-    
-    addLog(t('log.graphMemoryUpdateEnabled'))
-    
-    const res = await startSimulation(params)
-    
-    if (res.success && res.data) {
-      if (res.data.force_restarted) {
-        addLog(t('log.oldSimCleared'))
+    try {
+      const params = {
+        simulation_id: context.id,
+        platform: 'parallel',
+        force: true,  // 强制重新开始
+        enable_graph_memory_update: true  // 开启动态图谱更新
       }
-      addLog(t('log.engineStarted'))
-      addLog(`  ├─ PID: ${res.data.process_pid || '-'}`)
+    
+      if (props.maxRounds) {
+        params.max_rounds = props.maxRounds
+        addLog(t('log.setMaxRounds', { rounds: props.maxRounds }))
+      }
+    
+      addLog(t('log.graphMemoryUpdateEnabled'))
+    
+      const res = await startSimulation(params, context.actions.signal)
+      if (!ownsView(context)) return
+    
+      if (res.success && res.data) {
+        if (res.data.force_restarted) {
+          addLog(t('log.oldSimCleared'))
+        }
+        addLog(t('log.engineStarted'))
+        addLog(`  ├─ PID: ${res.data.process_pid || '-'}`)
       
-      phase.value = 1
-      runStatus.value = res.data
+        context.started = true
+        phase.value = 1
+        runStatus.value = res.data
       
-      startStatusPolling()
-      startDetailPolling()
-    } else {
-      startError.value = res.error || '启动失败'
-      addLog(t('log.startFailed', { error: res.error || t('common.unknownError') }))
+        startStatusPolling(context)
+        startDetailPolling(context)
+      } else {
+        startError.value = res.error || '启动失败'
+        addLog(t('log.startFailed', { error: res.error || t('common.unknownError') }))
+        emit('update-status', 'error')
+      }
+    } catch (err) {
+      if (!ownsView(context)) return
+      startError.value = err.message
+      addLog(t('log.startException', { error: err.message }))
       emit('update-status', 'error')
+    } finally {
+      if (ownsView(context)) isStarting.value = false
     }
-  } catch (err) {
-    startError.value = err.message
-    addLog(t('log.startException', { error: err.message }))
-    emit('update-status', 'error')
-  } finally {
-    isStarting.value = false
-  }
+  })
 }
 
 // 停止模拟
-const handleStopSimulation = async () => {
-  if (!props.simulationId) return
+const handleStopSimulation = () => {
+  const context = runContext
+  if (!canStop(context)) return Promise.resolve()
+  return singleFlight(context, 'stop', async () => {
+    if (!canStop(context)) return
+    isStopping.value = true
+    addLog(t('log.stoppingSim'))
   
-  isStopping.value = true
-  addLog(t('log.stoppingSim'))
-  
-  try {
-    const res = await stopSimulation({ simulation_id: props.simulationId })
+    try {
+      const res = await stopSimulation({ simulation_id: context.id }, context.actions.signal)
+      if (!canStop(context)) return
     
-    if (res.success) {
-      addLog(t('log.simStoppedSuccess'))
-      phase.value = 2
-      stopPolling()
-      emit('update-status', 'completed')
-    } else {
-      addLog(t('log.stopFailed', { error: res.error || t('common.unknownError') }))
+      if (res.success) {
+        addLog(t('log.simStoppedSuccess'))
+        if (res.data) runStatus.value = res.data
+        finishRun(context, 'completed')
+      } else {
+        addLog(t('log.stopFailed', { error: res.error || t('common.unknownError') }))
+      }
+    } catch (err) {
+      if (!canStop(context)) return
+      addLog(t('log.stopException', { error: err.message }))
+    } finally {
+      if (ownsView(context)) isStopping.value = false
     }
-  } catch (err) {
-    addLog(t('log.stopException', { error: err.message }))
-  } finally {
-    isStopping.value = false
-  }
+  })
 }
 
 // 轮询状态
 let statusTimer = null
 let detailTimer = null
 
-const startStatusPolling = () => {
-  statusTimer = setInterval(fetchRunStatus, 2000)
+const startStatusPolling = context => {
+  if (!isObserving(context) || statusTimer !== null) return
+  statusTimer = setInterval(() => fetchRunStatus(context), 2000)
 }
 
-const startDetailPolling = () => {
-  detailTimer = setInterval(fetchRunStatusDetail, 3000)
+const startDetailPolling = context => {
+  if (!isObserving(context) || detailTimer !== null) return
+  detailTimer = setInterval(() => fetchRunStatusDetail(context), 3000)
 }
 
 const stopPolling = () => {
-  if (statusTimer) {
+  if (statusTimer !== null) {
     clearInterval(statusTimer)
     statusTimer = null
   }
-  if (detailTimer) {
+  if (detailTimer !== null) {
     clearInterval(detailTimer)
     detailTimer = null
   }
@@ -489,11 +550,12 @@ const stopPolling = () => {
 const prevTwitterRound = ref(0)
 const prevRedditRound = ref(0)
 
-const fetchRunStatus = async () => {
-  if (!props.simulationId) return
+const fetchRunStatus = context => singleFlight(context, 'status', async () => {
+  if (!isObserving(context)) return
   
   try {
-    const res = await getRunStatus(props.simulationId)
+    const res = await getRunStatus(context.id, context.polling.signal)
+    if (!isObserving(context)) return
     
     if (res.success && res.data) {
       const data = res.data
@@ -519,20 +581,17 @@ const fetchRunStatus = async () => {
       // terminal state after the Zep ingestion barrier has completed.
       if (isFailed) {
         addLog(t('log.simFailed') + (data.error ? `: ${data.error}` : ''))
-        phase.value = 2
-        stopPolling()
-        emit('update-status', 'error')
+        finishRun(context, 'error')
       } else if (isCompleted) {
         addLog(t('log.simCompleted'))
-        phase.value = 2
-        stopPolling()
-        emit('update-status', 'completed')
+        finishRun(context, 'completed')
       }
     }
   } catch (err) {
+    if (!isObserving(context)) return
     console.warn('获取运行状态失败:', err)
   }
-}
+})
 
 // 检查所有启用的平台是否已完成
 const checkPlatformsCompleted = (data) => {
@@ -558,11 +617,15 @@ const checkPlatformsCompleted = (data) => {
   return true
 }
 
-const fetchRunStatusDetail = async () => {
-  if (!props.simulationId) return
+const fetchRunStatusDetail = (context, revision = null) => singleFlight(context, 'detail', async () => {
+  const current = () => revision !== null
+    ? ownsView(context) && !!context.terminal && context.detailRevision === revision
+    : isObserving(context)
+  if (!current()) return
   
   try {
-    const res = await getRunStatusDetail(props.simulationId)
+    const res = await getRunStatusDetail(context.id, (revision !== null ? context.actions : context.polling).signal)
+    if (!current()) return
     
     if (res.success && res.data) {
       // 使用 all_actions 获取完整的动作列表
@@ -588,9 +651,10 @@ const fetchRunStatusDetail = async () => {
       // 新动作会在底部追加
     }
   } catch (err) {
+    if (!current()) return
     console.warn('获取详细状态失败:', err)
   }
-}
+})
 
 // Helpers
 const getActionTypeLabel = (type) => {
@@ -642,40 +706,40 @@ const formatActionTime = (timestamp) => {
   }
 }
 
-const handleNextStep = async () => {
-  if (!props.simulationId) {
-    addLog(t('log.errorMissingSimId'))
-    return
-  }
-
-  if (isGeneratingReport.value) {
+const handleNextStep = () => {
+  const context = runContext
+  if (!ownsView(context) || phase.value !== 2) return Promise.resolve()
+  if (isGeneratingReport.value || context.requests.report) {
     addLog(t('log.reportRequestSent'))
-    return
+    return context.requests.report
   }
+  return singleFlight(context, 'report', async () => {
+    isGeneratingReport.value = true
+    addLog(t('log.startingReportGen'))
   
-  isGeneratingReport.value = true
-  addLog(t('log.startingReportGen'))
-  
-  try {
-    const res = await generateReport({
-      simulation_id: props.simulationId,
-      force_regenerate: true
-    })
+    try {
+      const res = await generateReport({
+        simulation_id: context.id,
+        force_regenerate: true
+      }, context.actions.signal)
+      if (!ownsView(context)) return
     
-    if (res.success && res.data) {
-      const reportId = res.data.report_id
-      addLog(t('log.reportGenTaskStarted', { reportId }))
+      if (res.success && res.data) {
+        const reportId = res.data.report_id
+        addLog(t('log.reportGenTaskStarted', { reportId }))
       
-      // 跳转到报告页面
-      router.push({ name: 'Report', params: { reportId } })
-    } else {
-      addLog(t('log.reportGenFailed', { error: res.error || t('common.unknownError') }))
+        // 跳转到报告页面
+        router.push({ name: 'Report', params: { reportId } })
+      } else {
+        addLog(t('log.reportGenFailed', { error: res.error || t('common.unknownError') }))
+        isGeneratingReport.value = false
+      }
+    } catch (err) {
+      if (!ownsView(context)) return
+      addLog(t('log.reportGenException', { error: err.message }))
       isGeneratingReport.value = false
     }
-  } catch (err) {
-    addLog(t('log.reportGenException', { error: err.message }))
-    isGeneratingReport.value = false
-  }
+  })
 }
 
 // Scroll log to bottom
@@ -688,15 +752,21 @@ watch(() => props.systemLogs?.length, () => {
   })
 })
 
+watch(() => props.simulationId, () => {
+  if (!mounted) return
+  if (props.simulationId) doStartSimulation()
+  else retireRun()
+}, { flush: 'sync' })
+
 onMounted(() => {
+  mounted = true
   addLog(t('log.step3Init'))
-  if (props.simulationId) {
-    doStartSimulation()
-  }
+  doStartSimulation()
 })
 
 onUnmounted(() => {
-  stopPolling()
+  mounted = false
+  retireRun()
 })
 </script>
 

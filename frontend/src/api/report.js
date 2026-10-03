@@ -3,9 +3,10 @@ import service from './index'
 /**
  * 开始报告生成
  * @param {Object} data - { simulation_id, force_regenerate? }
+ * @param {AbortSignal} [signal] - Cancel HTTP observation, not report generation
  */
-export const generateReport = (data) => {
-  return service.post('/api/report/generate', data)
+export const generateReport = (data, signal) => {
+  return service.post('/api/report/generate', data, { signal })
 }
 
 /**

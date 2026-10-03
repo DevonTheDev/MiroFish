@@ -86,33 +86,37 @@ export const listSimulations = (projectId) => {
 /**
  * 启动模拟
  * @param {Object} data - { simulation_id, platform?, max_rounds?, enable_graph_memory_update? }
+ * @param {AbortSignal} [signal] - Cancel HTTP observation, not backend work
  */
-export const startSimulation = (data) => {
-  return service.post('/api/simulation/start', data)
+export const startSimulation = (data, signal) => {
+  return service.post('/api/simulation/start', data, { signal })
 }
 
 /**
  * 停止模拟
  * @param {Object} data - { simulation_id }
+ * @param {AbortSignal} [signal] - Cancel HTTP observation, not backend work
  */
-export const stopSimulation = (data) => {
-  return service.post('/api/simulation/stop', data)
+export const stopSimulation = (data, signal) => {
+  return service.post('/api/simulation/stop', data, { signal })
 }
 
 /**
  * 获取模拟运行实时状态
  * @param {string} simulationId
+ * @param {AbortSignal} [signal] - Optional view cancellation
  */
-export const getRunStatus = (simulationId) => {
-  return service.get(`/api/simulation/${simulationId}/run-status`)
+export const getRunStatus = (simulationId, signal) => {
+  return service.get(`/api/simulation/${simulationId}/run-status`, { signal })
 }
 
 /**
  * 获取模拟运行详细状态（包含最近动作）
  * @param {string} simulationId
+ * @param {AbortSignal} [signal] - Optional view cancellation
  */
-export const getRunStatusDetail = (simulationId) => {
-  return service.get(`/api/simulation/${simulationId}/run-status/detail`)
+export const getRunStatusDetail = (simulationId, signal) => {
+  return service.get(`/api/simulation/${simulationId}/run-status/detail`, { signal })
 }
 
 /**
