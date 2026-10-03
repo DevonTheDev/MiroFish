@@ -67,7 +67,7 @@ test('mounted view retires an actual Axios request on route change and accepts o
     if (request.url.includes('/sim_A/')) { request.on('close', () => { firstClosed = true }); return }
     assert.ok(request.url.startsWith('/api/simulation/sim_B/saved-actions'))
     response.writeHead(200, { 'Content-Type': 'application/json' })
-    response.end(JSON.stringify({ success: true, data: { simulation_id: 'sim_B', source_revision: revision, observed_at: '2026-10-03T09:00:00Z', context: { status: 'completed', created_at: null, updated_at: null, started_at: null, completed_at: null, requested_rounds: null, last_saved_round: null }, availability: 'complete', platform_availability: { twitter: 'complete', reddit: 'unavailable' }, warnings: [], filters: { platform: null, agent_id: null, round_num: null, action_type: null }, order: 'source_record', offset: 0, limit: 50, returned_count: 0, matched_count: 0, has_more: false, actions: [] } }))
+    response.end(JSON.stringify({ success: true, data: { simulation_id: 'sim_B', source_revision: revision, observed_at: '2026-10-03T09:00:00Z', context: { status: 'completed', created_at: null, updated_at: null, started_at: null, completed_at: null, requested_rounds: null, last_saved_round: null }, availability: 'complete', platform_availability: { twitter: 'complete', reddit: 'unavailable' }, warnings: [], filters: { platform: null, agent_id: null, round_num: null, action_type: null, q: null, case_sensitive: false, outcome: null }, order: 'source_record', offset: 0, limit: 50, returned_count: 0, matched_count: 0, has_more: false, actions: [] } }))
   })
   const h = await mountSavedActivity({ api: build(productionClient(baseURL)) }); t.after(() => h.unmount())
   await waitFor(() => traffic.length === 1)

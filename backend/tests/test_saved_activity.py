@@ -78,12 +78,14 @@ def test_real_loggers_preserve_attempts_payload_and_allowlisted_context(reader, 
     assert result["availability"] == "complete"
     assert result["platform_availability"] == {"twitter": "complete", "reddit": "complete"}
     assert result["order"] == "source_record"
-    assert result["filters"] == dict(platform=None, agent_id=None, round_num=None, action_type=None)
+    assert result["filters"] == dict(platform=None, agent_id=None, round_num=None, action_type=None,
+                                     q=None, case_sensitive=False, outcome=None)
     assert (result["offset"], result["limit"], result["returned_count"], result["matched_count"], result["has_more"]) == (0, 50, 1, 1, False)
     assert result["actions"] == [{
         "record_id": "twitter:2", "platform": "twitter", "round_num": "0", "agent_id": "0",
         "agent_name": "Saved agent", "timestamp": recorded["timestamp"], "action_type": "CREATE_POST",
-        "success": False, "details_json": json.dumps(recorded, sort_keys=True, separators=(",", ":")),
+        "success": False, "match_preview": None,
+        "details_json": json.dumps(recorded, sort_keys=True, separators=(",", ":")),
     }]
     assert result["context"] == {
         "status": "completed", "created_at": "2026-01-01", "updated_at": "2026-01-02",

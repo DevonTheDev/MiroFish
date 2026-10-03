@@ -21,9 +21,11 @@ graphs or calling a model. The page is available in English and Chinese.
    read its parsed saved record as literal canonical JSON text. Unknown success
    stays unknown. A missing round uses the existing round-zero default; the JSON
    details preserve the original field's absence.
-2. Filter by platform, round number, agent ID or an exact action-type label, then
-   apply the filters. Round and agent zero are valid. Repeated identical records
-   remain separate attempts.
+2. Enter a literal phrase to find saved content, optionally enable case-sensitive
+   matching, and filter by the saved outcome: succeeded, failed or unknown. You
+   can combine these with platform, round number, agent ID and exact action type.
+   Apply the filters to read matching attempts. Round and agent zero are valid;
+   repeated identical records remain separate attempts.
 3. Choose a page size and use First, Previous and Next. Rows follow the saved
    file order: Twitter then Reddit, each in forward line order, or the legacy
    combined file's order. Recorded timestamps are labels, not a merged chronology.
@@ -31,6 +33,33 @@ graphs or calling a model. The page is available in English and Chinese.
    including filters, page/count metadata, source revision, warnings and rows.
    It exports this page only, not every matching record. Numeric identifiers are
    decimal strings; original JSON details remain text to preserve large integers.
+
+Phrase search checks individual decoded JSON string values, including nested
+action arguments/results and any saved name, type or timestamp. It does not
+search property names, numbers, booleans or null, or join separate values into a
+phrase. A stored string that contains JSON stays text; it is not parsed again.
+Punctuation is literal. The same row counts once even when the phrase
+occurs repeatedly or in several fields. Modern logs may omit a platform string,
+so use the platform filter to select a platform reliably.
+
+By default search uses Unicode casefold substring matching: for example,
+`STRASSE` matches `Straße`. There is no accent removal or Unicode normalization,
+so differently normalized spellings may differ. Casefold expansions also permit
+a partial match within one original character, such as `s` within `ß` → `ss`.
+Case-sensitive mode searches the original text exactly. Nonblank phrases retain
+their spaces and accept up to 200 Unicode code points, without control or line
+separator characters. An empty search box leaves content unrestricted;
+whitespace-only phrases are rejected.
+
+Each content match shows an excerpt from its first matching saved string, in
+parsed object/list traversal order. It preserves original characters and shows
+at most 240 code points with up to 40 before the match. Long matches, including
+casefold expansions, may extend beyond the excerpt; expand the saved JSON for
+the full record. Excerpts are literal text, not rendered markup. Outcomes use
+only the saved boolean `success` flag: `true` means succeeded, `false` means
+failed, and absent/null/nonboolean values mean unknown. Some simulation writers
+use the logger's default success flag, so these labels do not independently
+verify whether an action executed successfully.
 
 Applied filters, page and revision stay in the URL for reload and Back/Forward.
 Editing filters retires earlier rows and export controls. Pages remain tied to
@@ -49,7 +78,13 @@ Saved active states return a conflict, and absent terminal evidence leaves actio
 observations unavailable. Saved status does not verify current process ownership.
 
 The read-only API is `GET /api/simulation/<id>/saved-actions`, with optional
-`platform`, `agent_id`, `round_num`, `action_type`, `offset`, `limit` and `revision`.
+`platform`, `agent_id`, `round_num`, `action_type`, `q`, `case_sensitive`,
+`outcome`, `offset`, `limit` and `revision`. Omit `q` for no content filter;
+`case_sensitive` accepts only `true` or `false` and defaults to `false`.
+`outcome` accepts `success`, `failed` or `unknown`, or can be omitted for any.
+The echoed filters include the whole applied selection. Each row's
+`match_preview` is null without a phrase and a bounded original-text excerpt
+when the phrase matched; page downloads retain both the filters and excerpts.
 Repeated/unknown/invalid parameters are errors. Page size is 1–100 (default 50),
 offset is at most 500,000, decimal ID/round filters accept at most 64 digits, and an
 action-type filter accepts at most 256 characters. Later pages require the accepted
@@ -64,6 +99,14 @@ including changes during failed reads; they do not provide an atomic filesystem
 snapshot or protection from hostile local filesystem mutation. Full configuration
 and its credentials are excluded. Expanded records and downloads intentionally
 contain the saved action payloads you chose to inspect.
+
+Search scans the same bounded saved sources on each request; it does not build a
+persistent index or call a model. Casefold/find avoids regex pattern evaluation,
+and preview mapping is performed only for retained page rows. Large archives can
+still take time to read. The local tests cover actual saved loggers, decoded
+Unicode/casefold behavior, source refusal and revision conflicts, compiled Vue
+controls and a real Flask/Axios/view/export workflow. They do not establish native
+browser layout, Windows behavior or real-model quality.
 
 Local tests cover actual log writers, file admission, filters, pagination,
 revision conflicts and current-page exports. A loopback integration runs the real

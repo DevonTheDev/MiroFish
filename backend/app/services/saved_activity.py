@@ -19,7 +19,11 @@ MAX_PAGE_BYTES = 2 * 1024 * 1024
 MAX_RESPONSE_BYTES = 4 * 1024 * 1024
 MAX_OFFSET = 500_000
 MAX_LIMIT = 100
-_QUERY_FIELDS = {"platform", "agent_id", "round_num", "action_type", "offset", "limit", "revision"}
+MAX_QUERY_LENGTH = 200
+MAX_PREVIEW_LENGTH = 240
+_PREVIEW_LEADING_CONTEXT = 40
+_QUERY_FIELDS = {"platform", "agent_id", "round_num", "action_type", "offset", "limit", "revision",
+                 "q", "case_sensitive", "outcome"}
 _REVISION_VERSION = "saved-activity-v1"
 
 
@@ -35,7 +39,8 @@ def _decimal_filter(value):
     return str(int(value))
 
 
-def _selection(platform, agent_id, round_num, action_type, offset, limit, revision):
+def _selection(platform, agent_id, round_num, action_type, offset, limit, revision,
+               q=None, case_sensitive=False, outcome=None):
     if platform is not None and platform not in saved._PLATFORMS:
         _invalid("invalid_filters", "Choose a supported saved platform.")
     if action_type is not None and (
@@ -44,9 +49,19 @@ def _selection(platform, agent_id, round_num, action_type, offset, limit, revisi
         or any(unicodedata.category(char) in {"Cc", "Zl", "Zp"} for char in action_type)
     ):
         _invalid("invalid_filters", "Action type must be a nonblank label of at most 256 characters without controls.")
+    if q is not None and (
+        not isinstance(q, str) or not q.strip() or len(q) > MAX_QUERY_LENGTH
+        or any(unicodedata.category(char) in {"Cc", "Zl", "Zp"} for char in q)
+    ):
+        _invalid("invalid_filters", "Search phrase must be nonblank, at most 200 characters, and without controls.")
+    if type(case_sensitive) is not bool:
+        _invalid("invalid_filters", "Case sensitivity must be true or false.")
+    if outcome is not None and outcome not in ("success", "failed", "unknown"):
+        _invalid("invalid_filters", "Choose success, failed, or unknown for the saved outcome.")
     filters = {
         "platform": platform, "agent_id": _decimal_filter(agent_id),
         "round_num": _decimal_filter(round_num), "action_type": action_type,
+        "q": q, "case_sensitive": case_sensitive, "outcome": outcome,
     }
     if type(offset) is not int or not 0 <= offset <= MAX_OFFSET or type(limit) is not int or not 1 <= limit <= MAX_LIMIT:
         _invalid("invalid_pagination", "Offset must be 0–500000 and page size must be 1–100.")
@@ -74,8 +89,13 @@ def parse_saved_activity_query(args):
             _invalid("invalid_pagination", "Offset and page size must be nonnegative decimal integers.")
         else:
             values[key] = int(values[key])
+    if "case_sensitive" in values:
+        if values["case_sensitive"] not in ("true", "false"):
+            _invalid("invalid_filters", "Case sensitivity must be true or false.")
+        values["case_sensitive"] = values["case_sensitive"] == "true"
     filters = _selection(*(values.get(key) for key in ("platform", "agent_id", "round_num", "action_type")),
-                         values["offset"], values["limit"], values.get("revision"))
+                         values["offset"], values["limit"], values.get("revision"),
+                         values.get("q"), values.get("case_sensitive", False), values.get("outcome"))
     return {**values, **filters}
 
 
@@ -85,11 +105,53 @@ def _json(value):
     return json.dumps(value, ensure_ascii=True, allow_nan=False, sort_keys=True, separators=(",", ":"))
 
 
+def _first_string_match(row, phrase, case_sensitive):
+    """Find within one decoded value at a time, in saved insertion/list order.
+
+    Iterators keep traversal memory proportional to nesting rather than copying
+    a flattened payload. The caller folds the phrase once for the whole scan.
+    """
+    stack = [iter(row.values())]
+    while stack:
+        try:
+            value = next(stack[-1])
+        except StopIteration:
+            stack.pop()
+            continue
+        if isinstance(value, str):
+            start = (value if case_sensitive else value.casefold()).find(phrase)
+            if start >= 0:
+                return value, start
+        elif isinstance(value, dict):
+            stack.append(iter(value.values()))
+        elif isinstance(value, list):
+            stack.append(iter(value))
+    return None
+
+
+def _match_preview(value, start, case_sensitive):
+    """Map only a retained match start back to a bounded original-text excerpt."""
+    if not case_sensitive:
+        folded_end = 0
+        for original_start, char in enumerate(value):
+            folded_end += len(char.casefold())
+            if folded_end > start:
+                start = original_start
+                break
+    start = max(0, start - _PREVIEW_LEADING_CONTEXT)
+    # Expansions can make the original matching span exceed the preview budget.
+    # Keep source characters intact even when the bounded excerpt omits its tail.
+    return value[start:start + MAX_PREVIEW_LENGTH]
+
+
 class _PageCollector:
     """Keep only a bounded page; admit counts and cursor positions per source."""
 
     def __init__(self, filters, offset, limit):
         self.filters, self.offset, self.limit = filters, offset, limit
+        self.phrase = filters["q"]
+        if self.phrase is not None and not filters["case_sensitive"]:
+            self.phrase = self.phrase.casefold()
         self.clear()
 
     def clear(self):
@@ -116,6 +178,15 @@ class _PageCollector:
             or filters["round_num"] is not None and round_num != filters["round_num"]
             or filters["action_type"] is not None and row["action_type"] != filters["action_type"]):
             return
+        success = row.get("success") if type(row.get("success")) is bool else None
+        outcome = "success" if success is True else "failed" if success is False else "unknown"
+        if filters["outcome"] is not None and outcome != filters["outcome"]:
+            return
+        match = None
+        if self.phrase is not None:
+            match = _first_string_match(row, self.phrase, filters["case_sensitive"])
+            if match is None:
+                return
         index = self.matched + self.staged_count
         self.staged_count += 1
         if not self.offset <= index < self.offset + self.limit or self.too_large or self.staged_too_large:
@@ -125,7 +196,8 @@ class _PageCollector:
             "agent_id": agent_id, "round_num": round_num,
             "agent_name": saved._text(row.get("agent_name")),
             "timestamp": saved._text(row.get("timestamp")), "action_type": row["action_type"],
-            "success": row.get("success") if type(row.get("success")) is bool else None,
+            "success": success,
+            "match_preview": _match_preview(*match, filters["case_sensitive"]) if match is not None else None,
             "details_json": _json(row),
         }
         byte_count = len(_json(record).encode("ascii")) + bool(self.actions or self.staged_actions)
@@ -155,13 +227,15 @@ def response_too_large():
 
 def read_saved_activity(simulation_root, run_root, simulation_id, *, platform=None,
                         agent_id=None, round_num=None, action_type=None,
+                        q=None, case_sensitive=False, outcome=None,
                         offset=0, limit=50, revision=None):
     """Read selected attempts without a manager, runtime cache, or inference."""
     try:
         validate_record_id(simulation_id)
     except StoragePathError:
         raise saved.ComparisonError("invalid_selection", "Choose a valid saved simulation ID.") from None
-    filters = _selection(platform, agent_id, round_num, action_type, offset, limit, revision)
+    filters = _selection(platform, agent_id, round_num, action_type, offset, limit, revision,
+                         q, case_sensitive, outcome)
     paths = saved._paths(simulation_root, run_root, simulation_id)
     before = saved._snapshot(paths)
     try:

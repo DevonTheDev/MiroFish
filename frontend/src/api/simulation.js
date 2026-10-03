@@ -212,7 +212,7 @@ export const compareSavedSimulations = (left, right, signal) => {
 
 /** Read one page of the latest saved activity; abort cancels HTTP observation only. */
 export const getSavedActivity = (simulationId, params = {}, signal) => {
-  const allowed = ['platform', 'agent_id', 'round_num', 'action_type', 'offset', 'limit', 'revision']
+  const allowed = ['platform', 'agent_id', 'round_num', 'action_type', 'q', 'case_sensitive', 'outcome', 'offset', 'limit', 'revision']
   const query = Object.fromEntries(allowed.filter(key => Object.hasOwn(params, key)).map(key => [key, params[key]]))
   return service.get(`/api/simulation/${encodeURIComponent(simulationId)}/saved-actions`, { params: query, signal })
 }

@@ -12,6 +12,16 @@
         <p>{{ t('savedActivity.scope') }}</p>
       </header>
       <form data-testid="activity-form" class="panel" :aria-label="t('savedActivity.filtersTitle')" @submit.prevent="applyFilters">
+        <div class="search-grid">
+          <div><label for="activity-phrase">{{ t('savedActivity.phrase') }}</label><input id="activity-phrase" data-testid="search-phrase" :value="draft.q" :placeholder="t('savedActivity.any')" aria-describedby="activity-search-note" @input="editDraft('q', $event.target.value)"></div>
+          <div class="case-control"><input id="activity-case" data-testid="case-sensitive" type="checkbox" :checked="draft.case_sensitive" @change="editDraft('case_sensitive', $event.target.checked)"><label for="activity-case">{{ t('savedActivity.caseSensitive') }}</label></div>
+          <div><label for="activity-outcome">{{ t('savedActivity.outcome') }}</label>
+            <select id="activity-outcome" data-testid="outcome" :value="draft.outcome" @change="editDraft('outcome', $event.target.value)">
+              <option value="">{{ t('savedActivity.allOutcomes') }}</option><option v-for="outcome in outcomes" :key="outcome" :value="outcome">{{ t(`savedActivity.outcomes.${outcome}`) }}</option>
+            </select>
+          </div>
+        </div>
+        <p id="activity-search-note" class="note">{{ t('savedActivity.searchNote') }}</p>
         <div class="filter-grid">
           <div><label for="activity-platform">{{ t('savedActivity.platform') }}</label>
             <select id="activity-platform" data-testid="platform" :value="draft.platform" @change="editDraft('platform', $event.target.value)">
@@ -34,7 +44,7 @@
           <button type="button" data-testid="download" :disabled="!result || dirty || loading" @click="downloadPage">{{ t('savedActivity.download') }}</button>
         </div>
       </form>
-      <p class="note">{{ t('savedActivity.orderNote') }} {{ t('savedActivity.attemptNote') }}</p>
+      <p class="note">{{ t('savedActivity.orderNote') }} {{ t('savedActivity.attemptNote') }} {{ t('savedActivity.outcomeNote') }}</p>
       <p v-if="dirty" class="notice" role="status">{{ t('savedActivity.draftNote') }}</p>
       <p v-if="loading" data-testid="loading" class="notice" role="status" aria-live="polite">{{ t('savedActivity.loading') }}</p>
       <p v-if="error" data-testid="error" class="notice error" role="alert">{{ t(`savedActivity.errors.${error}`) }}</p>
@@ -61,7 +71,7 @@
               <td>{{ t(`comparison.platforms.${action.platform}`) }}</td><td>{{ action.round_num }}</td>
               <td><span>{{ action.agent_id }}</span><span v-if="action.agent_name !== null" class="agent-name">{{ action.agent_name }}</span></td>
               <td>{{ action.action_type }}</td><td>{{ action.timestamp ?? '—' }}</td><td>{{ t(`savedActivity.outcomes.${action.success === true ? 'success' : action.success === false ? 'failed' : 'unknown'}`) }}</td>
-              <td><details><summary>{{ t('savedActivity.details') }}</summary><p class="record-id">{{ action.record_id }}</p><pre>{{ action.details_json }}</pre></details></td>
+              <td><template v-if="action.match_preview !== null"><p class="note">{{ t('savedActivity.matchPreview') }}</p><pre :data-testid="`match-preview-${action.record_id}`">{{ action.match_preview }}</pre></template><details><summary>{{ t('savedActivity.details') }}</summary><p class="record-id">{{ action.record_id }}</p><pre>{{ action.details_json }}</pre></details></td>
             </tr></tbody>
           </table>
         </div>
@@ -86,7 +96,9 @@ import { getSavedActivity } from '../api/simulation'
 const { t } = useI18n()
 const route = useRoute(), router = useRouter()
 const platforms = ['twitter', 'reddit'], pageSizes = [1, 10, 25, 50, 100]
-const filterKeys = ['platform', 'agent_id', 'round_num', 'action_type']
+const outcomes = ['success', 'failed', 'unknown']
+const exactFilterKeys = ['platform', 'agent_id', 'round_num', 'action_type']
+const filterKeys = [...exactFilterKeys, 'q', 'case_sensitive', 'outcome']
 const queryKeys = [...filterKeys, 'offset', 'limit', 'revision']
 const contextFields = ['requested_rounds', 'last_saved_round', 'created_at', 'updated_at', 'started_at', 'completed_at']
 const columns = ['platform', 'round', 'agent', 'actionType', 'timestamp', 'outcome', 'details']
@@ -95,7 +107,7 @@ const warningCodes = ['config_unavailable', 'run_state_unavailable', 'run_not_te
 const errorCodes = ['invalid_selection', 'invalid_filters', 'invalid_pagination', 'invalid_revision', 'revision_required', 'unsafe_path', 'simulation_not_found', 'simulation_unreadable', 'simulation_active', 'sources_changed', 'response_too_large']
 const revisionPattern = /^[a-f0-9]{64}$/
 const result = ref(null), loading = ref(false), error = ref(''), dirty = ref(false)
-const draft = ref({ platform: '', agent_id: '', round_num: '', action_type: '', limit: '50' })
+const draft = ref({ platform: '', agent_id: '', round_num: '', action_type: '', q: '', case_sensitive: false, outcome: '', limit: '50' })
 const simulationId = computed(() => typeof route.params.simulationId === 'string' ? route.params.simulationId : '')
 let disposed = false, activeRequest = null, acknowledgement = null, pendingNavigation = null, observedRevision = null, downloadUrl = null
 
@@ -104,11 +116,23 @@ function decimal(value) {
   if (typeof value !== 'string' || !/^[0-9]{1,64}$/.test(value)) fail('invalid_filters')
   return value.replace(/^0+(?=\d)/, '')
 }
-function filters(values) {
-  const selected = Object.fromEntries(filterKeys.map(key => [key, values[key] === undefined || values[key] === '' ? null : values[key]]))
+function filters(values, fromUrl = false) {
+  const selected = Object.fromEntries(exactFilterKeys.map(key => [key, values[key] === undefined || values[key] === '' ? null : values[key]]))
   if (selected.platform !== null && !platforms.includes(selected.platform)) fail('invalid_filters')
   for (const key of ['agent_id', 'round_num']) if (selected[key] !== null) selected[key] = decimal(selected[key])
   if (selected.action_type !== null && (typeof selected.action_type !== 'string' || !selected.action_type.trim() || [...selected.action_type].length > 256 || /[\u0000-\u001f\u007f-\u009f\u2028\u2029]/.test(selected.action_type))) fail('invalid_filters')
+  for (const key of ['q', 'outcome']) selected[key] = values[key] === undefined || (!fromUrl && values[key] === '') ? null : values[key]
+  // Unlike ECMAScript trim(), Python whitespace does not include U+FEFF.
+  // Its additional whitespace controls are rejected by Cc below.
+  if (selected.q !== null && (typeof selected.q !== 'string' || [...selected.q].length < 1 || [...selected.q].length > 200 || /^\p{White_Space}+$/u.test(selected.q) || /[\p{Cc}\p{Zl}\p{Zp}]/u.test(selected.q))) fail('invalid_filters')
+  if (selected.outcome !== null && !outcomes.includes(selected.outcome)) fail('invalid_filters')
+  if (fromUrl) {
+    if (values.case_sensitive !== undefined && !['true', 'false'].includes(values.case_sensitive)) fail('invalid_filters')
+    selected.case_sensitive = values.case_sensitive === 'true'
+  } else {
+    selected.case_sensitive = values.case_sensitive ?? false
+    if (typeof selected.case_sensitive !== 'boolean') fail('invalid_filters')
+  }
   return selected
 }
 function pageNumber(value, fallback, min, max) {
@@ -123,13 +147,13 @@ function selection() {
   for (const [key, value] of Object.entries(route.query)) {
     if (!queryKeys.includes(key) || typeof value !== 'string' || value === '') fail('invalid_selection')
   }
-  const selected = { simulation_id: simulationId.value, filters: filters(route.query), offset: pageNumber(route.query.offset, 0, 0, 500000), limit: pageNumber(route.query.limit, 50, 1, 100), revision: route.query.revision ?? null }
+  const selected = { simulation_id: simulationId.value, filters: filters(route.query, true), offset: pageNumber(route.query.offset, 0, 0, 500000), limit: pageNumber(route.query.limit, 50, 1, 100), revision: route.query.revision ?? null }
   if (selected.revision !== null && !revisionPattern.test(selected.revision)) fail('invalid_revision')
   if (selected.offset > 0 && !selected.revision) fail('revision_required')
   return selected
 }
 function requestParams(selected) {
-  return { ...Object.fromEntries(filterKeys.filter(key => selected.filters[key] !== null).map(key => [key, selected.filters[key]])), offset: selected.offset, limit: selected.limit, ...(selected.revision ? { revision: selected.revision } : {}) }
+  return { ...Object.fromEntries(filterKeys.filter(key => selected.filters[key] !== null && selected.filters[key] !== false).map(key => [key, selected.filters[key]])), offset: selected.offset, limit: selected.limit, ...(selected.revision ? { revision: selected.revision } : {}) }
 }
 function revokeDownload() {
   if (downloadUrl) URL.revokeObjectURL(downloadUrl)
@@ -147,6 +171,7 @@ function owns(request) {
 }
 function syncDraft() {
   draft.value = Object.fromEntries([...filterKeys, 'limit'].map(key => [key, typeof route.query[key] === 'string' ? route.query[key] : key === 'limit' ? '50' : '']))
+  draft.value.case_sensitive = route.query.case_sensitive === 'true'
   // Select option values are canonical decimals, including for zero-padded URLs.
   try { draft.value.limit = String(pageNumber(route.query.limit, 50, 1, 100)) } catch { /* load reports invalid pagination */ }
   dirty.value = false
@@ -167,7 +192,11 @@ function validResponse(data, selected) {
   return data.actions.every(action => {
     if (!action || typeof action.record_id !== 'string' || !action.record_id || ids.has(action.record_id)) return false
     ids.add(action.record_id)
-    return platforms.includes(action.platform) && exactInteger(action.round_num) && exactInteger(action.agent_id) && optionalText(action.agent_name) && optionalText(action.timestamp) && typeof action.action_type === 'string' && (action.success === true || action.success === false || action.success === null) && typeof action.details_json === 'string' && filterKeys.every(key => selected.filters[key] === null || action[key] === selected.filters[key])
+    const outcome = action.success === true ? 'success' : action.success === false ? 'failed' : 'unknown'
+    const previewValid = selected.filters.q === null ? action.match_preview === null : typeof action.match_preview === 'string' && [...action.match_preview].length >= 1 && [...action.match_preview].length <= 240
+    // Content matching (including full Unicode casefold) belongs to the reader;
+    // validate its derived envelope without treating q/case/outcome as row keys.
+    return previewValid && (selected.filters.outcome === null || outcome === selected.filters.outcome) && platforms.includes(action.platform) && exactInteger(action.round_num) && exactInteger(action.agent_id) && optionalText(action.agent_name) && optionalText(action.timestamp) && typeof action.action_type === 'string' && (action.success === true || action.success === false || action.success === null) && typeof action.details_json === 'string' && exactFilterKeys.every(key => selected.filters[key] === null || action[key] === selected.filters[key])
   })
 }
 async function load() {
@@ -236,7 +265,7 @@ function refresh() {
   let selected
   try { selected = selection() } catch {
     // A malformed page/revision can be recovered without weakening filter checks.
-    try { selected = { simulation_id: simulationId.value, filters: filters(route.query), limit: pageNumber(route.query.limit, 50, 1, 100) } }
+    try { selected = { simulation_id: simulationId.value, filters: filters(route.query, true), limit: pageNumber(route.query.limit, 50, 1, 100) } }
     catch (cause) { retire(); error.value = cause.selectionCode ?? 'invalid_selection'; return }
   }
   observedRevision = null
@@ -294,9 +323,10 @@ onBeforeUnmount(() => { disposed = true; acknowledgement = null; retire(); pendi
 .brand { font-weight: 800; letter-spacing: 2px; font-size: 22px; text-decoration: none; }.header-actions { display: flex; align-items: center; gap: 24px; font-size: 14px; }a { color: #394555; }
 main { max-width: 1260px; margin: 0 auto; padding: 36px 24px 60px; }.page-heading { max-width: 920px; margin-bottom: 26px; }.eyebrow { text-transform: uppercase; letter-spacing: 2px; font-size: 12px; color: #68707c; }h1 { font-size: clamp(26px, 4vw, 36px); margin: 12px 0; }h2 { font-size: 19px; margin: 0; }p { line-height: 1.6; }.simulation-id { font-family: monospace; overflow-wrap: anywhere; }
 .panel { background: #fff; border: 1px solid #e1e5eb; border-radius: 12px; padding: 22px; }.filter-grid { display: grid; grid-template-columns: 1fr 1fr 1fr 1.5fr .7fr; gap: 16px; }label { display: block; font-size: 13px; font-weight: 600; margin-bottom: 8px; }input, select { box-sizing: border-box; width: 100%; min-height: 44px; border: 1px solid #c8cfd9; border-radius: 6px; padding: 10px; font: inherit; background: #fff; color: #202329; }
+.search-grid { display: grid; grid-template-columns: minmax(0, 2fr) minmax(0, 1fr) minmax(0, 1fr); gap: 16px; align-items: end; }.case-control { display: flex; align-items: center; gap: 10px; min-height: 44px; }.case-control input { width: 20px; height: 20px; min-height: 20px; flex-shrink: 0; padding: 0; }.case-control label { margin: 0; }
 .actions { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 18px; }button { cursor: pointer; border: 1px solid #c8cfd9; background: #fff; color: #28323f; border-radius: 7px; padding: 10px 16px; font: inherit; font-size: 14px; min-height: 44px; }button.primary { background: #222b38; color: #fff; }button:disabled { opacity: .45; cursor: not-allowed; }button:hover:enabled { background: #edf1f6; }button.primary:hover:enabled { background: #3b495e; }
 button:focus-visible, input:focus-visible, select:focus-visible, a:focus-visible, summary:focus-visible, .table-scroll:focus-visible { outline: 3px solid #5b8bc9; outline-offset: 3px; }.note { color: #68707c; font-size: 13px; }.notice { background: #edf1f6; border-radius: 8px; padding: 14px 16px; }.notice.error { background: #fff0ed; color: #9a3527; }.summary-heading { display: flex; justify-content: space-between; align-items: center; gap: 12px; }.availability { border-radius: 20px; padding: 5px 10px; background: #eff2f5; font-size: 12px; }.availability.partial, .warnings { background: #fff3d9; color: #805518; }
 dl { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 2fr); gap: 10px; font-size: 13px; }dt { color: #68707c; }dd { margin: 0; overflow-wrap: anywhere; }.platforms { display: flex; flex-wrap: wrap; gap: 16px; padding: 0; list-style: none; font-size: 13px; }.warnings { padding: 14px 14px 14px 32px; font-size: 13px; border-radius: 7px; line-height: 1.7; }.page-summary { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 12px; }
 .table-scroll { overflow-x: auto; padding: 16px; }table { border-collapse: collapse; width: 100%; min-width: 850px; text-align: left; font-size: 13px; }caption { text-align: left; color: #68707c; padding: 8px 0 16px; }th, td { padding: 12px 10px; border-bottom: 1px solid #e6e9ee; vertical-align: top; overflow-wrap: anywhere; }th { font-weight: 600; color: #68707c; }td { max-width: 260px; }.agent-name { display: block; color: #68707c; font-size: 12px; margin-top: 6px; }summary { cursor: pointer; }.record-id { color: #68707c; font-size: 12px; }pre { white-space: pre-wrap; overflow-wrap: anywhere; font: 12px/1.6 monospace; min-width: 200px; max-height: 420px; overflow-y: auto; }.pagination { margin-top: 24px; }
-@media (max-width: 900px) { .filter-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }@media (max-width: 540px) { .app-header { padding: 14px 18px; flex-wrap: wrap; }.header-actions { gap: 14px; }main { padding: 24px 14px; }.filter-grid { grid-template-columns: 1fr; }.panel { padding: 16px; }.summary-heading { align-items: flex-start; flex-direction: column; } }
+@media (max-width: 900px) { .filter-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }@media (max-width: 540px) { .app-header { padding: 14px 18px; flex-wrap: wrap; }.header-actions { gap: 14px; }main { padding: 24px 14px; }.filter-grid, .search-grid { grid-template-columns: 1fr; }.panel { padding: 16px; }.summary-heading { align-items: flex-start; flex-direction: column; } }
 </style>

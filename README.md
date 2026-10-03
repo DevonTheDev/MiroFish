@@ -34,9 +34,11 @@ Graphiti/Neo4j memory, and bounded consumer-hardware defaults. Start with the
 ## Explore saved activity
 
 Open a simulation in History and choose **Saved activity** to inspect its latest
-saved action records. Filter by platform, round, agent ID or exact action type,
-page through the results, expand original JSON details and download the displayed
-page. This view reads saved files without starting a simulation or asking a model.
+saved action records. Find a literal phrase in decoded saved content, filter by
+saved outcome, platform, round, agent ID or exact action type, and page through
+the results. Matching excerpts help locate a record before expanding its original
+JSON details or downloading the displayed page. This view reads saved files
+without starting a simulation or asking a model.
 It distinguishes missing or partial logs from a complete zero-match result and
 requires Refresh if files change between pages. See the
 [saved activity guide](docs/LOCAL_MODE.md#explore-latest-saved-activity).

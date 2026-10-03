@@ -3,8 +3,8 @@ import test from 'node:test'
 import { mountSavedActivity, deferredApi, flush, ok } from './helpers/saved-activity-view-fixture.js'
 
 const revision = 'a'.repeat(64), newRevision = 'b'.repeat(64)
-const row = (id = 'twitter:1', overrides = {}) => ({ record_id: id, platform: 'twitter', round_num: '0', agent_id: '900719925474099312345', agent_name: 'Saved agent', timestamp: null, action_type: 'POST', success: false, details_json: '{"agent_id":900719925474099312345,"text":"<img src=x onerror=alert(1)>","success":false}', ...overrides })
-export const activity = (overrides = {}) => ({ simulation_id: 'sim_A', source_revision: revision, observed_at: '2026-10-03T09:00:00Z', context: { status: 'completed', created_at: '2026-10-01T09:00:00Z', updated_at: null, started_at: null, completed_at: null, requested_rounds: '20', last_saved_round: '0' }, availability: 'complete', platform_availability: { twitter: 'complete', reddit: 'unavailable' }, warnings: [], filters: { platform: null, agent_id: null, round_num: null, action_type: null }, order: 'source_record', offset: 0, limit: 50, returned_count: 1, matched_count: 1, has_more: false, actions: [row()], ...overrides })
+const row = (id = 'twitter:1', overrides = {}) => ({ record_id: id, platform: 'twitter', round_num: '0', agent_id: '900719925474099312345', agent_name: 'Saved agent', timestamp: null, action_type: 'POST', success: false, details_json: '{"agent_id":900719925474099312345,"text":"<img src=x onerror=alert(1)>","success":false}', match_preview: null, ...overrides })
+export const activity = (overrides = {}) => ({ simulation_id: 'sim_A', source_revision: revision, observed_at: '2026-10-03T09:00:00Z', context: { status: 'completed', created_at: '2026-10-01T09:00:00Z', updated_at: null, started_at: null, completed_at: null, requested_rounds: '20', last_saved_round: '0' }, availability: 'complete', platform_availability: { twitter: 'complete', reddit: 'unavailable' }, warnings: [], filters: { platform: null, agent_id: null, round_num: null, action_type: null, q: null, case_sensitive: false, outcome: null }, order: 'source_record', offset: 0, limit: 50, returned_count: 1, matched_count: 1, has_more: false, actions: [row()], ...overrides })
 async function setup(t, initialPath = '/simulation/sim_A/activity', locale = 'en') {
   const d = deferredApi(), h = await mountSavedActivity({ api: d.api, initialPath, locale }); t.after(() => h.unmount())
   return { ...d, h }
@@ -138,7 +138,7 @@ test('all filters apply exactly, preserve huge decimal IDs, and remain accessibl
     const params = calls.getSavedActivity.at(-1).args[1]
     assert.equal(params.agent_id, '900719925474099312345'); assert.equal(params.action_type, '<script>saved()</script>')
     assert.equal(params.round_num, '0'); assert.equal(params.platform, 'twitter'); assert.equal(params.limit, 1)
-    await resolve(calls.getSavedActivity.at(-1), activity({ limit: 1, filters: { platform: 'twitter', agent_id: params.agent_id, round_num: '0', action_type: params.action_type }, actions: [row('twitter:1', { action_type: params.action_type })] }))
+    await resolve(calls.getSavedActivity.at(-1), activity({ limit: 1, filters: { ...activity().filters, platform: 'twitter', agent_id: params.agent_id, round_num: '0', action_type: params.action_type }, actions: [row('twitter:1', { action_type: params.action_type })] }))
     assert.ok(h.byId('results')); assert.doesNotMatch(h.text(), /savedActivity\.|comparison\./)
     for (const id of ['platform', 'agent-id', 'round-num', 'action-type', 'page-size']) {
       assert.ok(h.find(n => n.type === 'label' && n.props.for === h.byId(id).props.id))
