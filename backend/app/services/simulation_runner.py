@@ -24,6 +24,7 @@ from ..config import Config
 from ..storage import StoragePathError, storage_path, validate_record_id
 from ..utils.logger import get_logger
 from ..utils.locale import get_locale, set_locale
+from ..utils.persistence import write_json_atomic
 from ..utils.zep import (
     ZEP_HTTP_REQUEST_TIMEOUT_SECONDS,
     ZEP_INGESTION_WAIT_TIMEOUT_SECONDS,
@@ -359,16 +360,14 @@ class SimulationRunner:
     @classmethod
     def _save_run_state(cls, state: SimulationRunState):
         """保存运行状态到文件"""
-        sim_dir = os.path.join(cls.RUN_STATE_DIR, state.simulation_id)
+        simulation_id = validate_record_id(state.simulation_id)
+        sim_dir = storage_path(cls.RUN_STATE_DIR, simulation_id)
+        state_file = storage_path(cls.RUN_STATE_DIR, simulation_id, "run_state.json")
         os.makedirs(sim_dir, exist_ok=True)
-        state_file = os.path.join(sim_dir, "run_state.json")
         
         data = state.to_detail_dict()
-        
-        with open(state_file, 'w', encoding='utf-8') as f:
-            json.dump(data, f, ensure_ascii=False, indent=2)
-        
-        cls._run_states[state.simulation_id] = state
+        write_json_atomic(state_file, data, logger=logger)
+        cls._run_states[simulation_id] = state
     
     @classmethod
     def start_simulation(

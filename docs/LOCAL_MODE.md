@@ -445,7 +445,8 @@ error, and an abrupt exit may leave a temporary file. The in-memory Project,
 including its updated timestamp, is not rolled back on failure.
 
 The project save path covers metadata, with simulation state covered below; it
-does not cover uploads, extracted text, report or runner state. It is per-file
+does not cover uploads, extracted text or report state; runner state is covered
+below. It is per-file
 replacement, not a multi-file transaction,
 concurrent-edit lock, power-loss durability or a hostile-local-filesystem sandbox.
 Local tests use disposable files, real project readers and injected I/O failures;
@@ -509,3 +510,25 @@ or the complete action schema. They do not validate timestamp syntax, normalize
 timezones, repair logs, bound memory usage, or suppress filesystem/UTF-8 errors.
 Local tests use actual log writers, disposable JSONL files and Flask queries;
 no model or gameplay execution is involved.
+
+### Recoverable runner-state snapshots
+
+SimulationRunner now stages `run_state.json` beside its destination, closes the
+complete JSON and then replaces the previous snapshot. Uncached readers keep
+seeing the last complete status while a save is in progress. Serialization,
+staging, close or replacement failures preserve the previous file, and a failed
+first save leaves no partial final JSON. A distinct new state object enters the
+runner cache only after replacement succeeds; ordinary retries remain possible.
+
+The save validates the simulation ID and existing descendant path/alias boundary
+before creating a valid new run directory or staging its file. Configured storage
+root relocation remains supported. Existing JSON fields, Unicode formatting,
+process ownership/finalization locks and run-state loading are unchanged. Already
+shared mutable state objects are not rolled back when persistence fails.
+
+This is a per-file snapshot, not a concurrent state-version lock, a transaction
+with preparation metadata or a power-loss guarantee. It does not add validation
+to every runner read/API path or protect against hostile local filesystem changes
+between validation and use. Local tests cover actual readers/cache behavior,
+partial writes, nested saves, retries and storage aliases with disposable files;
+native Windows and live simulation processes remain separate validation work.
