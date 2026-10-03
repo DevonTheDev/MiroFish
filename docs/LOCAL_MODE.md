@@ -10,6 +10,71 @@ PC's RAM, disk, compute and electricity. Small-model accuracy is not equivalent
 to a large hosted model. Generated simulations are exploratory, not validated
 forecasts or a basis for consequential decisions.
 
+## Revisit saved reports
+
+Choose **Saved reports** on Home, or open `/reports`. This independent library
+lets you find every saved report ID, including earlier reports generated for the
+same simulation. Search a literal phrase in saved report/simulation IDs, title,
+summary or scenario requirement, filter by saved status, and page the matches.
+It does not search report bodies. List summaries and requirements are bounded
+previews; matching uses the complete admitted metadata strings.
+
+Open a row to read its saved Markdown and download that exact captured UTF-8
+snapshot. A simulation, graph or generation log is not needed to open a saved
+report here. The reader shows literal wrapped Markdown, including raw HTML and
+links as text. It does not execute or fetch anything embedded in a report. The
+existing interactive report-generation screen remains available separately.
+
+Saved status is metadata from the last write, not a check that a simulation or
+report process is running. Ordering uses saved creation-timestamp text descending
+and report ID ascending for ties, with missing timestamps last; historical local
+timestamps are not converted to another timezone. **Refresh** starts a new
+observation. The library does not poll, construct runtime resources, call models,
+connect to graph memory, regenerate sections or modify report files.
+
+The library recognizes modern `reports/<id>/meta.json` records and legacy
+`reports/<id>.json` files. A modern namespace takes precedence for the same ID,
+even if its metadata cannot be read. Invalid records are skipped with visible
+reason counts; the healthy records remain available. The stored report ID must
+match its record location. Unknown saved status is shown as unknown.
+
+For modern records, a present `full_report.md` is the content source; otherwise
+the reader uses embedded `markdown_content`. For legacy records it first checks
+`<id>.md`, then embedded content. A present but unreadable, unsafe or oversized
+Markdown file makes content unavailable rather than falling back to another
+version. A saved empty body is distinct from unavailable content and can still
+be downloaded. Metadata and body writes are independent, so the selected content
+source is shown explicitly; the library does not claim a multi-file transaction.
+
+Pagination pins the observed catalog revision, and opening a list row checks
+that its metadata revision still matches. A change produces a conflict requiring
+Refresh, instead of silently relabeling a different record. The body is captured
+freshly when opened. Download reuses those accepted bytes without another server
+read. Editing filters, changing the selected report or leaving the page retires
+the previous reader/download; late HTTP replies cannot restore them. Aborting
+these requests only stops the view's observation.
+
+Reads have explicit limits: 2,000 top-level catalog entries, 8 MiB per metadata
+file, 64 MiB of aggregate metadata bytes, 200 query characters, and 1–50 rows per
+page (20 by default). The list response is limited to 2 MiB. A selected Markdown
+body is limited to 8 MiB and its detail response to 16 MiB. Catalog-wide exhaustion
+fails visibly instead of claiming a complete truncated list. Individual invalid
+or oversized metadata records contribute to unavailable counts. Title previews
+contain at most 300 characters; summary and requirement previews at most 500 each.
+
+Opening an absent library creates no directories. Descendant aliases and
+nonregular files are rejected under the configured report root. Source identity
+checks catch ordinary replacements during a read, but are not a sandbox against
+a hostile local process racing filesystem mutations. The library reads only
+saved report storage; no live-state or model-quality conclusion follows from it.
+
+Local tests cover actual saved report files through Flask, Axios and the compiled
+Vue/Router view, including older reports without simulation/log files, modern and
+legacy sources, metadata-only and empty content, malformed records, bounded reads,
+revision conflicts, literal display and exact captured downloads. Network fixtures
+are disposable loopback services. Native browser layout/download dialogs and
+Windows filesystem behavior still need platform validation.
+
 ## Monitor local runtime activity
 
 Choose **Runtime monitor** on Home, or open `/runtime`. The English/Chinese page

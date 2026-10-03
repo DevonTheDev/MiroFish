@@ -1,5 +1,19 @@
 import service from './index'
 
+/** Browse saved metadata without starting generation or observing runtime. */
+export const getSavedReports = (params = {}, signal) => {
+  const query = Object.fromEntries(['q', 'status', 'offset', 'limit', 'revision']
+    .filter(key => params[key] !== undefined).map(key => [key, params[key]]))
+  return service.get('/api/report/library/records', { params: query, signal })
+}
+
+/** Capture saved Markdown; revision belongs to this report's metadata. */
+export const getSavedReport = (reportId, params = {}, signal) => {
+  return service.get(`/api/report/library/records/${encodeURIComponent(reportId)}`, {
+    params: params.revision === undefined ? {} : { revision: params.revision }, signal,
+  })
+}
+
 /**
  * 开始报告生成
  * @param {Object} data - { simulation_id, force_regenerate? }

@@ -960,5 +960,92 @@
       "invalid_gateway_configuration": "Invalid gateway configuration"
     },
     "doctorLink": "Open local mode and CLI doctor instructions ↗"
+  },
+  "savedReports": {
+    "navTitle": "Saved reports",
+    "home": "Home",
+    "eyebrow": "Saved report library",
+    "title": "Read your saved reports",
+    "scope": "Browse distinct saved report IDs, including earlier regenerations. Saved status describes the stored record; it does not indicate a live process or verify the report’s claims.",
+    "search": "Search saved metadata",
+    "status": "Saved status",
+    "allStatuses": "All saved statuses",
+    "pageSize": "Reports per page",
+    "searchNote": "Search report IDs, simulation IDs, titles, summaries and requirements in saved metadata only. Markdown body text is not searched. Literal matching ignores case; up to 200 characters.",
+    "apply": "Apply filters",
+    "refresh": "Refresh library",
+    "draftNote": "Filters changed. Apply them to load saved reports again.",
+    "loading": "Reading saved report metadata…",
+    "resultsTitle": "Saved reports",
+    "count": "{shown} shown · {matched} matching reports",
+    "observedAt": "Catalogue captured at",
+    "catalogueRevision": "Catalogue revision",
+    "unavailable": "{count} saved metadata record(s) could not be included. Counts below describe skipped records.",
+    "untitled": "Untitled saved report",
+    "reportId": "Report ID",
+    "simulationId": "Simulation ID",
+    "createdAt": "Saved creation time",
+    "source": "Metadata source",
+    "summaryPreview": "Saved summary preview (up to 500 characters)",
+    "requirementPreview": "Saved requirement preview (up to 500 characters)",
+    "open": "Open saved report",
+    "noMatches": "No saved reports match these filters.",
+    "outOfRange": "No saved reports on this page. Return to the first page.",
+    "pagination": "Saved report pages",
+    "first": "First page",
+    "previous": "Previous",
+    "next": "Next",
+    "readerTitle": "Saved Markdown reader",
+    "download": "Download saved Markdown",
+    "close": "Close reader",
+    "readerNote": "Markdown is shown as literal, wrapped text. Opening captures the currently saved body independently of generation, simulation, graph and logs. Downloads contain those exact captured UTF-8 bytes.",
+    "reading": "Reading saved Markdown…",
+    "capturedAt": "Body captured at",
+    "metadataRevision": "Report metadata revision",
+    "contentSource": "Saved body source",
+    "contentBytes": "Saved body bytes (UTF-8)",
+    "contentRevision": "Body SHA-256",
+    "emptyContent": "This saved report has an empty body (0 bytes). It can still be downloaded.",
+    "markdownLabel": "Literal saved Markdown",
+    "chooseReport": "Open a saved report to read its captured Markdown.",
+    "statuses": {
+      "pending": "Pending",
+      "planning": "Planning",
+      "generating": "Generating",
+      "completed": "Completed",
+      "failed": "Failed",
+      "unknown": "Unknown"
+    },
+    "sources": {
+      "modern": "Report folder",
+      "legacy": "Legacy report"
+    },
+    "contentSources": {
+      "full_report_md": "Saved full_report.md",
+      "legacy_markdown": "Saved legacy Markdown",
+      "metadata": "Markdown saved in metadata"
+    },
+    "contentErrors": {
+      "not_saved": "Metadata is available, but no Markdown body was saved.",
+      "unreadable": "Metadata is available, but the selected saved body could not be read safely.",
+      "too_large": "Metadata is available, but the saved body exceeds the reading limit."
+    },
+    "reasons": {
+      "metadata_unreadable": "Unreadable or malformed metadata: {count}",
+      "metadata_too_large": "Metadata above the reading limit: {count}",
+      "identity_mismatch": "Stored report identity mismatch: {count}",
+      "unsafe_path": "Unsafe saved paths skipped: {count}"
+    },
+    "errors": {
+      "invalid_query": "The report selection or filters are invalid. Check the URL or apply valid filters.",
+      "invalid_report_id": "The saved report ID is invalid.",
+      "report_not_found": "This saved report was not found. Refresh the library to see current records.",
+      "metadata_unavailable": "This report’s metadata could not be read safely. Refresh the library or choose another report.",
+      "sources_changed": "Saved report files changed. Refresh the library before continuing.",
+      "catalogue_too_large": "The saved catalogue exceeds the safe reading limit.",
+      "response_too_large": "The saved response exceeds the safe reading limit.",
+      "library_unavailable": "The saved report library is unavailable. Try Refresh again.",
+      "generic": "Saved reports could not be read. Try Refresh again."
+    }
   }
 }

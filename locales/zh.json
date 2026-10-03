@@ -960,5 +960,92 @@
       "invalid_gateway_configuration": "网关配置无效"
     },
     "doctorLink": "查看本地模式与 CLI doctor 说明 ↗"
+  },
+  "savedReports": {
+    "navTitle": "已保存报告",
+    "home": "首页",
+    "eyebrow": "已保存报告库",
+    "title": "阅读已保存的报告",
+    "scope": "浏览不同的已保存报告 ID，包括重新生成之前的版本。保存的状态仅描述存储记录，不代表实时进程，也不验证报告中的结论。",
+    "search": "搜索已保存的元数据",
+    "status": "保存的状态",
+    "allStatuses": "所有保存状态",
+    "pageSize": "每页报告数",
+    "searchNote": "仅搜索已保存元数据中的报告 ID、模拟 ID、标题、摘要和需求，不搜索 Markdown 正文。按字面匹配且不区分大小写，最多 200 个字符。",
+    "apply": "应用筛选",
+    "refresh": "刷新报告库",
+    "draftNote": "筛选已更改。请应用筛选以重新加载已保存报告。",
+    "loading": "正在读取已保存报告的元数据…",
+    "resultsTitle": "已保存报告",
+    "count": "显示 {shown} 条 · 共匹配 {matched} 条报告",
+    "observedAt": "目录采集时间",
+    "catalogueRevision": "目录修订值",
+    "unavailable": "有 {count} 条保存的元数据记录无法纳入结果。下方为跳过记录的原因和数量。",
+    "untitled": "无标题的已保存报告",
+    "reportId": "报告 ID",
+    "simulationId": "模拟 ID",
+    "createdAt": "保存的创建时间",
+    "source": "元数据来源",
+    "summaryPreview": "保存的摘要预览（最多 500 个字符）",
+    "requirementPreview": "保存的需求预览（最多 500 个字符）",
+    "open": "打开已保存报告",
+    "noMatches": "没有符合筛选条件的已保存报告。",
+    "outOfRange": "此页没有已保存报告，请返回首页。",
+    "pagination": "已保存报告分页",
+    "first": "首页",
+    "previous": "上一页",
+    "next": "下一页",
+    "readerTitle": "已保存 Markdown 阅读器",
+    "download": "下载已保存的 Markdown",
+    "close": "关闭阅读器",
+    "readerNote": "Markdown 以自动换行的纯文本显示。打开时独立读取当前保存的正文，无需报告生成、模拟、图谱或日志。下载文件保留此次读取的完整 UTF-8 字节。",
+    "reading": "正在读取已保存的 Markdown…",
+    "capturedAt": "正文采集时间",
+    "metadataRevision": "报告元数据修订值",
+    "contentSource": "保存的正文来源",
+    "contentBytes": "保存的正文字节数（UTF-8）",
+    "contentRevision": "正文 SHA-256",
+    "emptyContent": "此报告保存的正文为空（0 字节），仍可下载。",
+    "markdownLabel": "已保存的 Markdown 纯文本",
+    "chooseReport": "打开已保存报告以阅读此次读取的 Markdown。",
+    "statuses": {
+      "pending": "待处理",
+      "planning": "规划中",
+      "generating": "生成中",
+      "completed": "已完成",
+      "failed": "失败",
+      "unknown": "未知"
+    },
+    "sources": {
+      "modern": "报告文件夹",
+      "legacy": "旧版报告"
+    },
+    "contentSources": {
+      "full_report_md": "已保存的 full_report.md",
+      "legacy_markdown": "已保存的旧版 Markdown",
+      "metadata": "元数据内保存的 Markdown"
+    },
+    "contentErrors": {
+      "not_saved": "元数据可用，但未保存 Markdown 正文。",
+      "unreadable": "元数据可用，但无法安全读取选定的已保存正文。",
+      "too_large": "元数据可用，但已保存正文超过读取限制。"
+    },
+    "reasons": {
+      "metadata_unreadable": "元数据无法读取或格式错误：{count}",
+      "metadata_too_large": "元数据超过读取限制：{count}",
+      "identity_mismatch": "保存的报告身份不匹配：{count}",
+      "unsafe_path": "已跳过不安全路径：{count}"
+    },
+    "errors": {
+      "invalid_query": "报告选择或筛选无效。请检查网址或应用有效筛选。",
+      "invalid_report_id": "已保存报告 ID 无效。",
+      "report_not_found": "未找到此已保存报告。请刷新报告库查看当前记录。",
+      "metadata_unavailable": "无法安全读取此报告的元数据。请刷新报告库或选择其他报告。",
+      "sources_changed": "已保存报告文件发生变化，请刷新报告库后继续。",
+      "catalogue_too_large": "已保存报告目录超过安全读取限制。",
+      "response_too_large": "已保存响应超过安全读取限制。",
+      "library_unavailable": "已保存报告库暂不可用，请重试刷新。",
+      "generic": "无法读取已保存报告，请重试刷新。"
+    }
   }
 }

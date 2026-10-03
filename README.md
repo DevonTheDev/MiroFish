@@ -31,6 +31,14 @@ Graphiti/Neo4j memory, and bounded consumer-hardware defaults. Start with the
 [local setup guide](docs/LOCAL_MODE.md), `.env.local.example`, and
 `npm run setup:local`. Existing cloud setup remains available below.
 
+## Revisit saved reports
+
+Open **Saved reports** from Home to search earlier saved reports, filter their
+saved status, read Markdown without the original simulation/graph/logs, and
+download the exact displayed snapshot. Modern and legacy report files are
+supported. This view reads local saved files without calling models or starting
+new work. See the [saved report library guide](docs/LOCAL_MODE.md#revisit-saved-reports).
+
 ## Monitor local runtime activity
 
 Open **Runtime monitor** from Home to see loaded model settings, resource limits,

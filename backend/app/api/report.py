@@ -4,15 +4,24 @@ Report API路由
 """
 
 import os
+import json
 import traceback
 import threading
 from io import BytesIO
-from flask import request, jsonify, send_file
+from flask import current_app, request, jsonify, send_file
 
 from . import report_bp
 from ..config import Config
 from ..storage import StoragePathError
 from ..services.report_agent import ReportAgent, ReportManager, ReportStatus
+from ..services import saved_reports
+from ..services.saved_reports import (
+    SavedReportError,
+    list_saved_reports,
+    parse_library_query,
+    parse_report_query,
+    read_saved_report,
+)
 from ..services.simulation_manager import SimulationManager
 from ..services.simulation_runner import SimulationRunner, RunnerStatus
 from ..services.zep_graph_memory_updater import ZepGraphMemoryManager
@@ -38,6 +47,57 @@ def validate_storage_route_id():
             ReportManager._get_report_folder(record_id)
         except StoragePathError as exc:
             return jsonify({"success": False, "error": str(exc)}), 400
+
+
+# ============== Saved report library ==============
+
+def _saved_report_result(operation, maximum_bytes):
+    """Return bounded saved-only observations without exposing local paths."""
+    try:
+        payload = (json.dumps(
+            {"success": True, "data": operation()}, ensure_ascii=False,
+            allow_nan=False, separators=(',', ':'),
+        ) + '\n').encode('utf-8')
+        if len(payload) > maximum_bytes:
+            raise SavedReportError('response_too_large')
+        # Match the core's UTF-8 envelope budget even under Flask debug mode or
+        # another configured JSON provider. This preserves exact content text.
+        response = current_app.response_class(payload, mimetype='application/json')
+    except SavedReportError as error:
+        response = jsonify({
+            "success": False, "error_code": error.code, "error": str(error),
+        })
+        response.status_code = error.status_code
+    except Exception:
+        logger.exception("Saved report library request failed")
+        response = jsonify({
+            "success": False,
+            "error_code": "library_unavailable",
+            "error": "The saved report library is unavailable. Try again after checking local storage.",
+        })
+        response.status_code = 500
+    response.headers["Cache-Control"] = "no-store"
+    return response
+
+
+@report_bp.route('/library/records', methods=['GET'])
+def get_saved_report_library():
+    """Browse saved report metadata without constructing runtime resources."""
+    def read():
+        options = parse_library_query(request.args)
+        return list_saved_reports(ReportManager.REPORTS_DIR, **options)
+    return _saved_report_result(read, saved_reports.MAX_LIST_RESPONSE_BYTES)
+
+
+@report_bp.route('/library/records/<saved_report_id>', methods=['GET'])
+def get_saved_report_library_entry(saved_report_id):
+    """Capture an independent saved Markdown snapshot for reading/download."""
+    # This variable deliberately differs from the older routes' report_id:
+    # the saved-only reader validates query/ID before inspecting any path.
+    def read():
+        options = parse_report_query(request.args)
+        return read_saved_report(ReportManager.REPORTS_DIR, saved_report_id, **options)
+    return _saved_report_result(read, saved_reports.MAX_DETAIL_RESPONSE_BYTES)
 
 
 # ============== 报告生成接口 ==============

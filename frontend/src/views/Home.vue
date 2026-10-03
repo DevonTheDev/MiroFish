@@ -4,6 +4,7 @@
     <nav class="navbar">
       <div class="nav-brand">MIROFISH</div>
       <div class="nav-links">
+        <RouterLink to="/reports" class="github-link" data-testid="saved-reports-link">{{ $t('savedReports.navTitle') }}</RouterLink>
         <RouterLink to="/runtime" class="github-link" data-testid="runtime-link">{{ $t('runtime.navTitle') }}</RouterLink>
         <LanguageSwitcher />
         <a href="https://github.com/666ghj/MiroFish" target="_blank" class="github-link">
