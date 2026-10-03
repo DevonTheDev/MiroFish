@@ -59,9 +59,10 @@ export const getSimulationProfilesRealtime = (simulationId, platform, signal) =>
 /**
  * 获取模拟配置
  * @param {string} simulationId
+ * @param {AbortSignal} [signal] - Optional view cancellation
  */
-export const getSimulationConfig = (simulationId) => {
-  return service.get(`/api/simulation/${simulationId}/config`)
+export const getSimulationConfig = (simulationId, signal) => {
+  return service.get(`/api/simulation/${simulationId}/config`, { signal })
 }
 
 /**
@@ -166,17 +167,19 @@ export const getSimulationActions = (simulationId, params = {}) => {
 /**
  * 关闭模拟环境（优雅退出）
  * @param {Object} data - { simulation_id, timeout? }
+ * @param {AbortSignal} [signal] - Cancel HTTP observation, not backend shutdown
  */
-export const closeSimulationEnv = (data) => {
-  return service.post('/api/simulation/close-env', data)
+export const closeSimulationEnv = (data, signal) => {
+  return service.post('/api/simulation/close-env', data, { signal })
 }
 
 /**
  * 获取模拟环境状态
  * @param {Object} data - { simulation_id }
+ * @param {AbortSignal} [signal] - Optional view cancellation
  */
-export const getEnvStatus = (data) => {
-  return service.post('/api/simulation/env-status', data)
+export const getEnvStatus = (data, signal) => {
+  return service.post('/api/simulation/env-status', data, { signal })
 }
 
 /**

@@ -599,8 +599,8 @@ the next step. Terminal completion/failure stops remaining polls; a completed
 mounted view keeps its data and normal custom/automatic round selection.
 
 Aborting HTTP does not cancel preparation already running on the backend. These
-guards apply to the Step2 component's received simulation ID, not every parent
-route or the separate Step3 simulation screen. Local tests execute the actual Vue
+guards apply to the Step2 component's received simulation ID; parent route
+ownership is described below. Local tests execute the actual Vue
 setup/reactivity with deferred replies and verify cancellation through real Axios
 requests to a disposable loopback server. Browser rendering and model execution
 remain separate validation work.
@@ -623,7 +623,29 @@ from an older failed-status snapshot, with a new final detail refresh; older
 refreshes cannot publish over that recovery.
 
 HTTP cancellation does not stop backend simulation, stopping/finalization work or
-report generation already accepted by the server. The parent route's ID handling
-and backend finalization rules are unchanged. Local tests execute actual Vue setup
+report generation already accepted by the server. Backend finalization rules
+are unchanged. Local tests execute actual Vue setup
 and reactivity with controlled replies and loopback HTTP cancellation. Browser
 rendering, real model runs and native OS process behavior remain unverified here.
+
+### Simulation parent navigation
+
+The setup and running parent views follow the current route's simulation ID,
+including repeated A-to-B-to-A navigation. A different selection clears the old
+project, graph and log state, retires its requests and supplies the new ID to its
+child. Late metadata/graph replies cannot replace the new selection. A new running
+selection reads its own round query; query-only navigation keeps the current run's
+settings.
+
+Start, Back and leaving a view retire the old view's pending work. A late setup
+environment check cannot issue a new close/stop request after Start has moved to
+the running screen. Back from a running view retains the existing graceful-close
+and force-stop fallback, admits one pending cleanup action and navigates only
+while that action still owns the view. Graph refresh timers and loading state
+belong to the current selection and request.
+
+Requests already accepted by the backend may still complete after HTTP
+cancellation; this does not undo an already-submitted close/stop. Local tests use
+the actual Vue Router and compiled parent/child templates with controlled replies,
+plus loopback HTTP cancellation. Native browser interaction and real model runs
+remain unverified.

@@ -69,8 +69,8 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
-import { useRoute, useRouter } from 'vue-router'
+import { ref, computed, watch, onBeforeUnmount } from 'vue'
+import { useRoute, useRouter, onBeforeRouteLeave } from 'vue-router'
 import GraphPanel from '../components/GraphPanel.vue'
 import Step3Simulation from '../components/Step3Simulation.vue'
 import { getProject, getGraphData } from '../api/graph'
@@ -91,7 +91,7 @@ const props = defineProps({
 const viewMode = ref('split')
 
 // Data State
-const currentSimulationId = ref(route.params.simulationId)
+const currentSimulationId = computed(() => props.simulationId ?? route.params.simulationId)
 // 直接在初始化时从 query 参数获取 maxRounds，确保子组件能立即获取到值
 const maxRounds = ref(route.query.maxRounds ? parseInt(route.query.maxRounds) : null)
 const minutesPerRound = ref(30) // 默认每轮30分钟
@@ -127,8 +127,24 @@ const statusText = computed(() => {
 
 const isSimulating = computed(() => currentStatus.value === 'processing')
 
+// A new identity owns every selection, including A → B → A in a reused view.
+let viewContext = null
+const ownsView = context => !!context && context.active && context === viewContext
+  && context.id === currentSimulationId.value && context.id === route.params.simulationId
+const canRead = context => ownsView(context) && !context.goingBack
+
+const retireView = (context = viewContext) => {
+  if (!context) return
+  context.active = false
+  context.controller.abort()
+  context.graphRequest?.controller.abort()
+  context.backController?.abort()
+  stopGraphRefresh(context)
+}
+
 // --- Helpers ---
-const addLog = (msg) => {
+const addLog = (msg, context = viewContext) => {
+  if (!ownsView(context)) return
   const time = new Date().toLocaleTimeString('en-US', { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' }) + '.' + new Date().getMilliseconds().toString().padStart(3, '0')
   systemLogs.value.push({ time, msg })
   if (systemLogs.value.length > 200) {
@@ -137,6 +153,7 @@ const addLog = (msg) => {
 }
 
 const updateStatus = (status) => {
+  if (!ownsView(viewContext)) return
   currentStatus.value = status
 }
 
@@ -150,51 +167,56 @@ const toggleMaximize = (target) => {
 }
 
 const handleGoBack = async () => {
-  // 在返回 Step 2 之前，先关闭正在运行的模拟
-  addLog(t('log.preparingGoBack'))
-  
-  // 停止轮询
-  stopGraphRefresh()
-  
+  const context = viewContext
+  if (!canRead(context)) return
+  context.goingBack = true
+  context.backController = new AbortController()
+  const signal = context.backController.signal
+  addLog(t('log.preparingGoBack'), context)
+  stopGraphRefresh(context)
+  context.controller.abort()
+  context.graphRequest?.controller.abort()
+  graphLoading.value = false
+
   try {
-    // 先尝试优雅关闭模拟环境
-    const envStatusRes = await getEnvStatus({ simulation_id: currentSimulationId.value })
-    
+    const envStatusRes = await getEnvStatus({ simulation_id: context.id }, signal)
+    if (!ownsView(context)) return
     if (envStatusRes.success && envStatusRes.data?.env_alive) {
-      addLog(t('log.closingSimEnv'))
+      addLog(t('log.closingSimEnv'), context)
       try {
-        await closeSimulationEnv({ 
-          simulation_id: currentSimulationId.value,
-          timeout: 10
-        })
-        addLog(t('log.simEnvClosed'))
+        await closeSimulationEnv({ simulation_id: context.id, timeout: 10 }, signal)
+        if (!ownsView(context)) return
+        addLog(t('log.simEnvClosed'), context)
       } catch (closeErr) {
-        addLog(t('log.closeSimEnvFailed'))
+        if (!ownsView(context)) return
+        addLog(t('log.closeSimEnvFailed'), context)
         try {
-          await stopSimulation({ simulation_id: currentSimulationId.value })
-          addLog(t('log.simForceStopSuccess'))
+          await stopSimulation({ simulation_id: context.id }, signal)
+          if (!ownsView(context)) return
+          addLog(t('log.simForceStopSuccess'), context)
         } catch (stopErr) {
-          addLog(t('log.forceStopFailed', { error: stopErr.message }))
+          if (!ownsView(context)) return
+          addLog(t('log.forceStopFailed', { error: stopErr.message }), context)
         }
       }
-    } else {
-      // 环境未运行，检查是否需要停止进程
-      if (isSimulating.value) {
-        addLog(t('log.stoppingSimProcess'))
-        try {
-          await stopSimulation({ simulation_id: currentSimulationId.value })
-          addLog(t('log.simStopped'))
-        } catch (err) {
-          addLog(t('log.stopSimFailed', { error: err.message }))
-        }
+    } else if (isSimulating.value) {
+      addLog(t('log.stoppingSimProcess'), context)
+      try {
+        await stopSimulation({ simulation_id: context.id }, signal)
+        if (!ownsView(context)) return
+        addLog(t('log.simStopped'), context)
+      } catch (err) {
+        if (!ownsView(context)) return
+        addLog(t('log.stopSimFailed', { error: err.message }), context)
       }
     }
   } catch (err) {
-    addLog(t('log.checkStatusFailed', { error: err.message }))
+    if (!ownsView(context)) return
+    addLog(t('log.checkStatusFailed', { error: err.message }), context)
   }
-  
-  // 返回到 Step 2 (环境搭建)
-  router.push({ name: 'Simulation', params: { simulationId: currentSimulationId.value } })
+  if (!ownsView(context)) return
+  retireView(context)
+  router.push({ name: 'Simulation', params: { simulationId: context.id } })
 }
 
 const handleNextStep = () => {
@@ -204,36 +226,41 @@ const handleNextStep = () => {
 }
 
 // --- Data Logic ---
-const loadSimulationData = async () => {
+const loadSimulationData = async (context) => {
+  if (!canRead(context)) return
   try {
-    addLog(t('log.loadingSimData', { id: currentSimulationId.value }))
+    addLog(t('log.loadingSimData', { id: context.id }))
     
     // 获取 simulation 信息
-    const simRes = await getSimulation(currentSimulationId.value)
+    const simRes = await getSimulation(context.id, context.controller.signal)
+    if (!canRead(context)) return
     if (simRes.success && simRes.data) {
       const simData = simRes.data
       
       // 获取 simulation config 以获取 minutes_per_round
       try {
-        const configRes = await getSimulationConfig(currentSimulationId.value)
+        const configRes = await getSimulationConfig(context.id, context.controller.signal)
+        if (!canRead(context)) return
         if (configRes.success && configRes.data?.time_config?.minutes_per_round) {
           minutesPerRound.value = configRes.data.time_config.minutes_per_round
           addLog(t('log.timeConfig', { minutes: minutesPerRound.value }))
         }
       } catch (configErr) {
+        if (!canRead(context)) return
         addLog(t('log.timeConfigFetchFailed', { minutes: minutesPerRound.value }))
       }
       
       // 获取 project 信息
       if (simData.project_id) {
-        const projRes = await getProject(simData.project_id)
+        const projRes = await getProject(simData.project_id, context.controller.signal)
+        if (!canRead(context)) return
         if (projRes.success && projRes.data) {
           projectData.value = projRes.data
           addLog(t('log.projectLoadSuccess', { id: projRes.data.project_id }))
           
           // 获取 graph 数据
           if (projRes.data.graph_id) {
-            await loadGraph(projRes.data.graph_id)
+            await loadGraph(projRes.data.graph_id, context)
           }
         }
       }
@@ -241,78 +268,82 @@ const loadSimulationData = async () => {
       addLog(t('log.loadSimDataFailed', { error: simRes.error || t('common.unknownError') }))
     }
   } catch (err) {
+    if (!canRead(context)) return
     addLog(t('log.loadException', { error: err.message }))
   }
 }
 
-const loadGraph = async (graphId) => {
-  // 当正在模拟时，自动刷新不显示全屏 loading，以免闪烁
-  // 手动刷新或初始加载时显示 loading
-  if (!isSimulating.value) {
-    graphLoading.value = true
-  }
-  
+const loadGraph = async (graphId, context) => {
+  if (!canRead(context)) return
+  context.graphRequest?.controller.abort()
+  const request = { controller: new AbortController() }
+  context.graphRequest = request
+  const ownsRequest = () => canRead(context) && context.graphRequest === request
+  if (!isSimulating.value) graphLoading.value = true
   try {
-    const res = await getGraphData(graphId)
+    const res = await getGraphData(graphId, request.controller.signal)
+    if (!ownsRequest()) return
     if (res.success) {
       graphData.value = res.data
-      if (!isSimulating.value) {
-        addLog(t('log.graphDataLoadSuccess'))
-      }
+      if (!isSimulating.value) addLog(t('log.graphDataLoadSuccess'), context)
     }
   } catch (err) {
-    addLog(t('log.graphLoadFailed', { error: err.message }))
+    if (ownsRequest()) addLog(t('log.graphLoadFailed', { error: err.message }), context)
   } finally {
-    graphLoading.value = false
+    if (ownsRequest()) graphLoading.value = false
   }
 }
 
 const refreshGraph = () => {
-  if (projectData.value?.graph_id) {
-    loadGraph(projectData.value.graph_id)
+  const context = viewContext
+  if (canRead(context) && projectData.value?.graph_id) {
+    loadGraph(projectData.value.graph_id, context)
   }
 }
 
-// --- Auto Refresh Logic ---
-let graphRefreshTimer = null
-
-const startGraphRefresh = () => {
-  if (graphRefreshTimer) return
-  addLog(t('log.graphRealtimeRefreshStart'))
-  // 立即刷新一次，然后每30秒刷新
-  graphRefreshTimer = setInterval(refreshGraph, 30000)
+const startGraphRefresh = (context = viewContext) => {
+  if (!canRead(context) || !isSimulating.value || context.graphTimer !== null) return
+  addLog(t('log.graphRealtimeRefreshStart'), context)
+  context.graphTimer = setInterval(() => {
+    if (canRead(context)) refreshGraph()
+  }, 30000)
 }
 
-const stopGraphRefresh = () => {
-  if (graphRefreshTimer) {
-    clearInterval(graphRefreshTimer)
-    graphRefreshTimer = null
-    addLog(t('log.graphRealtimeRefreshStop'))
+const stopGraphRefresh = (context = viewContext) => {
+  if (context?.graphTimer !== null && context?.graphTimer !== undefined) {
+    clearInterval(context.graphTimer)
+    context.graphTimer = null
+    addLog(t('log.graphRealtimeRefreshStop'), context)
   }
 }
 
-watch(isSimulating, (newValue) => {
-  if (newValue) {
-    startGraphRefresh()
-  } else {
-    stopGraphRefresh()
-  }
-}, { immediate: true })
+watch(currentSimulationId, id => {
+  retireView()
+  viewContext = null
+  projectData.value = null
+  graphData.value = null
+  graphLoading.value = false
+  systemLogs.value = []
+  currentStatus.value = 'processing'
+  // Query-only navigation keeps this run's settings; a new selection reads its own query.
+  maxRounds.value = route.query.maxRounds ? parseInt(route.query.maxRounds) : null
+  minutesPerRound.value = 30
+  if (!id) return
+  const context = { id, active: true, controller: new AbortController(), graphRequest: null, goingBack: false, backController: null, graphTimer: null }
+  viewContext = context
+  addLog(t('log.simRunViewInit'), context)
+  if (maxRounds.value) addLog(t('log.customRounds', { rounds: maxRounds.value }), context)
+  loadSimulationData(context)
+  startGraphRefresh(context)
+}, { immediate: true, flush: 'sync' })
 
-onMounted(() => {
-  addLog(t('log.simRunViewInit'))
-  
-  // 记录 maxRounds 配置（值已在初始化时从 query 参数获取）
-  if (maxRounds.value) {
-    addLog(t('log.customRounds', { rounds: maxRounds.value }))
-  }
-  
-  loadSimulationData()
+watch(isSimulating, running => {
+  if (running) startGraphRefresh()
+  else stopGraphRefresh()
 })
 
-onUnmounted(() => {
-  stopGraphRefresh()
-})
+onBeforeRouteLeave(() => retireView())
+onBeforeUnmount(() => retireView())
 </script>
 
 <style scoped>
@@ -449,4 +480,3 @@ onUnmounted(() => {
   border-right: 1px solid #EAEAEA;
 }
 </style>
-

@@ -66,8 +66,8 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted, onUnmounted } from 'vue'
-import { useRoute, useRouter } from 'vue-router'
+import { ref, computed, watch, onBeforeUnmount } from 'vue'
+import { useRoute, useRouter, onBeforeRouteLeave } from 'vue-router'
 import GraphPanel from '../components/GraphPanel.vue'
 import Step2EnvSetup from '../components/Step2EnvSetup.vue'
 import { getProject, getGraphData } from '../api/graph'
@@ -88,7 +88,7 @@ const props = defineProps({
 const viewMode = ref('split')
 
 // Data State
-const currentSimulationId = ref(route.params.simulationId)
+const currentSimulationId = computed(() => props.simulationId ?? route.params.simulationId)
 const projectData = ref(null)
 const graphData = ref(null)
 const graphLoading = ref(false)
@@ -119,8 +119,21 @@ const statusText = computed(() => {
   return 'Preparing'
 })
 
+// A new identity owns every selection, including A → B → A in a reused view.
+let viewContext = null
+const ownsView = context => !!context && context.active && context === viewContext
+  && context.id === currentSimulationId.value && context.id === route.params.simulationId
+
+const retireView = (context = viewContext) => {
+  if (!context) return
+  context.active = false
+  context.controller.abort()
+  context.graphRequest?.controller.abort()
+}
+
 // --- Helpers ---
-const addLog = (msg) => {
+const addLog = (msg, context = viewContext) => {
+  if (!ownsView(context)) return
   const time = new Date().toLocaleTimeString('en-US', { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' }) + '.' + new Date().getMilliseconds().toString().padStart(3, '0')
   systemLogs.value.push({ time, msg })
   if (systemLogs.value.length > 100) {
@@ -129,6 +142,7 @@ const addLog = (msg) => {
 }
 
 const updateStatus = (status) => {
+  if (!ownsView(viewContext)) return
   currentStatus.value = status
 }
 
@@ -142,123 +156,103 @@ const toggleMaximize = (target) => {
 }
 
 const handleGoBack = () => {
-  // 返回到 process 页面
-  if (projectData.value?.project_id) {
-    router.push({ name: 'Process', params: { projectId: projectData.value.project_id } })
-  } else {
-    router.push('/')
-  }
+  const context = viewContext
+  if (!ownsView(context)) return
+  const projectId = projectData.value?.project_id
+  retireView(context)
+  router.push(projectId ? { name: 'Process', params: { projectId } } : '/')
 }
 
 const handleNextStep = (params = {}) => {
-  addLog(t('log.enterStep3'))
-
-  // 记录模拟轮数配置
+  const context = viewContext
+  if (!ownsView(context)) return
+  addLog(t('log.enterStep3'), context)
   if (params.maxRounds) {
-    addLog(t('log.customRoundsConfig', { rounds: params.maxRounds }))
+    addLog(t('log.customRoundsConfig', { rounds: params.maxRounds }), context)
   } else {
-    addLog(t('log.useAutoRounds'))
+    addLog(t('log.useAutoRounds'), context)
   }
-  
-  // 构建路由参数
-  const routeParams = {
-    name: 'SimulationRun',
-    params: { simulationId: currentSimulationId.value }
-  }
-  
-  // 如果有自定义轮数，通过 query 参数传递
-  if (params.maxRounds) {
-    routeParams.query = { maxRounds: params.maxRounds }
-  }
-  
-  // 跳转到 Step 3 页面
+  const routeParams = { name: 'SimulationRun', params: { simulationId: context.id } }
+  if (params.maxRounds) routeParams.query = { maxRounds: params.maxRounds }
+  // Retire cleanup before navigation can mount a new run of the same simulation.
+  retireView(context)
   router.push(routeParams)
 }
 
 // --- Data Logic ---
 
-/**
- * 检查并关闭正在运行的模拟
- * 当用户从 Step 3 返回到 Step 2 时，默认用户要退出模拟
- */
-const checkAndStopRunningSimulation = async () => {
-  if (!currentSimulationId.value) return
-  
+// Returning from Step 3 keeps the existing graceful-close/force-stop policy.
+const checkAndStopRunningSimulation = async (context) => {
+  if (!ownsView(context)) return
   try {
-    // 先检查模拟环境是否存活
-    const envStatusRes = await getEnvStatus({ simulation_id: currentSimulationId.value })
-    
+    const envStatusRes = await getEnvStatus({ simulation_id: context.id }, context.controller.signal)
+    if (!ownsView(context)) return
     if (envStatusRes.success && envStatusRes.data?.env_alive) {
-      addLog(t('log.detectedSimEnvRunning'))
-      
-      // 尝试优雅关闭模拟环境
+      addLog(t('log.detectedSimEnvRunning'), context)
       try {
-        const closeRes = await closeSimulationEnv({ 
-          simulation_id: currentSimulationId.value,
-          timeout: 10  // 10秒超时
-        })
-        
+        const closeRes = await closeSimulationEnv({ simulation_id: context.id, timeout: 10 }, context.controller.signal)
+        if (!ownsView(context)) return
         if (closeRes.success) {
-          addLog(t('log.simEnvClosed'))
+          addLog(t('log.simEnvClosed'), context)
         } else {
-          addLog(t('log.closeSimEnvFailedWithError', { error: closeRes.error || t('common.unknownError') }))
-          // 如果优雅关闭失败，尝试强制停止
-          await forceStopSimulation()
+          addLog(t('log.closeSimEnvFailedWithError', { error: closeRes.error || t('common.unknownError') }), context)
+          await forceStopSimulation(context)
         }
       } catch (closeErr) {
-        addLog(t('log.closeSimEnvException', { error: closeErr.message }))
-        // 如果优雅关闭异常，尝试强制停止
-        await forceStopSimulation()
+        if (!ownsView(context)) return
+        addLog(t('log.closeSimEnvException', { error: closeErr.message }), context)
+        await forceStopSimulation(context)
       }
     } else {
-      // 环境未运行，但可能进程还在，检查模拟状态
-      const simRes = await getSimulation(currentSimulationId.value)
+      const simRes = await getSimulation(context.id, context.controller.signal)
+      if (!ownsView(context)) return
       if (simRes.success && simRes.data?.status === 'running') {
-        addLog(t('log.detectedSimRunning'))
-        await forceStopSimulation()
+        addLog(t('log.detectedSimRunning'), context)
+        await forceStopSimulation(context)
       }
     }
   } catch (err) {
-    // 检查环境状态失败不影响后续流程
-    console.warn('检查模拟状态失败:', err)
+    if (ownsView(context)) console.warn('检查模拟状态失败:', err)
   }
 }
 
-/**
- * 强制停止模拟
- */
-const forceStopSimulation = async () => {
+const forceStopSimulation = async (context) => {
+  if (!ownsView(context)) return
   try {
-    const stopRes = await stopSimulation({ simulation_id: currentSimulationId.value })
+    const stopRes = await stopSimulation({ simulation_id: context.id }, context.controller.signal)
+    if (!ownsView(context)) return
     if (stopRes.success) {
-      addLog(t('log.simForceStopSuccess'))
+      addLog(t('log.simForceStopSuccess'), context)
     } else {
-      addLog(t('log.forceStopSimFailed', { error: stopRes.error || t('common.unknownError') }))
+      addLog(t('log.forceStopSimFailed', { error: stopRes.error || t('common.unknownError') }), context)
     }
   } catch (err) {
-    addLog(t('log.forceStopSimException', { error: err.message }))
+    if (ownsView(context)) addLog(t('log.forceStopSimException', { error: err.message }), context)
   }
 }
 
-const loadSimulationData = async () => {
+const loadSimulationData = async (context) => {
+  if (!ownsView(context)) return
   try {
-    addLog(t('log.loadingSimData', { id: currentSimulationId.value }))
+    addLog(t('log.loadingSimData', { id: context.id }))
 
     // 获取 simulation 信息
-    const simRes = await getSimulation(currentSimulationId.value)
+    const simRes = await getSimulation(context.id, context.controller.signal)
+    if (!ownsView(context)) return
     if (simRes.success && simRes.data) {
       const simData = simRes.data
 
       // 获取 project 信息
       if (simData.project_id) {
-        const projRes = await getProject(simData.project_id)
+        const projRes = await getProject(simData.project_id, context.controller.signal)
+        if (!ownsView(context)) return
         if (projRes.success && projRes.data) {
           projectData.value = projRes.data
           addLog(t('log.projectLoadSuccess', { id: projRes.data.project_id }))
           
           // 获取 graph 数据
           if (projRes.data.graph_id) {
-            await loadGraph(projRes.data.graph_id)
+            await loadGraph(projRes.data.graph_id, context)
           }
         }
       }
@@ -266,40 +260,58 @@ const loadSimulationData = async () => {
       addLog(t('log.loadSimDataFailed', { error: simRes.error || t('common.unknownError') }))
     }
   } catch (err) {
+    if (!ownsView(context)) return
     addLog(t('log.loadException', { error: err.message }))
   }
 }
 
-const loadGraph = async (graphId) => {
+const loadGraph = async (graphId, context) => {
+  if (!ownsView(context)) return
+  context.graphRequest?.controller.abort()
+  const request = { controller: new AbortController() }
+  context.graphRequest = request
+  const ownsRequest = () => ownsView(context) && context.graphRequest === request
   graphLoading.value = true
   try {
-    const res = await getGraphData(graphId)
+    const res = await getGraphData(graphId, request.controller.signal)
+    if (!ownsRequest()) return
     if (res.success) {
       graphData.value = res.data
-      addLog(t('log.graphDataLoadSuccess'))
+      addLog(t('log.graphDataLoadSuccess'), context)
     }
   } catch (err) {
-    addLog(t('log.graphLoadFailed', { error: err.message }))
+    if (ownsRequest()) addLog(t('log.graphLoadFailed', { error: err.message }), context)
   } finally {
-    graphLoading.value = false
+    if (ownsRequest()) graphLoading.value = false
   }
 }
 
 const refreshGraph = () => {
-  if (projectData.value?.graph_id) {
-    loadGraph(projectData.value.graph_id)
+  const context = viewContext
+  if (ownsView(context) && projectData.value?.graph_id) {
+    loadGraph(projectData.value.graph_id, context)
   }
 }
 
-onMounted(async () => {
-  addLog(t('log.simViewInit'))
-  
-  // 检查并关闭正在运行的模拟（用户从 Step 3 返回时）
-  await checkAndStopRunningSimulation()
-  
-  // 加载模拟数据
-  loadSimulationData()
-})
+watch(currentSimulationId, id => {
+  retireView()
+  viewContext = null
+  projectData.value = null
+  graphData.value = null
+  graphLoading.value = false
+  systemLogs.value = []
+  currentStatus.value = 'processing'
+  if (!id) return
+  const context = { id, active: true, controller: new AbortController(), graphRequest: null }
+  viewContext = context
+  addLog(t('log.simViewInit'), context)
+  checkAndStopRunningSimulation(context).then(() => {
+    if (ownsView(context)) loadSimulationData(context)
+  })
+}, { immediate: true, flush: 'sync' })
+
+onBeforeRouteLeave(() => retireView())
+onBeforeUnmount(() => retireView())
 </script>
 
 <style scoped>
