@@ -745,6 +745,16 @@ class GraphitiMemoryEngine:
         if self.closed:
             return
         self.closed = True
+        failures = []
+
+        async def attempt(operation):
+            try:
+                await operation
+            except BaseException as exc:
+                # Keep cancellation/error semantics after trying the remaining
+                # owned resources while the worker loop is still available.
+                failures.append(exc)
+
         pending = [
             (key, task, kind)
             for key, (task, _group, kind) in self.tasks.items()
@@ -753,31 +763,36 @@ class GraphitiMemoryEngine:
         for _key, task, _kind in pending:
             task.cancel()
         if pending:
-            await asyncio.gather(
+            await attempt(asyncio.gather(
                 *(task for _key, task, _kind in pending), return_exceptions=True
-            )
+            ))
         # A task canceled before its first execution cannot run its finally block.
         # Journal all admitted work explicitly, without touching other owners.
         for key, _task, kind in pending:
             if kind == "episode":
-                await self._cancel_episode(key)
+                await attempt(self._cancel_episode(key))
             else:
-                await self._query(
+                await attempt(self._query(
                     "MATCH (b:MiroMemoryBatch {batch_id:$id,owner:$owner}) "
                     "WHERE b.status='processing' SET b.status='canceled'",
                     id=key,
                     owner=self.owner,
-                )
-                await self._query(
+                ))
+                await attempt(self._query(
                     "MATCH (b:MiroMemoryBatch {batch_id:$id,owner:$owner}), (j:MiroMemoryJob {batch_id:$id}) "
                     "WHERE j.status='queued' OR (j.status='processing' AND j.owner=$owner) "
                     "SET j.status='canceled',j.error='Local batch processing was canceled'",
                     id=key,
                     owner=self.owner,
-                )
+                ))
         if self.graphiti is not None:
-            await self.graphiti.close()
+            await attempt(self.graphiti.close())
         elif self.driver is not None:
-            await self.driver.close()
+            await attempt(self.driver.close())
         for client in self.http_clients:
-            await client.close()
+            await attempt(client.close())
+        if failures:
+            first = failures[0]
+            for failure in failures[1:]:
+                first.add_note(f"Additional local memory shutdown failure: {failure!r}")
+            raise first

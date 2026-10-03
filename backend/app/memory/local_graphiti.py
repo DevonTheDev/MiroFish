@@ -241,11 +241,14 @@ class LocalGraphitiClient:
         self._runner = _LoopRunner()
         try:
             self._call("initialize")
-        except BaseException:
+        except BaseException as error:
+            self._closed = True
             try:
-                self._runner.call(self._engine.close(), settings.request_timeout)
-            finally:
-                self._runner.close()
+                self._close_owned_resources()
+            except BaseException as cleanup_error:
+                error.add_note(f"Local memory initialization cleanup failed: {cleanup_error!r}")
+                for note in getattr(cleanup_error, "__notes__", ()):
+                    error.add_note(note)
             raise
         self.graph = _GraphAPI(self)
         self.batch = _BatchAPI(self)
@@ -264,10 +267,23 @@ class LocalGraphitiClient:
             if self._closed:
                 return
             self._closed = True
-            try:
-                self._runner.call(self._engine.close(), self.settings.request_timeout)
-            finally:
-                self._runner.close()
+            self._close_owned_resources()
+
+    def _close_owned_resources(self):
+        failure = None
+        try:
+            self._runner.call(self._engine.close(), self.settings.request_timeout)
+        except BaseException as exc:
+            failure = exc
+        try:
+            self._runner.close()
+        except BaseException as exc:
+            if failure is None:
+                failure = exc
+            else:
+                failure.add_note(f"Additional local memory loop shutdown failure: {exc!r}")
+        if failure is not None:
+            raise failure
 
     def __enter__(self):
         return self

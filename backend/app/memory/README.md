@@ -45,12 +45,22 @@ The adapter is the subset needed by the current application, not a general Zep S
 replacement. Cloud-only features in the separate Zep integration-validation script
 (such as episode search and cloud filters) are outside this interface.
 
+An explicit client close attempts every owned cancellation-journal update and
+graph/HTTP resource close even when an earlier step fails. The first failure is
+still raised after cleanup attempts, with later failures attached as exception
+notes. Initialization failures retain their original cause if teardown also fails;
+worker-loop shutdown is still attempted. Close remains terminal and idempotent, and does
+not replay failed writes. A journal failure can leave job status uncertain; hard
+deadlines, unresponsive cleanup and process termination can still interrupt cleanup.
+This does not change application-wide exit-handler ordering.
+
 ## Verification
 
 Fast tests do not require a graph database or downloaded models:
 
 ```sh
-PYTHONPATH=backend python -m pytest -q backend/tests/test_local_memory_contract.py
+PYTHONPATH=backend python backend/scripts/run_offline_tests.py -q \
+  backend/tests/test_local_memory_contract.py backend/tests/test_local_memory_shutdown.py
 ```
 
 For the integration tests, install the local dependency extra (`uv sync --extra local --locked` in `backend`), start a
@@ -58,7 +68,8 @@ For the integration tests, install the local dependency extra (`uv sync --extra 
 
 ```sh
 MIRO_TEST_NEO4J_URI=bolt://127.0.0.1:7687 PYTHONPATH=backend \
-  python -m pytest -q backend/tests/test_local_memory_integration.py
+  python backend/scripts/run_offline_tests.py -q \
+  backend/tests/test_local_memory_integration.py backend/tests/test_local_memory_shutdown.py
 ```
 
 These tests use actual Graphiti/Neo4j, the actual bounded inference gateway, and a
@@ -67,3 +78,6 @@ groups. They cover extraction, typed ontology, provenance, isolated search,
 pagination, real application consumers, durable batches, concurrent replay,
 cross-client deletion, failure reporting and shutdown. They do not measure the
 quality, memory usage or latency of real downloaded model weights.
+Shutdown failure tests also check actual driver/HTTP closed state after an injected
+journal error; synthetic-resource cases cover partial initialization and secondary
+cleanup errors. The one real-driver case is skipped without the disposable Neo4j.
