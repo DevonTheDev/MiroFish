@@ -52,7 +52,9 @@ notes. Initialization failures retain their original cause if teardown also fail
 worker-loop shutdown is still attempted. Close remains terminal and idempotent, and does
 not replay failed writes. A journal failure can leave job status uncertain; hard
 deadlines, unresponsive cleanup and process termination can still interrupt cleanup.
-This does not change application-wide exit-handler ordering.
+Normal application exit drains simulation producers/updaters before closing local
+memory, then closes the gateway owned by this process. Lazy client construction
+does not change that order; an inherited parent gateway is never closed here.
 
 ## Verification
 

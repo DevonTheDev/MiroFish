@@ -6,11 +6,11 @@ loopback address to children; standalone simulation scripts own their gateway.
 
 from __future__ import annotations
 
-import atexit
 import os
 import threading
 
 from ..config import Config
+from ..shutdown import register_shutdown_callback
 
 _GATEWAY_ENV = "MIROFISH_LOCAL_GATEWAY_URL"
 _gateway = None
@@ -79,7 +79,7 @@ def get_local_gateway_url() -> str:
                 )
             )
             _gateway.start()
-            atexit.register(close_local_gateway)
+            register_shutdown_callback("gateway", close_local_gateway)
         return _gateway.start()
 
 

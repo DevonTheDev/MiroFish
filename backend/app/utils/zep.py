@@ -13,6 +13,7 @@ from zep_cloud.client import Zep
 from zep_cloud.core.api_error import ApiError as ZepApiError
 
 from ..config import Config
+from ..shutdown import register_shutdown_callback
 from .logger import get_logger
 
 logger = get_logger("mirofish.zep")
@@ -113,8 +114,7 @@ def _get_local_client():
         request_timeout=Config.LOCAL_REQUEST_TIMEOUT,
         max_concurrency=Config.LOCAL_MAX_CONCURRENCY,
     ))
-    import atexit
-    atexit.register(client.close)
+    register_shutdown_callback("memory", client.close)
     return client
 
 def clear_zep_client_cache() -> None:

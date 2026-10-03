@@ -532,3 +532,27 @@ to every runner read/API path or protect against hostile local filesystem change
 between validation and use. Local tests cover actual readers/cache behavior,
 partial writes, nested saves, retries and storage aliases with disposable files;
 native Windows and live simulation processes remain separate validation work.
+
+### Ordered normal shutdown
+
+The app registers one ordered exit callback for its owned resources: first stop
+simulations and drain their graph updaters, then close local memory clients, then
+close the inference gateway owned by this process. Lazy initialization no longer
+allows a later-created client or gateway to close ahead of the updater that needs
+it. Children using an inherited gateway address do not close the parent's gateway.
+Distinct memory clients are all retained for cleanup, while repeated registration
+of the same callback is ignored.
+
+Existing signal cleanup still runs first when invoked, and its completed runner
+cleanup remains a no-op during the exit fallback. A cleanup failure does not skip
+attempts for later owned resources; the first error retains secondary failure
+notes. This coordinates normal Python exit, whose standard
+[atexit callbacks run in reverse registration order](https://docs.python.org/3.11/library/atexit.html).
+It does not recover from a hard kill, force an unresponsive producer to drain, or
+guarantee that interrupted graph writes completed successfully.
+
+Local tests exercise the actual registrations, shared client and runner/updater
+cleanup with synthetic resources, plus a separate Python interpreter exiting
+normally. They cover lazy creation order, gateway-only use, inherited gateways,
+signal-before-exit cleanup and failed callbacks. No OS signal is sent, and these
+tests do not run models or live simulation subprocesses.

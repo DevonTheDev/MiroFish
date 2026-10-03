@@ -11,7 +11,6 @@ import asyncio
 import threading
 import subprocess
 import signal
-import atexit
 from typing import Dict, Any, List, Optional, Union
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -21,6 +20,7 @@ from contextlib import closing
 from pathlib import Path
 
 from ..config import Config
+from ..shutdown import register_shutdown_callback
 from ..storage import StoragePathError, storage_path, validate_record_id
 from ..utils.logger import get_logger
 from ..utils.locale import get_locale, set_locale
@@ -1684,7 +1684,7 @@ class SimulationRunner:
                 raise KeyboardInterrupt
         
         # 注册 atexit 处理器（作为备用）
-        atexit.register(cls.cleanup_all_simulations)
+        register_shutdown_callback("simulations", cls.cleanup_all_simulations)
         
         # 注册信号处理器（仅在主线程中）
         try:
