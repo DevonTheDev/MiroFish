@@ -11,17 +11,19 @@ export const createSimulation = (data) => {
 /**
  * 准备模拟环境（异步任务）
  * @param {Object} data - { simulation_id, entity_types?, use_llm_for_profiles?, parallel_profile_count?, force_regenerate? }
+ * @param {AbortSignal} [signal] - Cancel HTTP observation, not backend preparation
  */
-export const prepareSimulation = (data) => {
-  return service.post('/api/simulation/prepare', data)
+export const prepareSimulation = (data, signal) => {
+  return service.post('/api/simulation/prepare', data, { signal })
 }
 
 /**
  * 查询准备任务进度
  * @param {Object} data - { task_id?, simulation_id? }
+ * @param {AbortSignal} [signal] - Optional view cancellation
  */
-export const getPrepareStatus = (data) => {
-  return service.post('/api/simulation/prepare/status', data)
+export const getPrepareStatus = (data, signal) => {
+  return service.post('/api/simulation/prepare/status', data, { signal })
 }
 
 /**
@@ -65,10 +67,11 @@ export const getSimulationConfig = (simulationId) => {
 /**
  * 实时获取生成中的模拟配置
  * @param {string} simulationId
+ * @param {AbortSignal} [signal] - Optional view cancellation
  * @returns {Promise} 返回配置信息，包含元数据和配置内容
  */
-export const getSimulationConfigRealtime = (simulationId) => {
-  return service.get(`/api/simulation/${simulationId}/config/realtime`)
+export const getSimulationConfigRealtime = (simulationId, signal) => {
+  return service.get(`/api/simulation/${simulationId}/config/realtime`, { signal })
 }
 
 /**

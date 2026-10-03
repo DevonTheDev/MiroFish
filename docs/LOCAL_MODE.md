@@ -573,3 +573,24 @@ version locks, power-loss durability or protection against hostile local path
 changes. Local tests exercise real report readers and the Flask progress endpoint
 during serialization, failed first/repeated saves, retry and path aliases using
 disposable files. Native Windows and live model generation remain unverified.
+
+### Preparation view request lifetime
+
+Step2 ties preparation startup and status/profile/config reads to its current
+mounted simulation. Changing that simulation or leaving the component retires
+the old requests and aborts their HTTP observation. Late responses cannot restart
+timers, overwrite the current display or emit an old completion/error. Polls in
+the same stream do not overlap. The final prepared-data load waits for any current
+read before requesting a fresh snapshot, checking ownership after every await.
+
+A generated config while preparation is still running is a preview. The view
+waits for confirmed preparation readiness and the final data load before enabling
+the next step. Terminal completion/failure stops remaining polls; a completed
+mounted view keeps its data and normal custom/automatic round selection.
+
+Aborting HTTP does not cancel preparation already running on the backend. These
+guards apply to the Step2 component's received simulation ID, not every parent
+route or the separate Step3 simulation screen. Local tests execute the actual Vue
+setup/reactivity with deferred replies and verify cancellation through real Axios
+requests to a disposable loopback server. Browser rendering and model execution
+remain separate validation work.
