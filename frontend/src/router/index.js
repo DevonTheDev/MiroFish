@@ -10,11 +10,17 @@ import SimulationComparisonView from '../views/SimulationComparisonView.vue'
 import RuntimeStatusView from '../views/RuntimeStatusView.vue'
 import PromptTrialsView from '../views/PromptTrialsView.vue'
 import PromptSuitesView from '../views/PromptSuitesView.vue'
+import PromptSuiteComparisonView from '../views/PromptSuiteComparisonView.vue'
 import SavedReportsView from '../views/SavedReportsView.vue'
 
 import RunCapturesView from '../views/RunCapturesView.vue'
 
 const routes = [
+  {
+    path: '/prompt-suite-comparison',
+    name: 'PromptSuiteComparison',
+    component: PromptSuiteComparisonView
+  },
   {
     path: '/prompt-suites',
     name: 'PromptSuites',

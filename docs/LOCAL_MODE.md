@@ -368,6 +368,70 @@ Pure contract tests also cover strict imports and bounded polling. No real model
 weights, GPU quality/performance, native browser rendering/headers or Windows
 behavior is established by these tests.
 
+## Compare exported prompt-suite runs
+
+From **Prompt suites**, open **Compare run reports** (`/prompt-suite-comparison`).
+This separate page works with two exported run reports in browser memory. It
+does not read runtime status, start inference, reconcile a request, or save an
+archive. It can be used after changing a local model and repeating a saved suite.
+
+1. Select a baseline run report and a comparison run report. Review each preview,
+   then explicitly use it in its slot. Selecting a file alone does not replace
+   an accepted report or run a comparison
+2. Choose **Compare reports** to capture the selected pair. Inspect recorded
+   outcomes, exact-check transitions, replies, model settings and request timings
+3. Download the captured JSON/TXT comparison. Clear or replace a slot, or swap
+   the direction, before making another explicit comparison
+
+Cases match only by their stable case ID. Added/removed cases and changed
+prompts, settings or expectations remain visible. A paired finding requires
+identical system/user prompts, temperature, output-token request and expectation,
+two recorded successful outcomes, and request IDs absent from the opposite
+report. Names and labels do
+not substitute for identity; label changes are displayed separately. Different
+run IDs are required. A shared case is flagged as an overlap if either of its
+request IDs appears anywhere in the opposite report, including under a different
+case ID, and is excluded from paired findings.
+The order flag considers only shared cases; it does not call an insertion a move.
+
+An exact check can be gained, lost or retained only when that pair has the same
+enabled expectation. A disabled check differs from expecting an empty reply.
+Unknown, running, rejected, not-attempted, truncated, refused and failed outcomes
+are preserved, with unavailable findings shown as unavailable rather than zero.
+The page does not infer coverage from the report's overall status: a halted run
+may contain a later reconciled successful observation.
+
+Request-duration differences are comparison minus baseline, only for eligible
+pairs with two recorded durations. Zero is a valid duration; a missing duration
+is not zero. Overall elapsed time is shown separately because it includes startup
+and cleanup. Configurations are shown per case, with a warning for multiple
+observed model/reasoning settings in one report. These are recorded configuration
+labels, not authenticated weights or proof the server followed them. Hardware,
+warm-up and other workload conditions are unknown. No pass rate, overall winner,
+accuracy, throughput or statistically significant speed claim is produced.
+
+Imports are limited to 1 MiB each and require valid UTF-8, supported v1 report
+structure and identities. Duplicate keys, excessive nesting and malformed
+captures are rejected before fixed-field projection. A failed or canceled
+replacement retains the accepted historical slot and comparison. An accepted
+replacement, Clear or Swap retires the old result. Navigation retires pending
+reads and loses page memory; reports are not put in URLs or browser storage.
+
+Each comparison export is limited to 4 MiB of UTF-8, refused rather than
+truncated, and contains the two sanitized captures plus derived findings. TXT
+uses fixed labels and quoted literal values, escaping control/format characters.
+An export failure keeps the valid screen result. Downloading uses its captured
+bytes and time; comparison bundles are reports, not supported import files.
+The files contain prompts and replies, so choose their destination accordingly.
+
+Local tests import actual suite exports generated through Flask, the shared
+gateway, a synthetic loopback model, Axios and the compiled suite editor. The
+comparison then runs with the proxy closed and HTTP/fetch/socket tripwires.
+Additional compiled Vue tests cover both languages, partial results, invalid
+files, stale file/action ownership and download cleanup. This validates the
+scoped offline workflow, not an operating-system firewall, real model quality,
+GPU performance, native browser dialogs/layout or Windows behavior.
+
 ## Explore latest saved activity
 
 In History, open a saved simulation and choose **Saved activity**. The dedicated

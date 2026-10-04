@@ -6,6 +6,7 @@
         <RouterLink to="/">{{ t('runtime.backHome') }}</RouterLink>
         <RouterLink to="/runtime">{{ t('runtime.navTitle') }}</RouterLink>
         <RouterLink to="/prompt-trials">{{ t('promptTrials.navTitle') }}</RouterLink>
+        <RouterLink to="/prompt-suite-comparison">{{ t('promptSuiteComparison.navTitle') }}</RouterLink>
         <LanguageSwitcher />
       </nav>
     </header>

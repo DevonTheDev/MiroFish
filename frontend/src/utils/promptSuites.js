@@ -33,9 +33,9 @@ export function acceptPromptSuiteDefinition(source) {
 
 // JSON.parse silently overwrites duplicate keys. This bounded parser rejects them,
 // including escaped aliases, before schema admission. Depth is capped before recursion.
-export function parsePromptSuiteDefinition(source) {
+function parseBoundedJson(source, maximumBytes, maximumDepth, kind) {
   try {
-    if (typeof source !== 'string' || bytes(source) > PROMPT_SUITE_MAX_BYTES) return invalid('definition')
+    if (typeof source !== 'string' || bytes(source) > maximumBytes) return invalid(kind)
     let cursor = 0
     const whitespace = () => { while (/[\t\n\r ]/.test(source[cursor] ?? '\0')) cursor++ }
     function string() {
@@ -45,10 +45,10 @@ export function parsePromptSuiteDefinition(source) {
         if (character === '\\') cursor++
         else if (character === '"') return JSON.parse(source.slice(start, cursor))
       }
-      return invalid('definition')
+      return invalid(kind)
     }
     function value(depth) {
-      if (depth > 4) return invalid('definition')
+      if (depth > maximumDepth) return invalid(kind)
       whitespace()
       if (source[cursor] === '"') return string()
       if (source[cursor] === '{' || source[cursor] === '[') {
@@ -59,28 +59,36 @@ export function parsePromptSuiteDefinition(source) {
           whitespace()
           if (array) result.push(value(depth + 1))
           else {
-            if (source[cursor] !== '"') return invalid('definition')
+            if (source[cursor] !== '"') return invalid(kind)
             const key = string()
-            if (keys.has(key)) return invalid('definition')
+            if (keys.has(key)) return invalid(kind)
             keys.add(key); whitespace()
-            if (source[cursor++] !== ':') return invalid('definition')
+            if (source[cursor++] !== ':') return invalid(kind)
             result[key] = value(depth + 1)
           }
           whitespace()
           if (source[cursor] === end) { cursor++; return result }
-          if (source[cursor++] !== ',') return invalid('definition')
+          if (source[cursor++] !== ',') return invalid(kind)
         }
-        return invalid('definition')
+        return invalid(kind)
       }
       const token = /^(?:true|false|null|-?(?:0|[1-9]\d*)(?:\.\d+)?(?:[eE][+-]?\d+)?)/.exec(source.slice(cursor))?.[0]
-      if (!token) return invalid('definition')
+      if (!token) return invalid(kind)
       cursor += token.length
       return JSON.parse(token)
     }
     const result = value(0); whitespace()
-    if (cursor !== source.length) return invalid('definition')
-    return acceptPromptSuiteDefinition(result)
-  } catch { return invalid('definition') }
+    if (cursor !== source.length) return invalid(kind)
+    return result
+  } catch { return invalid(kind) }
+}
+
+export function parsePromptSuiteDefinition(source) {
+  return acceptPromptSuiteDefinition(parseBoundedJson(source, PROMPT_SUITE_MAX_BYTES, 4, 'definition'))
+}
+
+export function parsePromptSuiteReport(source) {
+  return acceptPromptSuiteReport(parseBoundedJson(source, PROMPT_SUITE_REPORT_MAX_BYTES, 12, 'report'))
 }
 
 export function exportPromptSuiteDefinition(source) {
