@@ -19,7 +19,8 @@ from test_prompt_trials_frontend_workflow import synthetic_trial_model
 
 
 @pytest.mark.parametrize("scenario", ["completed", "truncated"])
-def test_actual_suite_report_becomes_reviewed_examples_offline(monkeypatch, tmp_path, scenario, caplog):
+@pytest.mark.parametrize("resume", [False, True])
+def test_actual_suite_report_becomes_reviewed_examples_offline(monkeypatch, tmp_path, scenario, resume, caplog):
     repo = Path(__file__).resolve().parents[2]
     node = shutil.which("node")
     if node is None or not (repo / "frontend/node_modules/vue/package.json").is_file():
@@ -76,6 +77,7 @@ def test_actual_suite_report_becomes_reviewed_examples_offline(monkeypatch, tmp_
             result = subprocess.run([
                 node, str(repo / "frontend/tests/fixtures/prompt-examples-backend-smoke.mjs"),
                 f"http://127.0.0.1:{server.server_port}", scenario, str(output),
+                "resume" if resume else "direct",
             ], cwd=repo / "frontend", capture_output=True, text=True, timeout=90)
             assert result.returncode == 0, result.stdout + result.stderr
             assert "actual suite replies reviewed and exported offline" in result.stdout
@@ -114,6 +116,21 @@ def test_actual_suite_report_becomes_reviewed_examples_offline(monkeypatch, tmp_
             assert "UNSELECTED_EXAMPLE_MUST_NOT_EXPORT" not in saved["review"] + saved["jsonl"]
             assert "unused-test-key" not in saved["review"] + saved["jsonl"]
             assert "unused-test-password" not in saved["review"] + saved["jsonl"]
+            if resume:
+                draft = json.loads(saved["draft"])
+                assert set(draft) == {"schema_version", "kind", "captured_at", "source_report", "targets"}
+                assert draft["kind"] == "mirofish_prompt_example_draft"
+                assert draft["schema_version"] == 1
+                assert len(draft["source_report"]["cases"]) == len(draft["targets"]) == 3
+                assert draft["source_report"]["status"] == ("completed" if scenario == "completed" else "halted")
+                assert [item["target_text"] for item in draft["targets"][:2]] == [row["messages"][-1]["content"] for row in rows]
+                assert draft["targets"][2]["target_text"] == ("" if scenario == "completed" else " \r\n\t ")
+                assert all(set(item) == {"case_id", "target_text"} for item in draft["targets"])
+                assert "UNSELECTED_EXAMPLE_MUST_NOT_EXPORT" in saved["draft"]
+                assert "unused-test-key" not in saved["draft"]
+                assert "unused-test-password" not in saved["draft"]
+            else:
+                assert saved["draft"] is None
             assert "PROMPT_BODY_PRIVATE" not in caplog.text
             assert "请求: GET /api/runtime/trials" in caplog.text
         finally:

@@ -16,8 +16,11 @@
         <h2 id="examples-import-title">{{ t('promptExamples.importTitle') }}</h2>
         <label for="examples-file">{{ t('promptExamples.chooseFile') }}</label>
         <input id="examples-file" data-testid="examples-file" type="file" accept="application/json,.json" @change="actions.read">
-        <p v-if="importState.loading" role="status">{{ t('promptExamples.reading') }}</p>
-        <p v-if="importState.error" class="notice error" data-testid="examples-import-error" role="alert">{{ t('promptExamples.importError') }}</p>
+        <label for="examples-draft-file">{{ t('promptExamples.openDraft') }}</label>
+        <input id="examples-draft-file" data-testid="examples-draft-file" type="file" accept="application/json,.json" @change="actions.readDraft">
+        <p class="reading-note">{{ t('promptExamples.draftLimits') }}</p>
+        <p v-if="importState.loading" role="status">{{ t(importState.kind === 'draft' ? 'promptExamples.readingDraft' : 'promptExamples.reading') }}</p>
+        <p v-if="importState.error" class="notice error" data-testid="examples-import-error" role="alert">{{ t(importState.kind === 'draft' ? 'promptExamples.draftImportError' : 'promptExamples.importError') }}</p>
         <article v-if="source" data-testid="examples-accepted">
           <h3>{{ t('promptExamples.accepted') }}: {{ source.report.definition.name }}</h3>
           <dl><div><dt>{{ t('promptSuites.runId') }}</dt><dd>{{ source.report.run_id }}</dd></div><div><dt>{{ t('promptExamples.recordedRunStatus') }}</dt><dd>{{ t(`promptSuites.runStates.${source.report.status}`) }}</dd></div><div><dt>{{ t('promptTrials.startedAt') }}</dt><dd>{{ source.report.started_at }}</dd></div><div><dt>{{ t('promptTrials.finishedAt') }}</dt><dd>{{ value(source.report.finished_at) }}</dd></div></dl>
@@ -26,14 +29,42 @@
           <p v-if="importState.retained" class="notice warning" data-testid="examples-retained">{{ t('promptExamples.retained') }}</p>
         </article>
         <p v-else>{{ t('promptExamples.empty') }}</p>
-        <article v-if="importState.preview" class="preview" data-testid="examples-preview">
-          <h3>{{ t('promptExamples.preview') }}: {{ importState.preview.report.definition.name }}</h3><p>{{ t('promptExamples.previewNote') }}</p>
+        <article v-if="importState.preview" class="preview" data-testid="examples-preview" :data-kind="importState.preview.kind">
+          <h3>{{ t(importState.preview.kind === 'draft' ? 'promptExamples.draftPreview' : 'promptExamples.preview') }}: {{ importState.preview.report.definition.name }}</h3>
+          <p>{{ t(importState.preview.kind === 'draft' ? 'promptExamples.draftPreviewNote' : 'promptExamples.previewNote') }}</p>
+          <p v-if="importState.preview.kind === 'draft'">{{ t('promptExamples.captured') }} <time :datetime="importState.preview.capturedAt">{{ importState.preview.capturedAt }}</time></p>
           <p>{{ t('promptSuites.runId') }}: {{ importState.preview.report.run_id }}</p>
           <p>{{ t(`promptSuites.runStates.${importState.preview.report.status}`) }} · {{ t('promptExamples.caseCount', { count: importState.preview.report.cases.length }) }}</p>
-          <ol><li v-for="(item, index) in importState.preview.report.definition.cases" :key="item.case_id">{{ item.label }} · {{ t(`promptSuites.caseStates.${importState.preview.report.cases[index].status}`) }} · {{ t(`promptSuites.checkKinds.${checkKind(item)}`) }}</li></ol>
-          <button type="button" data-testid="examples-use" @click="actions.use">{{ t('promptExamples.use') }}</button>
+          <template v-if="importState.preview.kind === 'draft'">
+            <dl><div><dt>{{ t('promptTrials.startedAt') }}</dt><dd>{{ importState.preview.report.started_at }}</dd></div><div><dt>{{ t('promptTrials.finishedAt') }}</dt><dd>{{ value(importState.preview.report.finished_at) }}</dd></div></dl>
+            <p v-if="importState.preview.report.stop_requested">{{ t('promptSuites.stopRequested') }}</p>
+            <p v-if="importState.preview.report.halt_code">{{ t(`promptSuites.errors.${importState.preview.report.halt_code}`) }}</p>
+          </template>
+          <ol><li v-for="(item, index) in importState.preview.report.definition.cases" :key="item.case_id">
+            {{ item.label }} · {{ t(`promptSuites.caseStates.${importState.preview.report.cases[index].status}`) }} · {{ t(`promptSuites.checkKinds.${checkKind(item)}`) }}
+            <template v-if="importState.preview.kind === 'draft'">
+              <p class="identifier">{{ t('promptExamples.caseId') }}: {{ item.case_id }}</p>
+              <h4>{{ t('promptExamples.draftTarget') }}</h4><pre :data-testid="`examples-preview-target-${index}`">{{ importState.preview.targets[index].target_text }}</pre>
+              <small v-if="importState.preview.targets[index].target_text === ''">{{ t('promptExamples.emptyDraftTarget') }}</small>
+              <details><summary>{{ t('promptExamples.recordedDetails') }}</summary>
+                <h5>{{ t('promptTrials.systemPrompt') }}</h5><pre :data-testid="`examples-preview-system-${index}`">{{ item.system_prompt }}</pre>
+                <h5>{{ t('promptTrials.userPrompt') }}</h5><pre :data-testid="`examples-preview-user-${index}`">{{ item.user_prompt }}</pre>
+                <h5>{{ t('promptExamples.recordedReply') }}</h5>
+                <pre v-if="typeof importState.preview.report.cases[index].snapshot?.run?.response?.content === 'string'" :data-testid="`examples-preview-reply-${index}`">{{ importState.preview.report.cases[index].snapshot.run.response.content }}</pre><p v-else>{{ t('promptTrials.noContent') }}</p>
+                <template v-if="typeof importState.preview.report.cases[index].snapshot?.run?.response?.refusal === 'string'"><h5>{{ t('promptExamples.recordedRefusal') }}</h5><pre>{{ importState.preview.report.cases[index].snapshot.run.response.refusal }}</pre></template>
+              </details>
+            </template>
+          </li></ol>
+          <details v-if="importState.preview.kind === 'draft'"><summary>{{ t('promptExamples.fullDraftSource') }}</summary><pre data-testid="examples-preview-source">{{ sourceReportText(importState.preview.report) }}</pre></details>
+          <button type="button" data-testid="examples-use" @click="actions.use">{{ t(importState.preview.kind === 'draft' ? 'promptExamples.useDraft' : 'promptExamples.use') }}</button>
         </article>
         <div class="toolbar"><button v-if="importState.preview || importState.loading" type="button" data-testid="examples-cancel" @click="actions.cancel">{{ t('promptExamples.cancel') }}</button><button type="button" data-testid="examples-clear" :disabled="!source && !importState.preview && !importState.loading && !importState.error" @click="actions.clear">{{ t('promptExamples.clear') }}</button></div>
+      </section>
+      <section class="panel" aria-labelledby="examples-draft-title">
+        <h2 id="examples-draft-title">{{ t('promptExamples.draftTitle') }}</h2>
+        <p class="notice" data-testid="examples-draft-privacy">{{ t('promptExamples.draftPrivacy') }}</p>
+        <div v-for="actions in [draftDownloadActions]" :key="'draft-download-actions'" class="toolbar"><button type="button" data-testid="examples-export-draft" :disabled="!source" @click="actions.download">{{ t('promptExamples.downloadDraft') }}</button></div>
+        <p v-if="draftExportError" class="notice error" data-testid="examples-draft-export-error" role="alert">{{ t('promptExamples.draftExportError') }}</p>
       </section>
       <section v-if="source" class="review-section" aria-labelledby="examples-review-title">
         <h2 id="examples-review-title">{{ t('promptExamples.reviewTitle') }}</h2>
@@ -102,42 +133,48 @@ import { RouterLink } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import LanguageSwitcher from '../components/LanguageSwitcher.vue'
 import { parsePromptSuiteReport, getPromptSuiteCheck, evaluatePromptSuiteCheck, PROMPT_SUITE_REPORT_MAX_BYTES } from '../utils/promptSuites.js'
-import { capturePromptExampleSource, approvePromptExampleTarget, buildPromptExamples, exportPromptExamples } from '../utils/promptExamples.js'
+import { capturePromptExampleSource, approvePromptExampleTarget, buildPromptExamples, exportPromptExamples,
+  capturePromptExampleDraft, parsePromptExampleDraft, exportPromptExampleDraft, PROMPT_EXAMPLES_DRAFT_MAX_BYTES } from '../utils/promptExamples.js'
 
 const { t } = useI18n()
-const emptyImport = () => ({ preview: null, loading: false, error: false, retained: false })
+const emptyImport = () => ({ preview: null, loading: false, error: false, retained: false, kind: 'report' })
 const importState = shallowRef(emptyImport()), source = shallowRef(null), rows = shallowRef([]), bundle = shallowRef(null)
 const buildError = ref(false), exportError = ref(false), downloadRevision = ref(0), buildRevision = ref(0)
+const draftExportError = ref(false), draftDownloadRevision = ref(0)
 let retired = false, fileGeneration = 0
 function activeFile(token) { return !retired && fileGeneration === token }
 function invalidateBundle() { bundle.value = null; buildError.value = false; exportError.value = false }
 function updateImport(change) { importState.value = { ...importState.value, ...change } }
-async function readFile(event, token) {
+async function readFile(event, token, kind = 'report') {
   if (!activeFile(token)) return
   const file = event.target.files?.[0], reading = ++fileGeneration
   event.target.value = ''
-  updateImport({ preview: null, loading: !!file, error: false, retained: !!source.value })
+  updateImport({ preview: null, loading: !!file, error: false, retained: !!source.value, kind })
   if (!file) return
   try {
-    if (!Number.isSafeInteger(file.size) || file.size < 0 || file.size > PROMPT_SUITE_REPORT_MAX_BYTES || typeof file.arrayBuffer !== 'function') throw new Error('Invalid file')
+    const maxBytes = kind === 'draft' ? PROMPT_EXAMPLES_DRAFT_MAX_BYTES : PROMPT_SUITE_REPORT_MAX_BYTES
+    if (!Number.isSafeInteger(file.size) || file.size < 0 || file.size > maxBytes || typeof file.arrayBuffer !== 'function') throw new Error('Invalid file')
     const bytes = await file.arrayBuffer()
     if (!activeFile(reading)) return
-    if (Object.prototype.toString.call(bytes) !== '[object ArrayBuffer]' || bytes.byteLength > PROMPT_SUITE_REPORT_MAX_BYTES) throw new Error('Invalid bytes')
-    const report = parsePromptSuiteReport(new TextDecoder('utf-8', { fatal: true, ignoreBOM: true }).decode(bytes))
-    const capture = capturePromptExampleSource(report)
-    if (activeFile(reading)) updateImport({ preview: { capture, report: capture.toReport(), token: reading }, loading: false })
+    if (Object.prototype.toString.call(bytes) !== '[object ArrayBuffer]' || bytes.byteLength > maxBytes) throw new Error('Invalid bytes')
+    const text = new TextDecoder('utf-8', { fatal: true, ignoreBOM: true }).decode(bytes)
+    const draft = kind === 'draft' ? parsePromptExampleDraft(text).toReport() : null
+    const capture = capturePromptExampleSource(draft ? draft.source_report : parsePromptSuiteReport(text))
+    if (activeFile(reading)) updateImport({ preview: { kind, capture, report: capture.toReport(), token: reading,
+      ...(draft ? { targets: draft.targets, capturedAt: draft.captured_at } : {}) }, loading: false })
   } catch { if (activeFile(reading)) updateImport({ loading: false, error: true }) }
 }
 const importActions = computed(() => {
   const state = importState.value, token = fileGeneration, preview = state.preview
   return {
     read: event => readFile(event, token),
+    readDraft: event => readFile(event, token, 'draft'),
     use: () => {
       if (!preview || !activeFile(token) || importState.value.preview !== preview) return
       fileGeneration++
       source.value = { capture: preview.capture, report: preview.report }
-      rows.value = preview.report.definition.cases.map((input, index) => ({ input, row: preview.report.cases[index], target: '', approval: null, error: false }))
-      importState.value = emptyImport(); invalidateBundle()
+      rows.value = preview.report.definition.cases.map((input, index) => ({ input, row: preview.report.cases[index], target: preview.kind === 'draft' ? preview.targets[index].target_text : '', approval: null, error: false }))
+      importState.value = emptyImport(); draftExportError.value = false; invalidateBundle()
     },
     cancel: () => {
       if (!activeFile(token)) return
@@ -145,7 +182,7 @@ const importActions = computed(() => {
     },
     clear: () => {
       if (!activeFile(token)) return
-      fileGeneration++; importState.value = emptyImport(); source.value = null; rows.value = []; invalidateBundle()
+      fileGeneration++; importState.value = emptyImport(); source.value = null; rows.value = []; draftExportError.value = false; invalidateBundle()
     },
   }
 })
@@ -159,7 +196,7 @@ const rowViews = computed(() => {
   const ownedSource = source.value
   return rows.value.map((row, index) => {
     const valid = validTarget(row.target), current = () => rowIsCurrent(ownedSource, row, index)
-    const setTarget = target => { if (current()) replaceRow(index, { ...row, target, approval: null, error: false }) }
+    const setTarget = target => { if (current()) { replaceRow(index, { ...row, target, approval: null, error: false }); draftExportError.value = false } }
     return { ...row, valid, approvalReport: row.approval?.toReport(),
       targetCheck: valid ? evaluatePromptSuiteCheck(row.input, 'succeeded', row.target) : null,
       replyEqual: row.row.status === 'succeeded' ? row.target === row.row.snapshot.run.response.content : null,
@@ -211,6 +248,43 @@ const downloadActions = computed(() => {
   const once = format => { let used = false; return () => { if (used) return; used = true; download(owned, format); downloadRevision.value++ } }
   return { jsonl: once('jsonl'), review: once('review') }
 })
+function downloadDraft(ownedSource, ownedRows, current) {
+  if (!current()) return
+  let url = null, anchor = null
+  const failed = () => { if (current()) draftExportError.value = true }
+  try {
+    const capture = capturePromptExampleDraft(ownedSource.capture, ownedRows.map(row => ({ case_id: row.input.case_id, target_text: row.target })))
+    const exported = exportPromptExampleDraft(capture)
+    if (!current()) return
+    const blob = new Blob([exported.draft_json_text], { type: 'application/json;charset=utf-8' })
+    if (!current()) return
+    url = URL.createObjectURL(blob)
+    if (!current()) return
+    anchor = document.createElement('a')
+    if (!current()) return
+    anchor.href = url; anchor.download = 'prompt_example_curation.draft.json'
+    document.body.appendChild(anchor)
+    if (!current()) return
+    anchor.click()
+    if (current()) draftExportError.value = false
+  } catch { failed() }
+  finally {
+    try { anchor?.remove() } catch { failed() }
+    try { if (url !== null) URL.revokeObjectURL(url) } catch { failed() }
+  }
+}
+const draftDownloadActions = computed(() => {
+  const ownedSource = source.value, ownedRows = rows.value, revision = draftDownloadRevision.value
+  const current = () => !retired && !!ownedSource && source.value === ownedSource && rows.value === ownedRows && draftDownloadRevision.value === revision
+  let used = false
+  return { download: () => {
+    if (used || !current()) return
+    used = true
+    downloadDraft(ownedSource, ownedRows, current)
+    draftDownloadRevision.value++
+  } }
+})
+function sourceReportText(report) { return JSON.stringify(report, null, 2) }
 function checkKind(input) { return getPromptSuiteCheck(input).kind }
 function requiredFieldsText(input) { return input.required_fields.map(rule => `${JSON.stringify(rule.name)}: ${rule.type}`).join('\n') }
 function checkLabel(input, check) {

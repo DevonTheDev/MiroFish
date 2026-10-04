@@ -1766,8 +1766,8 @@
     "recordedDetails": "Recorded prompts, check and settings",
     "targetTitle": "Human-reviewed target",
     "targetLabel": "Target reply",
-    "targetBounds": "Required: nonblank text, up to 16,384 Unicode code points and 64 KiB UTF-8. Control characters are not allowed except carriage return, line feed and tab. Text is preserved exactly.",
-    "invalidTarget": "Enter a nonblank target within the character and byte limits, without unsupported control characters.",
+    "targetBounds": "Approval requires nonblank text. Curation drafts may contain empty or whitespace-only targets. Each target is limited to 16,384 Unicode code points and 64 KiB UTF-8. Control characters are not allowed except carriage return, line feed and tab. Text is preserved exactly.",
+    "invalidTarget": "Approval requires nonblank text within the character and byte limits, without unsupported control characters. Curation drafts can retain empty or whitespace-only targets within the same limits.",
     "editNote": "Editing or copying a target removes its approval and any built bundle immediately. Copying only creates a draft.",
     "copy": "Copy recorded reply",
     "targetCheck": "Target check (separate from recorded reply)",
@@ -1793,6 +1793,20 @@
     "privacy": "Downloads contain selected prompts, targets and, in the review file, recorded replies and observations. Keep them private as needed.",
     "yes": "Yes",
     "no": "No",
-    "notApplicable": "Not applicable"
+    "notApplicable": "Not applicable",
+    "openDraft": "Open curation draft",
+    "draftLimits": "Curation draft JSON files may be up to 4 MiB in UTF-8. Their embedded source report must meet the original 1 MiB report limit. Reviewed-example JSON and JSONL are not curation drafts.",
+    "readingDraft": "Reading curation draft…",
+    "draftImportError": "The curation draft could not be accepted. Choose a valid UTF-8 curation draft up to 4 MiB with a valid source report up to 1 MiB.",
+    "draftPreview": "Curation draft preview",
+    "draftPreviewNote": "Use this draft to replace the accepted source and restore every target exactly as shown. All approvals will be reset and the built bundle cleared. Review and approve targets again before building selected examples.",
+    "draftTarget": "Saved target draft",
+    "emptyDraftTarget": "Empty target draft",
+    "fullDraftSource": "Full captured source report and metadata",
+    "useDraft": "Use this draft",
+    "draftTitle": "Save curation work",
+    "draftPrivacy": "This download contains ALL source prompts and replies and ALL target drafts, including unapproved and empty targets. Keep it private as needed. No automatic saving or browser storage is used. The draft contains no approvals; targets must be approved again after restoring it.",
+    "downloadDraft": "Download curation draft",
+    "draftExportError": "The curation draft download could not be completed. Check your downloads before retrying; a file may already have been saved. Also check every target's character and byte limits and unsupported control characters. Current targets, approvals and any built bundle are retained."
   }
 }

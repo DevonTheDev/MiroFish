@@ -773,8 +773,10 @@ download weights, or write a backend archive.
    selection and time. Removing approval or replacing the accepted source
    requires building again
 
-Targets must be nonblank, use at most 16,384 Unicode codepoints and 64 KiB UTF-8,
-and contain no control or surrogate characters except CR, LF and tab. Accepted
+Targets must be nonblank before approval. Target text uses at most 16,384
+Unicode codepoints and 64 KiB UTF-8, and contains no control or surrogate
+characters except CR, LF and tab. Empty and whitespace-only targets can be saved
+in a curation draft without being eligible for approval. Accepted
 prompts and targets remain exact: whitespace, Unicode, tags and reasoning
 wrappers are not trimmed or rewritten. A succeeded response can still be empty,
 contain unsupported controls, or be incorrect; it must become a valid reviewed
@@ -810,9 +812,10 @@ training examples separate from independent held-out evaluation cases.
 JSONL is limited to 1 MiB and review JSON to 4 MiB, refused rather than truncated.
 The files include selected prompts, targets and, in the review file, recorded
 replies; choose their destination accordingly. There is no automatic browser
-storage, restoration or merge. Leaving or reloading the page loses its in-memory
-review. A captured download remains byte-identical on repeated use, and retired
-controls cannot export a replacement source or target.
+storage or merge. Leaving or reloading the page loses its in-memory review;
+download a curation draft first to recover its target text explicitly later.
+A captured reviewed-example download remains byte-identical on repeated use,
+and retired controls cannot export a replacement source or target.
 
 Local verification covers all supported report versions, historical outcomes,
 selection identity, target boundaries, immutable capture, both languages and
@@ -822,6 +825,61 @@ the review stage. Downloaded records also pass a real installed Transformers
 consumer with a synthetic local tokenizer/template. No pretrained-model template,
 actual training, weights, GPU performance, native browser dialogs or Windows
 behavior is established by these checks.
+
+### Save and reopen a curation draft
+
+Choose **Download curation draft** to save the current source and every target,
+including targets that are empty, unfinished or unapproved. No approved examples
+or built JSONL bundle are required. The file is `prompt_example_curation.draft.json`.
+It captures the current text on that explicit click; later edits need another
+download. It does not save anything to browser storage or a backend archive.
+
+In a fresh session, use **Open curation draft**, inspect its preview and choose
+**Use this draft**. The preview shows the recorded draft time, source and every
+target as literal text. Reading or previewing a file does not replace accepted
+work. A failed or canceled import retains the current targets, approvals and
+reviewed bundle. Report and draft selections share the same import ownership:
+a late file read or an old Use/Cancel button cannot replace a newer selection.
+
+Using a draft restores all target text in original source-case order, but every
+target is **unapproved** and no reviewed bundle is restored. Recheck each target,
+choose **Approve this target for export**, then build/download the selected
+examples as usual. Historical reply/check fields remain separate from the target
+check. This is editable work recovery, not an imported approval or an inference
+resume. It makes no runtime request, loads no model and starts no training.
+
+A draft contains **the full imported source report and all target text**, including
+source prompts/replies for cases omitted from selected JSONL/review exports.
+Review its contents and choose its destination accordingly. The selected-example
+review JSON remains selected-only; it is a different format and cannot be opened
+as a curation draft. The original suite-run report input also remains separate.
+
+The draft format is `schema_version: 1`, `kind: mirofish_prompt_example_draft`,
+with `captured_at`, `source_report` and an ordered `targets` array containing
+exactly `case_id` / `target_text` for every source case. It has no approval fields.
+The file is bounded to 4 MiB of strict UTF-8 JSON and depth 14. The embedded source
+is independently checked under the existing suite-report 1 MiB/depth-12 rules
+before its known-field projection. Invalid source observations, duplicate or
+escaped-alias keys, nonfinite numbers, lone surrogates, extra fields, reordered or
+missing target IDs and oversized values are refused. Recognized source fields
+and target strings are preserved; ignored snapshot fields are not carried forward.
+
+Each draft target has the same text limits as an approvable target, except that
+empty/whitespace text is allowed. There is no trimming, truncation or automatic
+repair. Recorded historical replies retain their existing source rules, which
+can allow controls that are unsuitable in an edited target. A failed draft
+download keeps the current work for correction and an explicit retry. A cleanup
+error can occur after a download starts, so check the download destination before
+retrying. Retired source/row handlers cannot download replacement content. Cleanup
+of temporary object URLs and anchors is attempted independently on every path.
+
+Local tests execute the real compiled Vue view/router in both languages with
+production handler caching. They cover strict file contracts, cross-kind import
+races, fresh-session target recovery, reapproval, literal text and download
+cleanup. The linked workflow captures real disposable local model replies, then
+blocks network/runtime access before draft download, reopening and final JSONL
+export. A local synthetic tokenizer checks those messages; this does not validate
+native browser dialogs, Windows, actual training or model quality.
 
 ## Compare exported prompt-suite runs
 

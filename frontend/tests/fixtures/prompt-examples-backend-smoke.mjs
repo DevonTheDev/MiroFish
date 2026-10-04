@@ -13,9 +13,10 @@ import { mountSuites, trialApi } from '../helpers/prompt-suites-view-fixture.js'
 import { mountPromptExamplesApp } from '../helpers/prompt-examples-view-fixture.js'
 import { parsePromptSuiteReport } from '../../src/utils/promptSuites.js'
 
-const [backendURL, scenario, outputPath] = process.argv.slice(2)
+const [backendURL, scenario, outputPath, mode = 'direct'] = process.argv.slice(2)
 assert.match(backendURL, /^http:\/\/127\.0\.0\.1:[0-9]+$/)
 assert.ok(['completed', 'truncated'].includes(scenario))
+assert.ok(['direct', 'resume'].includes(mode))
 const truncated = scenario === 'truncated'
 const root = fileURLToPath(new URL('../../', import.meta.url))
 const cacheDir = await mkdtemp(path.join(tmpdir(), 'miro-prompt-examples-vite-'))
@@ -89,6 +90,40 @@ try {
   await examples.click('examples-row-0-approve')
   await examples.input('examples-row-1-target', targets[1])
   await examples.click('examples-row-1-approve')
+  let draftText = null
+  if (mode === 'resume') {
+    const unfinished = truncated ? ' \r\n\t ' : ''
+    await examples.input('examples-row-2-target', unfinished)
+    await examples.click('examples-export-draft')
+    assert.equal(examples.downloads.at(-1).filename, 'prompt_example_curation.draft.json')
+    draftText = await examples.downloads.at(-1).blob.text()
+    const draft = JSON.parse(draftText)
+    assert.equal(draft.kind, 'mirofish_prompt_example_draft')
+    assert.deepEqual(draft.source_report, source)
+    assert.deepEqual(draft.targets, definition.cases.map((item, index) => ({
+      case_id: item.case_id, target_text: index < 2 ? targets[index] : unfinished,
+    })))
+    assert.equal(examples.revokedUrls.length, examples.downloads.length)
+    assert.equal(examples.removedAnchors.length, examples.downloads.length)
+    examples.unmount(); examples = null
+    examples = await mountPromptExamplesApp({ locale: truncated ? 'zh' : 'en', cacheHandlers: true,
+      api: { getPromptTrials: reject, getPromptTrial: reject, startPromptTrial: reject } })
+    assert.ok(!examples.byId('examples-accepted'))
+    const draftFile = new Blob([draftText], { type: 'application/json' })
+    await examples.draftFile({ name: '<curation draft>.json', size: draftFile.size, arrayBuffer: () => draftFile.arrayBuffer() })
+    assert.ok(examples.byId('examples-preview'))
+    assert.ok(!examples.byId('examples-accepted'))
+    await examples.click('examples-use')
+    for (let index = 0; index < 3; index++) {
+      assert.equal(examples.byId(`examples-row-${index}-target`).props.value, index < 2 ? targets[index] : unfinished)
+      assert.ok(examples.byId(`examples-row-${index}-unapproved`))
+      assert.ok(!examples.byId(`examples-row-${index}-approved`))
+    }
+    assert.equal(examples.byId('examples-build').props.disabled, true, 'Opening a draft never approves examples')
+    assert.ok(!examples.byId('examples-bundle'))
+    await examples.click('examples-row-0-approve')
+    await examples.click('examples-row-1-approve')
+  }
   await examples.click('examples-build')
   assert.ok(examples.byId('examples-bundle'))
   await examples.click('examples-export-jsonl')
@@ -120,7 +155,7 @@ try {
   assert.equal(calls.length, count)
   assert.deepEqual(examples.warnings, [])
   assert.deepEqual(logs, [])
-  await writeFile(outputPath, JSON.stringify({ jsonl, review: reviewText }))
+  await writeFile(outputPath, JSON.stringify({ jsonl, review: reviewText, draft: draftText }))
   console.log('actual suite replies reviewed and exported offline')
 } finally {
   examples?.unmount()

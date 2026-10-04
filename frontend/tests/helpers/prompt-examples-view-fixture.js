@@ -56,22 +56,27 @@ function renderer() {
   return { host, root, body }
 }
 
-export async function mountPromptExamplesView({ api, initialPath = '/prompt-examples', locale = 'en', timers = fakeTimers(), downloadError = false, examplesExportError = false, includeSuites = false, cacheHandlers = true } = {}) {
+export async function mountPromptExamplesView({ api, initialPath = '/prompt-examples', locale = 'en', timers = fakeTimers(), downloadError = false, examplesExportError = false, draftExportError = false, downloadHooks = {}, includeSuites = false, cacheHandlers = true } = {}) {
   const requests = deferredTrials()
   api = { ...trialApi(), acceptPromptTrialInputs, ...requests.api, ...api }
-  const warnings = [], downloads = [], revokedUrls = [], removedAnchors = []
+  const warnings = [], downloads = [], revokedUrls = [], removedAnchors = [], downloadSteps = []
   const blobs = new Map()
+  function downloadStep(name) { downloadSteps.push(name); downloadHooks[name]?.() }
+  class DownloadBlob extends Blob {
+    constructor(parts, options) { downloadStep('blob'); super(parts, options) }
+  }
   let urlIndex = 0
   const urlApi = {
-    createObjectURL(blob) { if (downloadError === true) throw new Error('Private URL failure'); const url = `blob:prompt-suite-${++urlIndex}`; blobs.set(url, blob); return url },
-    revokeObjectURL(url) { revokedUrls.push(url); blobs.delete(url) },
+    createObjectURL(blob) { downloadStep('url'); if (downloadError === true) throw new Error('Private URL failure'); const url = `blob:prompt-suite-${++urlIndex}`; blobs.set(url, blob); return url },
+    revokeObjectURL(url) { revokedUrls.push(url); blobs.delete(url); downloadStep('revoke') },
   }
   const document = {
     createElement(type) {
       assert.equal(type, 'a')
-      return { click() { if (downloadError === 'click') throw new Error('Private anchor failure'); downloads.push({ blob: blobs.get(this.href), filename: this.download, url: this.href }) }, remove() { removedAnchors.push(this) } }
+      downloadStep('anchor')
+      return { click() { downloadStep('click'); if (downloadError === 'click') throw new Error('Private anchor failure'); downloads.push({ blob: blobs.get(this.href), filename: this.download, url: this.href }) }, remove() { removedAnchors.push(this); downloadStep('remove') } }
     },
-    body: { appendChild() {} },
+    body: { appendChild() { downloadStep('append') } },
   }
   const { host, root, body } = renderer()
   const stub = { render: () => Vue.h('fixture-boundary') }
@@ -84,7 +89,7 @@ export async function mountPromptExamplesView({ api, initialPath = '/prompt-exam
   const components = { '../components/LanguageSwitcher.vue': stub }
   function evaluate(source, returnName = 'component') {
     const ast = parseJavaScript(source, { sourceType: 'module' })
-    const globals = { crypto: webcrypto, TextEncoder, TextDecoder, ArrayBuffer, Uint8Array, AbortController, Date, Intl, console, Blob, URL: urlApi, document,
+    const globals = { crypto: webcrypto, TextEncoder, TextDecoder, ArrayBuffer, Uint8Array, AbortController, Date, Intl, console, Blob: DownloadBlob, URL: urlApi, document,
       setTimeout: timers.setTimeout, clearTimeout: timers.clearTimeout,
       IntersectionObserver: class { observe() {} disconnect() {} } }
     for (const statement of ast.program.body.filter(item => item.type === 'ImportDeclaration').reverse()) {
@@ -122,6 +127,13 @@ export async function mountPromptExamplesView({ api, initialPath = '/prompt-exam
         return original(...args)
       }
     }
+    if (name === 'promptExamples.js' && draftExportError) {
+      const original = result.exportPromptExampleDraft
+      result.exportPromptExampleDraft = (...args) => {
+        if (typeof draftExportError === 'function' ? draftExportError() : draftExportError) throw new Error('Private draft preparation failure')
+        return original(...args)
+      }
+    }
     loadedModules.set(name, result)
     return result
   }
@@ -153,7 +165,7 @@ export async function mountPromptExamplesView({ api, initialPath = '/prompt-exam
   const find = predicate => all(predicate)[0]
   const byId = id => find(node => node.props['data-testid'] === id)
   const text = (target = root) => (target.type === '#comment' ? '' : target.text ?? '') + (target.children ?? []).map(text).join(' ')
-  return { root, body, router, i18n, warnings, requests, flush, waitFor, all, find, byId, text, downloads, revokedUrls, removedAnchors, timers,
+  return { root, body, router, i18n, warnings, requests, flush, waitFor, all, find, byId, text, downloads, revokedUrls, removedAnchors, downloadSteps, timers,
     async click(id) {
       const target = byId(id); assert.ok(target, `missing clickable control ${id}`)
       assert.ok(!target.props.disabled, `disabled control ${id}`)
@@ -172,6 +184,10 @@ export async function mountPromptExamplesView({ api, initialPath = '/prompt-exam
     async file(file) {
       const target = byId('examples-file'); assert.ok(target)
       target.props.onChange({ target: { files: file ? [file] : [], value: 'report.json' } }); await flush()
+    },
+    async draftFile(file) {
+      const target = byId('examples-draft-file'); assert.ok(target)
+      target.props.onChange({ target: { files: file ? [file] : [], value: 'draft.json' } }); await flush()
     },
     async runFile(file) {
       const target = byId('suite-run-import-file'); assert.ok(target)

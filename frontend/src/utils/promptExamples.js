@@ -1,8 +1,10 @@
-import { acceptPromptSuiteReport, getPromptSuiteCheck, evaluatePromptSuiteCheck } from './promptSuites.js'
+import { acceptPromptSuiteReport, parsePromptSuiteReport, getPromptSuiteCheck, evaluatePromptSuiteCheck } from './promptSuites.js'
+import { parseBoundedJson } from './boundedJson.js'
 
 export const PROMPT_EXAMPLES_JSONL_MAX_BYTES = 1024 * 1024
 export const PROMPT_EXAMPLES_REVIEW_MAX_BYTES = 4 * 1024 * 1024
-const sources = new WeakMap(), reviews = new WeakMap(), bundles = new WeakMap()
+export const PROMPT_EXAMPLES_DRAFT_MAX_BYTES = 4 * 1024 * 1024
+const sources = new WeakMap(), reviews = new WeakMap(), bundles = new WeakMap(), drafts = new WeakMap()
 const invalid = kind => { throw new Error(`Invalid prompt examples ${kind}`) }
 const bytes = value => new TextEncoder().encode(value).length
 const timestamp = value => typeof value === 'string' && /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,6})?(?:Z|\+00:00)$/.test(value) &&
@@ -109,4 +111,67 @@ export function exportPromptExamples(bundle) {
     if (bytes(jsonlText) > PROMPT_EXAMPLES_JSONL_MAX_BYTES || bytes(reviewJsonText) > PROMPT_EXAMPLES_REVIEW_MAX_BYTES) return invalid('export')
     return Object.freeze({ jsonl_text: jsonlText, review_json_text: reviewJsonText, captured_at: report.captured_at })
   } catch { return invalid('export') }
+}
+
+const exactDraftFields = (value, fields) => value !== null && typeof value === 'object' && !Array.isArray(value) &&
+  Reflect.ownKeys(value).length === fields.length && fields.every(field => Object.hasOwn(value, field))
+const draftTarget = value => typeof value === 'string' && value.length <= 32768 && Array.from(value).length <= 16384 &&
+  bytes(value) <= 65536 && !/[\p{Cc}\p{Cs}]/u.test(value.replace(/[\r\n\t]/g, ''))
+
+function serializeDraft(report) {
+  const result = JSON.stringify(report, null, 2)
+  // Check UTF-16 length before allocating an encoded copy. UTF-8 cannot be
+  // smaller for admitted text, and the byte limit is independently enforced.
+  if (result.length > PROMPT_EXAMPLES_DRAFT_MAX_BYTES || bytes(result) > PROMPT_EXAMPLES_DRAFT_MAX_BYTES) return invalid('draft')
+  return result
+}
+
+function captureDraft(source, targets, capturedAt) {
+  if (!source || !timestamp(capturedAt) || !Array.isArray(targets) || targets.length !== source.cases.length) return invalid('draft')
+  const rows = []
+  // Numeric positions preserve complete source coverage even if an array has a
+  // custom iterator. Blank or incomplete drafts remain editable, never approved.
+  for (let index = 0; index < source.cases.length; index++) {
+    if (!Object.hasOwn(targets, index)) return invalid('draft')
+    const row = targets[index]
+    if (!exactDraftFields(row, ['case_id', 'target_text'])) return invalid('draft')
+    const { case_id, target_text } = row
+    if (case_id !== source.definition.cases[index].case_id || !draftTarget(target_text)) return invalid('draft')
+    rows.push({ case_id, target_text })
+  }
+  const report = { schema_version: 1, kind: 'mirofish_prompt_example_draft', captured_at: capturedAt, source_report: source, targets: rows }
+  serializeDraft(report)
+  const handle = capture(report)
+  drafts.set(handle, report)
+  return handle
+}
+
+// A draft contains the complete admitted source and every target. It neither
+// carries review handles nor creates approvals for a later examples export.
+export function capturePromptExampleDraft(sourceCapture, targets, options = {}) {
+  try {
+    const { capturedAt = new Date().toISOString() } = options
+    return captureDraft(sources.get(sourceCapture), targets, capturedAt)
+  } catch { return invalid('draft') }
+}
+
+export function parsePromptExampleDraft(text) {
+  try {
+    if (typeof text !== 'string' || text.length > PROMPT_EXAMPLES_DRAFT_MAX_BYTES) return invalid('draft')
+    const value = parseBoundedJson(text, PROMPT_EXAMPLES_DRAFT_MAX_BYTES, 14, () => invalid('draft'), true)
+    if (!exactDraftFields(value, ['schema_version', 'kind', 'captured_at', 'source_report', 'targets']) ||
+      value.schema_version !== 1 || value.kind !== 'mirofish_prompt_example_draft') return invalid('draft')
+    // Reapply the source's own 1 MiB/depth-12 import limits before its existing
+    // projection drops ignored snapshot fields. The outer cap cannot replace it.
+    const source = parsePromptSuiteReport(JSON.stringify(value.source_report))
+    return captureDraft(source, value.targets, value.captured_at)
+  } catch { return invalid('draft') }
+}
+
+export function exportPromptExampleDraft(draftCapture) {
+  try {
+    const report = drafts.get(draftCapture)
+    if (!report) return invalid('draft export')
+    return Object.freeze({ draft_json_text: serializeDraft(report), captured_at: report.captured_at })
+  } catch { return invalid('draft export') }
 }

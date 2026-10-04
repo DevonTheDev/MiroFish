@@ -76,6 +76,12 @@ This page works offline and does not train a model; passing a recorded check doe
 not automatically approve an example. See the
 [reviewed examples guide](docs/LOCAL_MODE.md#prepare-reviewed-prompt-examples).
 
+To continue editing later, choose **Download curation draft**. In a fresh session,
+open that draft, inspect its preview and use it to restore all target text.
+Approvals are cleared so each exported example gets a fresh explicit review.
+The draft includes the full source report and every target, including unapproved
+cases; it is separate from the selected training-example downloads.
+
 ## Explore saved activity
 
 Open a simulation in History and choose **Saved activity** to inspect its latest
