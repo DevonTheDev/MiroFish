@@ -564,6 +564,52 @@ fresh view, compare/export while offline, and explicitly run reused inputs with
 a fresh ID. No real model weights, inference quality, native browser file or
 download dialogs, or Windows behavior are established by these checks.
 
+### Build a suite from pinned trials
+
+Use the separate suite builder in **Local prompt trials** to turn experiments
+you want to repeat into a reusable definition. It accepts both newly pinned
+observations and explicitly imported historical pins.
+
+1. Enter a suite name and select one to five pins in the builder. This selection
+   is separate from the two-pin comparison selection. Cases follow the displayed
+   pin order, regardless of the order in which you checked them
+2. Choose **Build suite definition** and inspect each captured label, full system
+   and user prompt, temperature and requested output-token limit
+3. Download the definition, open **Prompt suites**, import and explicitly adopt
+   it, then edit any checks you need. **Run suite once** remains a separate
+   explicit action that checks current backend readiness and output-token caps
+
+The definition copies exact admitted inputs/settings. It does not include model
+configuration, historical replies, outcomes, request IDs or imported filenames.
+Every case starts with its check disabled (`expected_text: null`); a model's
+recorded reply never silently becomes an expected answer. Failed or truncated
+terminal trials can still supply valid inputs for another experiment. The
+configured model for the later run is determined by the current local backend,
+not by a historical pin.
+
+Each Build assigns fresh, distinct case IDs and freezes the captured definition.
+Repeated downloads preserve those IDs and bytes. Rebuilding explicitly creates
+new IDs, so reuse the same definition when you want report comparison to match
+the same cases across runs. Changing the suite name or selected pins retires the
+old preview/download; removing or replacing a selected pin cannot keep a stale
+selection. Adding or removing an unrelated pin does not rewrite a built result.
+
+Building and downloading make no runtime requests and remain available if the
+current backend observation is stale or unavailable. They do not start inference,
+restore an old request, select a model or save an archive. The existing v1 suite
+schema, trial input bounds and **128 KiB UTF-8 definition limit** apply; invalid
+selections fail together without truncation or a partial definition. The file
+contains selected prompts and settings. It is kept only in page memory until
+you download it; leaving or reloading discards the builder.
+
+Local tests cover the pure conversion, literal previews, both languages, separate
+selection ownership, stale controls and download cleanup. Actual Flask, Vite,
+gateway, Axios and compiled Vue tests create trials, build/download a definition,
+import it through the existing suite editor and explicitly run it with new
+request IDs. Historical-import and offline-download paths are covered too. No
+real weights, model quality, native browser/file-picker behavior or Windows
+behavior is established by these checks.
+
 ## Run repeatable prompt suites
 
 Open **Prompt suites** from Home, Runtime monitor or Local prompt trials. Define

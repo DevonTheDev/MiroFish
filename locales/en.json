@@ -1238,6 +1238,30 @@
     "recoverStore": "Recover interrupted save",
     "recheckStore": "Check saved records again"
   },
+  "promptTrialSuite": {
+    "title": "Build a suite from pinned trials",
+    "scope": "Choose one to five pins to capture their historical inputs and requested settings in a reusable version 1 suite definition. Model observations, recorded replies, source request IDs and outcomes are not included.",
+    "offline": "Building and downloading work offline. They do not read the runtime, change models or execute prompts. Execution happens separately in Prompt suites.",
+    "name": "Suite name",
+    "nameHint": "Enter 1–80 characters with a non-blank name and no control or hidden formatting characters. The name is preserved exactly.",
+    "selection": "Suite cases ({count}/5 selected)",
+    "selectionHint": "This selection is independent of the two-pin comparison. Cases follow the pin order shown below.",
+    "noPins": "Pin a finished trial or add a historical trial file above to get started.",
+    "build": "Build suite definition",
+    "preview": "Captured suite definition",
+    "capturedNote": "Review every captured case below. These are historical inputs and requested settings, not a promise that a current model will use them unchanged. Changing the name, selected pins or their order clears this capture; build again to capture your changes.",
+    "checksNote": "All expected answers start disabled. A recorded reply is never used as an expected answer.",
+    "caseId": "New case ID",
+    "noExpectation": "Expected answer: disabled (null)",
+    "jsonPreview": "Complete definition JSON",
+    "download": "Download suite definition",
+    "nextStep": "Open Prompt suites, import this definition and review it. Use its separate Run action to execute new trials against the then-current runtime and output limit.",
+    "privacy": "This file contains the full selected prompts. Keep it private as needed. Repeated downloads use this same capture; Build again creates fresh case IDs.",
+    "errors": {
+      "invalid": "Could not build this definition. Check the name and selected trials against the suite input and 128 KiB file limits. No partial definition was created.",
+      "download": "The download could not be completed. Check your downloads before retrying; a file may already have been saved. The captured definition is retained."
+    }
+  },
   "promptTrials": {
     "navTitle": "Prompt trials",
     "runtimeLink": "Try a prompt with the configured local model →",

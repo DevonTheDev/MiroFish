@@ -65,6 +65,13 @@ prompt before an explicit fresh run. Imports stay separate from current model
 readiness and never resume old requests or start inference. See the
 [saved trial workflow](docs/LOCAL_MODE.md#reopen-saved-trial-files).
 
+Turn one to five pinned trials into a repeatable suite with **Build suite
+definition**. Review the captured prompts and settings, download the definition,
+then import it in **Prompt suites** before an explicit run. Recorded replies
+are never made into expected answers automatically. This also works with
+reopened historical pins while the backend is unavailable. See
+[building a suite from pins](docs/LOCAL_MODE.md#build-a-suite-from-pinned-trials).
+
 ## Run and pause local prompt suites
 
 Open **Prompt suites** to run a small repeatable set of prompts against your

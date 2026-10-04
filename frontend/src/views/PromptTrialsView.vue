@@ -76,6 +76,7 @@
           </li>
         </ul>
       </section>
+      <PromptTrialSuiteBuilder :pins="pins" :imported-origins="importedOrigins" />
       <div v-if="comparison.length === 2" class="toolbar"><button type="button" data-testid="comparison-download" :disabled="!canUsePins" @click="downloadComparison">{{ t('promptTrials.downloadComparison') }}</button><span class="reading-note">{{ t('promptTrials.privateExport') }}</span></div>
       <section v-if="comparison.length === 2" class="comparison" :aria-label="t('promptTrials.comparison')">
         <article v-for="saved in comparison" :key="saved.run.request_id" class="panel" :data-testid="`comparison-${saved.run.request_id}`"><h2>{{ saved.run.request.label }}</h2><span class="badge">{{ t(`promptTrials.states.${saved.run.state}`) }}</span><div v-if="importedOrigins.has(saved.run.request_id)" class="reading-note"><p>{{ t('promptTrials.importedHistorical') }} · <span class="literal-filename">{{ importedOrigins.get(saved.run.request_id).filename }}</span></p><p>{{ t('promptTrials.historicalObservedAt') }} <time :datetime="saved.observed_at">{{ formatDate(saved.observed_at) }}</time></p><p>{{ t('promptTrials.importHistoricalNote') }}</p><p>{{ t('promptTrials.importProvenanceNote') }}</p></div><ResultDetails :run="saved.run" :prefix="`compare-${saved.run.request_id}`" /></article>
@@ -89,6 +90,7 @@ import { computed, defineComponent, h, onBeforeUnmount, onMounted, ref, shallowR
 import { RouterLink } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import LanguageSwitcher from '../components/LanguageSwitcher.vue'
+import PromptTrialSuiteBuilder from '../components/PromptTrialSuiteBuilder.vue'
 import { acceptPromptTrialRequest, acceptPromptTrialSnapshot, getPromptTrial, getPromptTrials, isPromptTrialTerminal, samePromptTrialRequest, startPromptTrial } from '../api/promptTrials'
 import { PROMPT_TRIAL_FILE_MAX_BYTES, parsePromptTrialFile } from '../utils/promptTrialFiles.js'
 

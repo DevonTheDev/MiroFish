@@ -7,10 +7,13 @@ import { setTimeout as pause } from 'node:timers/promises'
 import { fileURLToPath } from 'node:url'
 import { createServer, loadConfigFromFile } from 'vite'
 import { mountTrials, trialApi } from '../helpers/prompt-trials-view-fixture.js'
+import { mountSuites } from '../helpers/prompt-suites-view-fixture.js'
+import { parsePromptSuiteDefinition, acceptPromptSuiteReport } from '../../src/utils/promptSuites.js'
 
 const [backendURL, scenario] = process.argv.slice(2)
 assert.match(backendURL, /^http:\/\/127\.0\.0\.1:[0-9]+$/)
-assert.ok(['succeeded', 'truncated', 'lost', 'leave', 'cloud', 'empty', 'controls', 'reopen', 'reopen_offline', 'reopen_single'].includes(scenario))
+assert.ok(['succeeded', 'truncated', 'lost', 'leave', 'cloud', 'empty', 'controls', 'reopen', 'reopen_offline', 'reopen_single',
+  'suite_builder', 'suite_builder_imported', 'suite_builder_offline'].includes(scenario))
 const root = fileURLToPath(new URL('../../', import.meta.url))
 const cacheDir = await mkdtemp(path.join(tmpdir(), 'miro-prompt-trial-vite-'))
 let proxy, view
@@ -58,7 +61,8 @@ try {
     }
     return response
   })
-  view = await mountTrials({ api, timers: { setTimeout, clearTimeout } })
+  const mount = scenario.startsWith('suite_builder') ? mountSuites : mountTrials
+  view = await mount({ api, initialPath: '/prompt-trials', timers: { setTimeout, clearTimeout }, cacheHandlers: true })
   await view.waitFor(() => replies.some(reply => reply.data?.kind === 'mirofish_local_prompt_trials'), { timeout: 15000 })
   await view.flush()
   assert.ok(calls.length >= 1)
@@ -67,9 +71,9 @@ try {
     assert.equal(view.byId('trial-run').props.disabled, true)
     assert.match(view.text(), /only in local mode/)
   } else {
-    async function start(label, prompt) {
+    async function start(label, prompt, settings = {}) {
       for (const [key, value] of Object.entries({ label, system_prompt: 'Preserve literal text.',
-        user_prompt: prompt, temperature: '0.2', max_output_tokens: '128' })) {
+        user_prompt: prompt, temperature: '0.2', max_output_tokens: '128', ...settings })) {
         await view.input('trial-' + key, value)
       }
       await view.submit('trial-form')
@@ -108,9 +112,11 @@ try {
         assert.equal(lost, true)
         assert.ok(calls.some(call => call.method === 'get' && call.url.endsWith('/' + accepted.run.request_id)))
       }
-      if (['succeeded', 'reopen', 'reopen_offline', 'reopen_single'].includes(scenario)) {
+      if (['succeeded', 'reopen', 'reopen_offline', 'reopen_single',
+        'suite_builder', 'suite_builder_imported', 'suite_builder_offline'].includes(scenario)) {
         await view.click('trial-pin')
-        await start('Second trial', 'PROMPT_BODY_PRIVATE: second response')
+        await start('Second trial', 'PROMPT_BODY_PRIVATE: second response', scenario.startsWith('suite_builder')
+          ? { system_prompt: ' \t\n', temperature: '0.7', max_output_tokens: '64' } : {})
         await view.waitFor(() => view.byId('trial-download')?.props.disabled === false &&
           replies.some(reply => reply.data?.run?.request.label === 'Second trial' && reply.data.run.state === 'succeeded'), { timeout: 20000 })
         const second = replies.filter(reply => reply.data?.run?.request.label === 'Second trial' && reply.data.run.state === 'succeeded').at(-1).data
@@ -124,6 +130,72 @@ try {
         const comparison = JSON.parse(await view.downloads.at(-1).blob.text())
         assert.deepEqual(comparison.trials, [accepted, second])
         assert.equal(calls.filter(call => call.method === 'post').length, 2)
+        if (scenario.startsWith('suite_builder')) {
+          if (scenario === 'suite_builder_imported') {
+            const savedBlob = view.downloads.at(-1).blob
+            view.unmount()
+            view = await mountSuites({ api, initialPath: '/prompt-trials', timers: { setTimeout, clearTimeout }, cacheHandlers: true })
+            await view.waitFor(() => view.byId('trial-download')?.props.disabled === false)
+            const control = view.byId('trial-import-file')
+            await control.props.onChange({ target: { files: [{ name: '<captured trials>.json', size: savedBlob.size,
+              arrayBuffer: () => savedBlob.arrayBuffer() }], value: 'selected' } })
+            await view.waitFor(() => view.byId('trial-import-preview'))
+            await view.click('trial-import-add')
+            assert.match(view.text(), /historical/i)
+          }
+          if (scenario === 'suite_builder_offline') {
+            await proxy.close(); proxy = null
+            await view.click('trial-refresh')
+            await view.waitFor(() => view.byId('trial-error'))
+            assert.equal(view.byId('trial-run').props.disabled, true)
+          }
+          const beforeBuild = calls.length
+          await view.input('trial-suite-name', 'Reusable <literal> trials 雪')
+          // Selection order differs deliberately: the definition follows displayed pin order.
+          await view.change('trial-suite-select-' + second.run.request_id, true)
+          await view.change('trial-suite-select-' + accepted.run.request_id, true)
+          await view.click('trial-suite-build')
+          assert.ok(view.byId('trial-suite-preview'))
+          await view.click('trial-suite-download')
+          const definitionText = await view.downloads.at(-1).blob.text()
+          const definition = parsePromptSuiteDefinition(definitionText)
+          assert.equal(definition.name, 'Reusable <literal> trials 雪')
+          assert.equal(definition.schema_version, 1)
+          assert.deepEqual(definition.cases.map(({ case_id, expected_text, ...inputs }) => {
+            assert.equal(expected_text, null, 'Recorded replies never become expected answers')
+            assert.ok(![accepted.run.request_id, second.run.request_id].includes(case_id))
+            return inputs
+          }), [accepted.run.request, second.run.request])
+          assert.notEqual(definition.cases[0].case_id, definition.cases[1].case_id)
+          assert.doesNotMatch(definitionText, /fixture-local-chat|fingerprint|request_id|<think>/)
+          await view.click('trial-suite-download')
+          assert.equal(await view.downloads.at(-1).blob.text(), definitionText)
+          assert.equal(calls.length, beforeBuild, 'Selection, Build and download perform no runtime work')
+          if (scenario !== 'suite_builder_offline') {
+            const repliesBeforeNavigation = replies.length
+            await view.navigate('/prompt-suites')
+            await view.waitFor(() => replies.length > repliesBeforeNavigation)
+            await view.flush()
+            const beforeImport = calls.length
+            await view.file({ name: 'prompt_suite.definition.json', size: new TextEncoder().encode(definitionText).length,
+              text: async () => definitionText })
+            assert.ok(view.byId('suite-import-preview'))
+            assert.equal(view.byId('suite-name').props.value, '', 'Preview alone does not adopt inputs')
+            await view.click('suite-import-use')
+            assert.equal(view.byId('suite-name').props.value, definition.name)
+            assert.equal(calls.length, beforeImport, 'Import and adoption do not run the suite')
+            assert.equal(view.byId('suite-run').props.disabled, false)
+            await view.submit('suite-form')
+            await view.waitFor(() => view.byId('suite-run-report')?.props['data-status'] === 'completed', { timeout: 25000 })
+            await view.click('suite-export-run')
+            const report = acceptPromptSuiteReport(JSON.parse(await view.downloads.at(-1).blob.text()))
+            assert.deepEqual(report.definition, definition)
+            assert.ok(report.cases.every(row => row.status === 'succeeded' && row.check === 'not_requested'))
+            assert.ok(report.cases.every(row => ![accepted.run.request_id, second.run.request_id].includes(row.request_id)))
+            assert.equal(calls.filter(call => call.method === 'post').length, 4)
+            assert.deepEqual(report.cases.map(row => row.snapshot.run.request), [accepted.run.request, second.run.request])
+          } else assert.equal(calls.filter(call => call.method === 'post').length, 2)
+        }
         if (scenario.startsWith('reopen')) {
           const savedBlob = scenario === 'reopen_single' ? singleBlob : view.downloads.at(-1).blob
           view.unmount()

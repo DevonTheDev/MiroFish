@@ -84,7 +84,7 @@ export async function mountSuites({ api, initialPath = '/prompt-suites', locale 
   const components = { '../components/LanguageSwitcher.vue': stub }
   function evaluate(source, returnName = 'component') {
     const ast = parseJavaScript(source, { sourceType: 'module' })
-    const globals = { crypto: webcrypto, TextEncoder, TextDecoder, AbortController, Date, Intl, console, Blob, URL: urlApi, document,
+    const globals = { crypto: webcrypto, TextEncoder, TextDecoder, AbortController, Date, Intl, console, Blob, Map, URL: urlApi, document,
       setTimeout: timers.setTimeout, clearTimeout: timers.clearTimeout,
       IntersectionObserver: class { observe() {} disconnect() {} } }
     for (const statement of ast.program.body.filter(item => item.type === 'ImportDeclaration').reverse()) {
@@ -128,6 +128,7 @@ export async function mountSuites({ api, initialPath = '/prompt-suites', locale 
     value.render = evaluate(template.code, 'render')
     return value
   }
+  components['../components/PromptTrialSuiteBuilder.vue'] = component('components/PromptTrialSuiteBuilder.vue')
   components['../views/PromptSuitesView.vue'] = component('views/PromptSuitesView.vue')
   components['../views/PromptTrialsView.vue'] = component('views/PromptTrialsView.vue')
   components['../views/RuntimeStatusView.vue'] = component('views/RuntimeStatusView.vue')
