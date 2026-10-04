@@ -681,7 +681,7 @@ def preview_cast(data):
                              "summary": entity.summary[:240],
                              "text_truncated": len(entity.name) > 256 or len(entity.summary) > 240})
         entities.sort(key=lambda item: (item["name"], item["uuid"]))
-        result = {"simulation_id": simulation_id, "graph_id": state["graph_id"],
+        result = {"simulation_id": simulation_id, "project_id": state["project_id"], "graph_id": state["graph_id"],
                   "total_nodes": filtered.total_count, "eligible_count": filtered.filtered_count,
                   "entities": entities, "limits": current}
         if len(json.dumps(result, ensure_ascii=True, allow_nan=False).encode("utf-8")) > MAX_PREVIEW_BYTES:

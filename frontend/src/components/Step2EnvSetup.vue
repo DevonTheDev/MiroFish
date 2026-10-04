@@ -6,12 +6,18 @@
         :error="planError" :limits-valid="localLimitsValid" :can-prepare="canPrepareLocal" :can-reuse="canReuseLocal"
         :loading-cast="loadingCast" :catalog-loaded="catalogLoaded" :entities="catalog" :selected-ids="selectedEntityIds"
         :type-filter="typeFilter" :use-llm="useLlmProfiles" :complete="phase === 4"
+        :max-rounds="localMaxRounds" :rounds-valid="localRoundsValid" :rounds-action="plannerActions.draftRoundsInput"
         :cancellation-status="cancellationStatus" :cancellation-blocked="cancellationBlocked"
         :show-cancel="showCancelPreparation" :can-cancel="canCancelPreparation" :cancel-retry="cancelRetry"
         :cancel-action="cancelPreparationAction"
         @refresh="plannerActions.refresh" @load="plannerActions.load" @select="plannerActions.select"
         @filter="plannerActions.filter" @profile-mode="plannerActions.profileMode"
         @prepare="plannerActions.prepare" @reuse="plannerActions.reuse" />
+      <LocalCastPresetPanel v-if="runtimeMode === 'local'" :key="'preset-' + plannerGeneration"
+        :catalog-ready="presetCatalogReady" :project-id="catalogSnapshot?.project_id" :graph-id="catalogSnapshot?.graph_id"
+        :can-save="!!presetExport" :can-open="presetCanOpen" :reading="presetReading" :candidate="presetCandidate"
+        :error="presetError" :compatibility-error="presetCompatibility.error" :can-apply="presetCanApply"
+        :applied="presetApplied" :actions="presetActions" />
       <template v-if="runtimeMode === 'cloud' || phase > 0">
       <!-- Step 01: 模拟实例 -->
       <div class="step-card" :class="{ 'active': phase === 0, 'completed': phase > 0 }">
@@ -656,6 +662,8 @@
 import { ref, computed, watch, onMounted, onUnmounted, nextTick } from 'vue'
 import { useI18n } from 'vue-i18n'
 import LocalRunPlanner from './LocalRunPlanner.vue'
+import LocalCastPresetPanel from './LocalCastPresetPanel.vue'
+import { LOCAL_CAST_PRESET_MAX_BYTES, parseLocalCastPresetBytes, exportLocalCastPreset, validLocalCastPresetCatalog, acceptCompatibleLocalCastPreset } from '../utils/localCastPreset'
 import { validLocalPlan, validLocalCatalog, validPreparationTask, configuredRounds, validLocalMaximum, effectiveRounds, planningErrorKey } from '../utils/localRunPlan'
 import {
   prepareSimulation,
@@ -701,6 +709,15 @@ const loadingCast = ref(false)
 const actionPending = ref(false)
 const catalogLoaded = ref(false)
 const catalog = ref([])
+// The admitted preview owns the project/graph binding; parent metadata cannot
+// authorize a portable preset for a different or stale graph.
+const catalogSnapshot = ref(null)
+const presetEpoch = ref(0)
+const presetReading = ref(false)
+const presetCandidate = ref(null)
+const presetError = ref('')
+const presetApplied = ref(false)
+let presetDownloadUrl = null
 const selectedEntityIds = ref([])
 const typeFilter = ref('')
 const useLlmProfiles = ref(false)
@@ -828,6 +845,7 @@ const finishPreparation = (context, status) => {
 
 const replacePreparation = () => {
   if (preparationContext) { preparationContext.controller.abort(); preparationContext.cancelController.abort() }
+  retirePreset()
   preparationContext = null
   stopAllPolling()
   plannerGeneration.value += 1
@@ -839,6 +857,7 @@ const replacePreparation = () => {
   actionPending.value = false
   catalogLoaded.value = false
   catalog.value = []
+  catalogSnapshot.value = null
   selectedEntityIds.value = []
   typeFilter.value = ''
   useLlmProfiles.value = false
@@ -884,6 +903,11 @@ const replacePreparation = () => {
     },
     filter: value => { if (isActive(context) && !plannerBusy.value && typeof value === 'string') typeFilter.value = value },
     profileMode: value => { if (isActive(context) && canPrepareLocal.value && typeof value === 'boolean') useLlmProfiles.value = value },
+    draftRoundsInput: event => {
+      if (!isActive(context) || phase.value !== 0 || !canPrepareLocal.value) return
+      const value = event.target.value
+      localMaxRounds.value = value === '' ? null : Number(value)
+    },
     roundsInput: event => {
       if (!ownsView(context) || runtimeMode.value !== 'local') return
       const value = event.target.value
@@ -897,6 +921,100 @@ const replacePreparation = () => {
   emit('update-status', 'planning')
   resolvePreparationPlan(context)
 }
+
+// Import epochs are independent of route identity: a second file, clear, or
+// catalog replacement retires every callback and outstanding file read.
+const revokePresetDownload = () => {
+  if (presetDownloadUrl !== null) URL.revokeObjectURL(presetDownloadUrl)
+  presetDownloadUrl = null
+}
+const retirePreset = () => {
+  presetEpoch.value += 1
+  presetReading.value = false
+  presetCandidate.value = null
+  presetError.value = ''
+  presetApplied.value = false
+  revokePresetDownload()
+}
+const ownsPreset = (context, epoch, snapshot) => ownsView(context) && presetEpoch.value === epoch && catalogSnapshot.value === snapshot
+const presetErrorKey = error => 'localCastPreset.errors.' + (['invalid_preset', 'file_too_large', 'invalid_utf8', 'invalid_catalog',
+  'identity_mismatch', 'selection_unavailable', 'agent_limit_exceeded', 'round_limit_exceeded'].includes(error?.code) ? error.code : 'read_failed')
+const presetCatalogReady = computed(() => runtimeMode.value === 'local' && validLocalCastPresetCatalog(catalogSnapshot.value, props.simulationId))
+const presetCanOpen = computed(() => presetCatalogReady.value && !loadingCast.value)
+const currentPresetCatalog = () => ({ ...catalogSnapshot.value, limits: localPlan.value?.limits })
+const presetCompatibility = computed(() => {
+  if (!presetCandidate.value) return { preset: null, error: '' }
+  try { return { preset: acceptCompatibleLocalCastPreset(presetCandidate.value, currentPresetCatalog(), props.simulationId), error: '' } }
+  catch (error) { return { preset: null, error: presetErrorKey(error) } }
+})
+const presetCanApply = computed(() => !!presetCompatibility.value.preset && phase.value === 0 && canPrepareLocal.value
+  && isActive(preparationContext))
+const presetExport = computed(() => {
+  if (!presetCatalogReady.value) return null
+  try {
+    return exportLocalCastPreset(acceptCompatibleLocalCastPreset({ schema_version: 1, kind: 'mirofish_local_cast_preset',
+      project_id: catalogSnapshot.value.project_id, graph_id: catalogSnapshot.value.graph_id,
+      selected_entity_ids: [...selectedEntityIds.value], use_llm_for_profiles: useLlmProfiles.value,
+      max_rounds: localMaxRounds.value }, currentPresetCatalog(), props.simulationId))
+  } catch { return null }
+})
+const presetActions = computed(() => {
+  // Read reactive generation as well as capturing the unique context identity.
+  plannerGeneration.value
+  const context = preparationContext, epoch = presetEpoch.value, snapshot = catalogSnapshot.value
+  const capturedCandidate = presetCandidate.value, capturedExport = presetExport.value
+  return {
+    open: async event => {
+      if (!ownsPreset(context, epoch, snapshot) || !presetCanOpen.value) return
+      const file = event.target.files?.[0]
+      event.target.value = ''
+      if (!file) return
+      retirePreset()
+      const readEpoch = presetEpoch.value
+      presetReading.value = true
+      try {
+        if (!Number.isSafeInteger(file.size) || file.size < 0 || file.size > LOCAL_CAST_PRESET_MAX_BYTES) throw { code: 'file_too_large' }
+        const bytes = await file.arrayBuffer()
+        if (!ownsPreset(context, readEpoch, snapshot)) return
+        const accepted = parseLocalCastPresetBytes(bytes)
+        if (!ownsPreset(context, readEpoch, snapshot)) return
+        presetCandidate.value = accepted
+      } catch (error) {
+        if (ownsPreset(context, readEpoch, snapshot)) presetError.value = presetErrorKey(error)
+      } finally {
+        if (ownsPreset(context, readEpoch, snapshot)) presetReading.value = false
+      }
+    },
+    clear: () => { if (ownsPreset(context, epoch, snapshot)) retirePreset() },
+    apply: () => {
+      if (!ownsPreset(context, epoch, snapshot) || !capturedCandidate || presetCandidate.value !== capturedCandidate || !presetCanApply.value) return
+      let accepted
+      try { accepted = acceptCompatibleLocalCastPreset(capturedCandidate, currentPresetCatalog(), context.id) }
+      catch (error) { presetError.value = presetErrorKey(error); return }
+      // Admission is complete before replacing any part of the draft.
+      selectedEntityIds.value = [...accepted.selected_entity_ids]
+      useLlmProfiles.value = accepted.use_llm_for_profiles
+      localMaxRounds.value = accepted.max_rounds
+      retirePreset()
+      presetApplied.value = true
+    },
+    save: () => {
+      if (!ownsPreset(context, epoch, snapshot) || !capturedExport || presetExport.value !== capturedExport) return
+      revokePresetDownload()
+      try {
+        const blob = new Blob([capturedExport], { type: 'application/json;charset=utf-8' })
+        presetDownloadUrl = URL.createObjectURL(blob)
+        const link = document.createElement('a')
+        link.href = presetDownloadUrl
+        link.download = 'mirofish-local-cast-preset.json'
+        link.click()
+      } catch {
+        revokePresetDownload()
+        presetError.value = 'localCastPreset.errors.download_failed'
+      }
+    },
+  }
+})
 
 // Computed
 const displayProfiles = computed(() => {
@@ -1159,6 +1277,8 @@ const resolvePreparationPlan = context => singleFlight(context, 'plan', async ()
 
 const loadLocalCast = context => {
   if (!isActive(context) || !canPrepareLocal.value) return Promise.resolve()
+  retirePreset()
+  catalogSnapshot.value = null
   loadingCast.value = true
   return singleFlight(context, 'preview', async () => {
     try {
@@ -1166,7 +1286,9 @@ const loadLocalCast = context => {
       if (!isActive(context)) return
       if (!response.success || !validLocalCatalog(response.data, context.id)) { planError.value = planningErrorKey(response); return }
       localPlan.value = { ...localPlan.value, limits: response.data.limits }
-      catalog.value = response.data.entities
+      retirePreset()
+      catalogSnapshot.value = { ...response.data, limits: { ...response.data.limits }, entities: response.data.entities.map(entity => ({ ...entity })) }
+      catalog.value = catalogSnapshot.value.entities
       catalogLoaded.value = true
       selectedEntityIds.value = []
       typeFilter.value = ''
@@ -1183,7 +1305,7 @@ const prepareLocal = (context, reuse) => {
   let payload = { simulation_id: context.id, preparation_mode: 'reuse' }
   if (!reuse) {
     const ids = [...selectedEntityIds.value]
-    if (!catalogLoaded.value || ids.length < 1 || ids.length > localPlan.value.limits.max_selectable_agents
+    if (!localRoundsValid.value || !catalogLoaded.value || ids.length < 1 || ids.length > localPlan.value.limits.max_selectable_agents
       || new Set(ids).size !== ids.length || ids.some(id => !catalog.value.some(entity => entity.uuid === id))) return Promise.resolve()
     payload = { simulation_id: context.id, preparation_mode: 'prepare', selected_entity_ids: ids,
       use_llm_for_profiles: useLlmProfiles.value,
@@ -1517,6 +1639,7 @@ onMounted(() => {
 onUnmounted(() => {
   mounted = false
   if (preparationContext) { preparationContext.controller.abort(); preparationContext.cancelController.abort() }
+  retirePreset()
   preparationContext = null
   stopAllPolling()
 })

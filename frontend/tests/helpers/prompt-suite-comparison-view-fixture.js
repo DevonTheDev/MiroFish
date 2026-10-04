@@ -89,7 +89,7 @@ export async function mountSuiteComparison({ api, initialPath = '/prompt-suite-c
       IntersectionObserver: class { observe() {} disconnect() {} } }
     for (const statement of ast.program.body.filter(item => item.type === 'ImportDeclaration').reverse()) {
       const path = statement.source.value
-      const dependency = modules[path] ?? (path.includes('/api/') ? api : (path.includes('/utils/') || path.startsWith('./promptSuite')) ? module(path) : null)
+      const dependency = modules[path] ?? (path.includes('/api/') ? api : (path.includes('/utils/') || path.startsWith('./promptSuite') || path === './boundedJson.js') ? module(path) : null)
       for (const item of statement.specifiers) {
         globals[item.local.name] = item.type === 'ImportDefaultSpecifier'
           ? components[path] ?? stub : dependency[item.imported.name]

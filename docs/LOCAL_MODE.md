@@ -26,13 +26,16 @@ cap. The ordinary cloud preparation workflow remains automatic.
    For example, a graph with twenty people can supply a selected two-person cast;
    type filtering alone would still select twenty. Selected IDs remain exact,
    and an empty or over-limit selection cannot start preparation.
-3. Choose template or LLM-generated profiles, then **Prepare selected cast**.
+3. Choose template or LLM-generated profiles and **Maximum rounds**, then
+   **Prepare selected cast**. You can save these draft choices as a cast preset
+   before starting generation.
    Template profiles avoid per-agent model generation and embedding/retrieval
    context. Simulation configuration generation still uses the configured model,
    and the simulation itself will use it. LLM profile generation retains its
    existing fallback behavior; the choice is not a quality guarantee.
-4. After authoritative profile/configuration completion, choose **Maximum
-   rounds** and Start. Local values begin at one and cannot exceed the loaded
+4. After authoritative profile/configuration completion, review **Maximum
+   rounds** and Start. You can change this maximum again before starting. Local
+   values begin at one and cannot exceed the loaded
    cap. The effective total is bounded by the configured simulation duration,
    requested maximum and backend cap. This is simulated workload, not an estimate
    of wall-clock time or GPU capacity.
@@ -98,6 +101,61 @@ embedding requests after graph construction. It does not use pretrained weights,
 or paid services. Native browser rendering, Windows behavior, real-model quality
 and useful simulation outcomes remain unverified.
 
+## Save and reopen a local cast preset
+
+After **Load cast**, choose agents, profile mode and **Maximum rounds**, then
+choose **Save cast preset**. The downloaded `mirofish-local-cast-preset.json`
+keeps those choices for a later draft or another simulation using the same
+exact project and graph. It contains seven fields: format version, kind, project
+ID, graph ID, ordered selected entity IDs, the template/LLM choice, and maximum
+rounds. It contains no generated profiles, prompts, credentials, platform
+settings or simulation artifacts.
+
+In an idle, unprepared local setup, choose **Load cast**, then **Open cast
+preset**. Review **File choices** and any compatibility message. Opening only
+stages the file; **Apply cast preset** replaces the selected agents, profile
+mode and round maximum together. Choose **Prepare selected cast** explicitly
+when ready, and Start separately after preparation finishes. File operations
+make no API requests, upload no file content, and do not start model work.
+
+The exact project/graph IDs must match the loaded cast. Every selected entity ID
+must still be eligible, and the selection and rounds must fit the loaded local
+limits. Incompatible presets are refused without changing the draft. IDs are
+not matched by name, dropped, reordered or clipped, and an excessive round cap
+is not silently reduced. Backend selection, ownership and resource checks still
+run again when preparation or execution is explicitly requested. The round cap
+bounds later execution; it does not limit configuration-generation calls.
+
+Files are limited to 256 KiB and 1–1,000 unique portable entity IDs, further
+restricted by the current loaded agent cap when applied. Admission rejects
+malformed UTF-8/JSON, duplicate keys, extra fields, unsupported versions,
+invalid types and nonfinite or unsafe numbers. **Clear file preview** dismisses
+a staged import. Failed imports preserve the current draft. New files, catalog
+replacement, refresh and navigation retire pending reads and old callbacks;
+an older file cannot overwrite a newer selection or another simulation.
+
+Save can export valid choices still retained in the current view after
+preparation or cancellation. Applying remains unavailable while preparation,
+cleanup or a run owns the simulation, and for a cancelled or already prepared
+simulation. A refresh loses unsaved draft choices: they are not reconstructed
+from saved state, generated configuration or cancellation records. Save a file
+before leaving if you need those choices later. For a cancelled preparation,
+create a fresh simulation through the project flow, load its current cast and
+apply the file there.
+
+A graph ID is an identity, not a frozen copy of historical facts. This preset
+restores choices against the loaded graph; fresh preparation uses current graph
+content and creates new profiles/configuration. It does not reproduce a prior
+model output or authenticate where an imported file came from.
+
+Local tests cover strict file admission, both locales, compiled Vue/router file
+and context races, existing prompt-suite parser compatibility, and actual
+Flask/Axios workflows that export from one simulation and apply to another.
+Those workflows verify no file-operation API calls, exact explicit preparation
+inputs, preserved source files and the round cap passed to Start. They use
+synthetic graph/model boundaries. Native browser file dialogs/rendering,
+Windows and real-model quality remain unverified.
+
 ## Cancel local preparation
 
 Step 2 offers **Cancel preparation** for an exact, currently owned task started
@@ -116,7 +174,8 @@ legacy-local preparation calls and running simulations do not get this action.
 3. When the task reports cancellation complete, its completed partial profile
    files remain available for inspection. Start, reuse and regeneration of that
    cancelled simulation are blocked. Return to the project's graph step and
-   create another simulation to prepare a new cast.
+   create another simulation to prepare a new cast. If the current view still
+   retains your choices, **Save cast preset** can keep them for that fresh setup.
 
 Resource-dependent graph/entity/document preflight now runs inside the planned
 worker, so HTTP admission returns the task ID before those checks finish. Invalid

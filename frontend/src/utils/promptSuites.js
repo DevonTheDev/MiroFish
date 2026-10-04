@@ -1,3 +1,4 @@
+import { parseBoundedJson as parseJson } from './boundedJson.js'
 import { acceptPromptTrialInputs, acceptPromptTrialSnapshot, samePromptTrialRequest } from '../api/promptTrials.js'
 
 export const PROMPT_SUITE_MAX_BYTES = 128 * 1024
@@ -77,63 +78,8 @@ export function acceptPromptSuiteDefinition(source) {
   } catch { return invalid('definition') }
 }
 
-// JSON.parse silently overwrites duplicate keys. This bounded parser rejects them,
-// including escaped aliases, before schema admission. Depth is capped before recursion.
-function parseBoundedJson(source, maximumBytes, maximumDepth, kind, strictValues = false) {
-  try {
-    if (typeof source !== 'string' || bytes(source) > maximumBytes) return invalid(kind)
-    let cursor = 0
-    const whitespace = () => { while (/[\t\n\r ]/.test(source[cursor] ?? '\0')) cursor++ }
-    function string() {
-      const start = cursor++
-      while (cursor < source.length) {
-        const character = source[cursor++]
-        if (character === '\\') cursor++
-        else if (character === '"') {
-          const result = JSON.parse(source.slice(start, cursor))
-          if (strictValues && /\p{Cs}/u.test(result)) return invalid(kind)
-          return result
-        }
-      }
-      return invalid(kind)
-    }
-    function value(depth) {
-      if (depth > maximumDepth) return invalid(kind)
-      whitespace()
-      if (source[cursor] === '"') return string()
-      if (source[cursor] === '{' || source[cursor] === '[') {
-        const array = source[cursor++] === '[', end = array ? ']' : '}', result = array ? [] : Object.create(null), keys = new Set()
-        whitespace()
-        if (source[cursor] === end) { cursor++; return result }
-        while (cursor < source.length) {
-          whitespace()
-          if (array) result.push(value(depth + 1))
-          else {
-            if (source[cursor] !== '"') return invalid(kind)
-            const key = string()
-            if (keys.has(key)) return invalid(kind)
-            keys.add(key); whitespace()
-            if (source[cursor++] !== ':') return invalid(kind)
-            result[key] = value(depth + 1)
-          }
-          whitespace()
-          if (source[cursor] === end) { cursor++; return result }
-          if (source[cursor++] !== ',') return invalid(kind)
-        }
-        return invalid(kind)
-      }
-      const token = /^(?:true|false|null|-?(?:0|[1-9]\d*)(?:\.\d+)?(?:[eE][+-]?\d+)?)/.exec(source.slice(cursor))?.[0]
-      if (!token) return invalid(kind)
-      cursor += token.length
-      const result = JSON.parse(token)
-      if (strictValues && typeof result === 'number' && !Number.isFinite(result)) return invalid(kind)
-      return result
-    }
-    const result = value(0); whitespace()
-    if (cursor !== source.length) return invalid(kind)
-    return result
-  } catch { return invalid(kind) }
-}
+const parseBoundedJson = (source, maximumBytes, maximumDepth, kind, strictValues = false) =>
+  parseJson(source, maximumBytes, maximumDepth, () => invalid(kind), strictValues)
 
 // These limits apply to response format checks only. Legacy import projection
 // still accepts ignored fields under the original bounded-parser rules.

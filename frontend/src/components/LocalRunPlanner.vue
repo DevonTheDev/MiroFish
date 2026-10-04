@@ -59,7 +59,12 @@
           </label>
           <p class="hint">{{ $t(useLlm ? 'localPlan.llmHint' : 'localPlan.templateHint') }}</p>
           <p class="hint">{{ $t('localPlan.configModelHint') }}</p>
-          <button data-testid="prepare-cast" type="button" :disabled="!canPrepare || !selectedIds.length" @click="$emit('prepare')">{{ $t('localPlan.prepare') }}</button>
+          <label class="profile-choice" for="draft-maximum-rounds">{{ $t('localPlan.maximumRounds') }}</label>
+          <input id="draft-maximum-rounds" data-testid="draft-maximum-rounds" type="number" min="1" step="1"
+            :max="plan.limits.max_rounds" :value="maxRounds" :disabled="!canPrepare" :onInput="roundsAction">
+          <p class="hint">{{ $t('localPlan.roundsHint', { cap: plan.limits.max_rounds }) }}</p>
+          <p v-if="!roundsValid" class="planner-error">{{ $t('localPlan.invalidRounds') }}</p>
+          <button data-testid="prepare-cast" type="button" :disabled="!canPrepare || !selectedIds.length || !roundsValid" @click="$emit('prepare')">{{ $t('localPlan.prepare') }}</button>
         </template>
       </template>
       <p v-if="complete" role="status">{{ $t('localPlan.ready') }}</p>
@@ -72,7 +77,7 @@ import { computed } from 'vue'
 const props = defineProps({ plan: Object, checking: Boolean, waiting: Boolean, busy: Boolean, error: String,
   limitsValid: Boolean, canPrepare: Boolean, canReuse: Boolean, loadingCast: Boolean, catalogLoaded: Boolean,
   entities: { type: Array, default: () => [] }, selectedIds: { type: Array, default: () => [] },
-  typeFilter: String, useLlm: Boolean, complete: Boolean, cancellationStatus: String,
+  typeFilter: String, useLlm: Boolean, maxRounds: Number, roundsValid: Boolean, roundsAction: Function, complete: Boolean, cancellationStatus: String,
   cancellationBlocked: Boolean, showCancel: Boolean, canCancel: Boolean, cancelRetry: Boolean, cancelAction: Function })
 defineEmits(['refresh', 'load', 'select', 'filter', 'profile-mode', 'prepare', 'reuse'])
 const types = computed(() => [...new Set(props.entities.map(entity => entity.entity_type))].sort())

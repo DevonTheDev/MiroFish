@@ -7,6 +7,7 @@ import { parse as parseJavaScript } from '@babel/parser'
 import { parse, compileScript, compileTemplate } from '@vue/compiler-sfc'
 import * as Vue from 'vue'
 import * as Router from 'vue-router'
+import * as LocalCastPreset from '../../src/utils/localCastPreset.js'
 
 export const setupView = 'views/SimulationView.vue'
 export const runView = 'views/SimulationRunView.vue'
@@ -53,6 +54,16 @@ function renderer() {
 
 export function build(options = {}) {
   const requests = {}, instances = {}, intervals = new Map(), warnings = []
+  const downloads = options.downloads ?? [], revoked = options.revoked ?? [], objectUrls = new Map()
+  let nextObjectUrl = 0
+  const fileUrl = {
+    createObjectURL(blob) { const url = 'blob:preset-fixture-' + (++nextObjectUrl); objectUrls.set(url, blob); return url },
+    revokeObjectURL(url) { revoked.push(url); objectUrls.delete(url) },
+  }
+  const fileDocument = { createElement(type) {
+    assert.equal(type, 'a')
+    return { href: '', download: '', click() { downloads.push({ href: this.href, filename: this.download, blob: objectUrls.get(this.href) }) } }
+  } }
   let nextTimer = 0 // Timer ID zero must be retired too.
   const api = new Proxy({}, { get(_target, name) {
     return (...args) => {
@@ -80,12 +91,13 @@ export function build(options = {}) {
   const components = { '../components/GraphPanel.vue': graph }
   function evaluate(source, returnName = 'component') {
     const ast = parseJavaScript(source, { sourceType: 'module' })
-    const globals = { AbortController, console: { warn: (...args) => warnings.push(args), error: (...args) => warnings.push(args) },
+    const globals = { AbortController, Blob, URL: fileUrl, document: fileDocument, console: { warn: (...args) => warnings.push(args), error: (...args) => warnings.push(args) },
       setInterval: (callback, ms) => { const id = nextTimer++; intervals.set(id, { callback, ms }); return id },
       clearInterval: id => intervals.delete(id) }
     for (const statement of ast.program.body.filter(item => item.type === 'ImportDeclaration').reverse()) {
       const path = statement.source.value
       let dependency = modules[path] ?? (path.includes('/api/') ? api : null)
+      if (path === '../utils/localCastPreset') dependency = LocalCastPreset
       if (path === '../utils/localRunPlan') {
         const utility = readFileSync(new URL('../../src/utils/localRunPlan.js', import.meta.url), 'utf8')
         const exports = [...utility.matchAll(/export (?:const|function) (\w+)/g)].map(match => match[1])
@@ -116,6 +128,9 @@ export function build(options = {}) {
     }
     return value
   }
+  if (existsSync(new URL('../../src/components/LocalCastPresetPanel.vue', import.meta.url))) {
+    components['./LocalCastPresetPanel.vue'] = component('components/LocalCastPresetPanel.vue')
+  }
   if (existsSync(new URL('../../src/components/LocalRunPlanner.vue', import.meta.url))) {
     components['./LocalRunPlanner.vue'] = component('components/LocalRunPlanner.vue')
   }
@@ -137,7 +152,7 @@ export function build(options = {}) {
   }
   const host = { type: 'root', children: [], parent: null }
   let mounted = false
-  return { requests, instances, router, intervals, host, warnings,
+  return { requests, instances, router, intervals, host, warnings, downloads, revoked, objectUrls,
     state: path => instances[path].at(-1).setupState,
     child: path => instances[path].at(-1),
     graph: () => instances.graph.at(-1),

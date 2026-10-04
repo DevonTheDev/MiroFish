@@ -31,6 +31,11 @@ Graphiti/Neo4j memory, and bounded consumer-hardware defaults. Start with the
 [local setup guide](docs/LOCAL_MODE.md), `.env.local.example`, and
 `npm run setup:local`. Existing cloud setup remains available below.
 
+Local preparation also supports [cast presets](docs/LOCAL_MODE.md#save-and-reopen-a-local-cast-preset):
+save selected agents, profile mode and a round cap to a small JSON file, then
+explicitly apply those choices to a fresh setup on the same project and graph.
+Opening a preset does not prepare or start a simulation.
+
 ## Revisit saved reports
 
 Open **Saved reports** from Home to search earlier saved reports, filter their

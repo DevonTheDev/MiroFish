@@ -1684,5 +1684,37 @@
     "cancelUnknown": "无法确认取消请求是否成功。正在检查任务状态，之后才可再次尝试。",
     "cancelRetryAvailable": "最新任务状态仍允许取消。您可以重试取消。",
     "cancelRetry": "重试取消"
+  },
+  "localCastPreset": {
+    "title": "本地角色预设",
+    "scope": "保存此项目和图谱的角色选择，供重新生成或同图谱的新模拟使用。预设不会冻结图谱事实、人设、提示词、配置或产物状态。",
+    "loadFirst": "请先点击“加载角色”，核验当前项目、图谱及可选实体。没有保留角色选择的已有准备结果无法导出。",
+    "binding": "当前项目：{project} · 当前图谱：{graph}",
+    "save": "保存角色预设",
+    "open": "打开角色预设",
+    "clear": "清除文件预览",
+    "fileHint": "仅支持 JSON，最大 256 KiB。打开文件只会预览其中的选择；应用会替换角色、人设模式和最大轮数，之后仍需手动点击准备。",
+    "reading": "正在读取角色预设…",
+    "preview": "文件中的选择",
+    "project": "项目 ID",
+    "graph": "图谱 ID",
+    "selection": "按顺序选择的实体 ID（{count}）",
+    "compatible": "与已加载角色和当前限制兼容，可以应用到此空闲模拟。",
+    "applyUnavailable": "这些选择与已加载角色兼容，但应用需要环境清理完成后的空闲、尚未准备的本地模拟。",
+    "apply": "应用角色预设",
+    "applied": "预设已应用到草稿。确认后请点击“准备所选角色”。",
+    "retainedDraft": "保存会导出当前页面保留的有效选择，包括准备或取消后保留的选择；不会导出生成的产物。",
+    "errors": {
+      "invalid_preset": "这不是有效的本地角色预设，请检查版本、完整字段、ID 和数据类型。",
+      "file_too_large": "预设文件超过 256 KiB 限制。",
+      "invalid_utf8": "文件必须是有效的 UTF-8 JSON。",
+      "invalid_catalog": "无法核验当前角色的项目、图谱或限制，请从有效的本地计划加载角色。",
+      "identity_mismatch": "此预设属于不同的项目或图谱。",
+      "selection_unavailable": "当前角色列表中缺少一个或多个所选实体 ID。",
+      "agent_limit_exceeded": "预设选择的实体数量超过当前本地限制。",
+      "round_limit_exceeded": "预设的最大轮数超过当前本地限制。",
+      "read_failed": "无法读取预设文件，当前草稿已保留。",
+      "download_failed": "无法创建预设下载，当前草稿已保留。"
+    }
   }
 }

@@ -1684,5 +1684,37 @@
     "cancelUnknown": "Could not confirm the cancellation request. Checking task status before another attempt.",
     "cancelRetryAvailable": "The latest task status still allows cancellation. You can retry cancellation.",
     "cancelRetry": "Retry cancellation"
+  },
+  "localCastPreset": {
+    "title": "Local cast preset",
+    "scope": "Save cast choices for fresh generation on this project and graph, including a new simulation. A preset does not freeze graph facts, profiles, prompts, configuration or artifact state.",
+    "loadFirst": "First choose Load cast to verify the current project, graph and eligible entities. Saved preparation without a retained selection cannot be exported.",
+    "binding": "Current project: {project} · Current graph: {graph}",
+    "save": "Save cast preset",
+    "open": "Open cast preset",
+    "clear": "Clear file preview",
+    "fileHint": "JSON only, up to 256 KiB. Opening a file only previews its choices. Apply replaces the cast, profile mode and maximum rounds; prepare explicitly afterward.",
+    "reading": "Reading cast preset…",
+    "preview": "File choices",
+    "project": "Project ID",
+    "graph": "Graph ID",
+    "selection": "Selected entity IDs, in order ({count})",
+    "compatible": "Compatible with the loaded cast and current limits. Ready to apply to this idle simulation.",
+    "applyUnavailable": "These choices match the loaded cast, but applying requires an idle, unprepared local simulation after cleanup.",
+    "apply": "Apply cast preset",
+    "applied": "Preset applied to the draft. Choose Prepare selected cast when ready.",
+    "retainedDraft": "Save exports the valid choices retained in this view, even after preparation or cancellation. It does not export generated artifacts.",
+    "errors": {
+      "invalid_preset": "This is not a valid local cast preset. Check the version, exact fields, IDs and value types.",
+      "file_too_large": "The preset exceeds the 256 KiB file limit.",
+      "invalid_utf8": "The file must contain valid UTF-8 JSON.",
+      "invalid_catalog": "The current cast binding or limits cannot be verified. Load the cast from a valid local plan.",
+      "identity_mismatch": "This preset belongs to a different project or graph.",
+      "selection_unavailable": "One or more selected entity IDs are absent from the current cast.",
+      "agent_limit_exceeded": "The preset selects more entities than the current local limit allows.",
+      "round_limit_exceeded": "The preset maximum rounds exceeds the current local limit.",
+      "read_failed": "The preset file could not be read. Your current draft was kept.",
+      "download_failed": "The preset download could not be created. Your current draft was kept."
+    }
   }
 }
