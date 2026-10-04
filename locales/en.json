@@ -1365,7 +1365,7 @@
     "backendBusy": "The backend reports a running trial. Wait for it to finish, then refresh readiness.",
     "exportError": "The download could not be prepared. Your draft and captured run are unchanged.",
     "filesTitle": "Suite files",
-    "filesNote": "Import a definition up to 128 KiB, review it, then choose whether to replace the draft. Editing and definition downloads work offline. Version 1 stays unchanged until you choose JSON object, which upgrades the draft and its exports to version 2; switching back keeps version 2.",
+    "filesNote": "Import a definition up to 128 KiB, review it, then choose whether to replace the draft. Editing and definition downloads work offline. Choosing JSON object upgrades a version 1 draft to version 2; choosing JSON fields upgrades any older draft to version 3. Changing check modes never downgrades the version.",
     "import": "Import suite definition",
     "importRun": "Import saved run report",
     "runImportNote": "Reuse cases from a saved run report up to 1 MiB. Review the captured cases, then explicitly use them as the editable draft.",
@@ -1390,7 +1390,7 @@
     "emptyExpected": "The expected reply is the empty string.",
     "removeCase": "Remove case",
     "addCase": "Add case",
-    "validation": "Complete a suite name and 1–5 valid cases. Each case needs a label and user prompt; temperature must be 0–1 and the output limit an integer from 1–512. Prompt and expected-reply bounds are shown above.",
+    "validation": "Complete a suite name and 1–5 valid cases. Each case needs a label and user prompt; temperature must be 0–1 and the output limit an integer from 1–512. JSON fields needs 1–10 distinct valid names with a type chosen for every field. Prompt, name and expected-reply bounds are shown above.",
     "capExceeded": "At least one case exceeds the currently loaded output limit of {cap} tokens. Reduce it before running; the definition can still be downloaded.",
     "run": "Run suite once",
     "stop": "Stop scheduling",
@@ -1469,10 +1469,11 @@
     "checkKinds": {
       "none": "No check",
       "exact_text": "Exact text",
-      "json_object": "JSON object"
+      "json_object": "JSON object",
+      "json_fields": "JSON fields"
     },
     "jsonObjectHint": "Checks format only: the entire reply must be one JSON object, including an empty object. Surrounding JSON whitespace and nested arrays are allowed. Limit: 64 KiB of UTF-8 and value depth 16 (root depth 0). Rejects wrappers, trailing content, duplicate decoded keys, nonfinite numbers and unpaired surrogates. No repair, schema validation, numeric-precision guarantee or answer-quality assessment. This does not request a JSON response format from the model.",
-    "formatCheckNote": "Checks evaluate only confirmed successful replies. Exact text checks compare the complete reply literally; JSON object checks verify bounded format only. They do not measure model accuracy or answer quality. A failed check may continue; other run outcomes halt the suite.",
+    "formatCheckNote": "Checks evaluate only confirmed successful replies. Exact text compares the complete reply literally; JSON object checks bounded format; JSON fields also checks the required top-level names and types. These checks do not measure model accuracy or answer quality. A failed check may continue; other run outcomes halt the suite.",
     "jsonChecks": {
       "not_evaluated": "JSON object check not evaluated",
       "not_requested": "No check requested",
@@ -1488,6 +1489,28 @@
       "mismatched": "Checks failed",
       "not_requested": "Checks not requested",
       "not_evaluated": "Checks not evaluated"
+    },
+    "requiredFields": "Required top-level fields",
+    "requiredFieldsHint": "Add 1–10 distinct literal field names and choose a JSON type for each. Names use 1–80 Unicode characters and cannot be blank or contain control, format, surrogate, private-use or unassigned characters. Casing, Unicode spelling and outer spaces are significant. Names such as a.b are literal keys, not nested paths.",
+    "fieldName": "Field {number} name",
+    "fieldType": "JSON type",
+    "chooseFieldType": "Choose a type",
+    "fieldTypes": {
+      "string": "string",
+      "number": "number",
+      "boolean": "boolean",
+      "object": "object",
+      "array": "array",
+      "null": "null"
+    },
+    "removeField": "Remove field",
+    "addField": "Add required field",
+    "jsonFieldsHint": "The complete successful reply must pass the strict JSON object check and contain each named top-level field with the chosen type. Extra fields are allowed; object and array rules check only the container, not its children. Limit: 64 KiB UTF-8 and value depth 16 (root depth 0). Rejects wrappers, trailing content, duplicate decoded keys, nonfinite numbers and unpaired surrogates. No nested schema, numeric-precision guarantee or meaning check. This checks captured replies only and does not change the model request or settings.",
+    "jsonFieldsChecks": {
+      "not_evaluated": "JSON fields check not evaluated",
+      "not_requested": "No check requested",
+      "matched": "JSON fields check passed",
+      "mismatched": "JSON fields check failed"
     }
   },
   "promptSuiteComparison": {
@@ -1496,7 +1519,7 @@
     "title": "Compare captured prompt-suite runs",
     "scope": "Import two exported runs to inspect exact replies, inputs and recorded observations side by side.",
     "offline": "This page works offline. Reading files, comparing and downloading make no backend or model requests. Reports stay in page memory; leaving clears them. Report data is not saved to browser storage.",
-    "limits": "Choose exported version 1 or 2 suite-run JSON files, up to 1 MiB each. Review each preview, then explicitly use it. Comparison bundles cannot be imported as runs.",
+    "limits": "Choose exported version 1, 2 or 3 suite-run JSON files, up to 1 MiB each. Review each preview, then explicitly use it. Comparison bundles cannot be imported as runs.",
     "baseline": "Baseline",
     "comparison": "Comparison",
     "chooseFile": "Choose a captured run (.json)",
@@ -1572,7 +1595,7 @@
     },
     "requestIdOverlap": "A request ID for this case also appears in the other report; paired findings are excluded.",
     "checkTransition": "Check transition",
-    "checkFindingsNote": "Paired findings require identical evaluation inputs and check kinds, two successful recorded rows and request IDs absent from the other report. Check transitions also require an enabled check; exact text requires the same expected reply. JSON checks validate bounded object format only, not schema or answer quality. Literal reply equality still compares the full text.",
+    "checkFindingsNote": "Paired findings require identical evaluation inputs and check kinds, two successful recorded rows and request IDs absent from the other report. Exact text requires the same expected reply; JSON fields requires the same names and types, regardless of rule order. Check transitions require an enabled check. JSON checks validate bounded object format and, when requested, top-level fields and types, not nested schema or answer quality. Literal reply equality still compares the full text.",
     "jsonTransitions": {
       "gained_match": "JSON format check now passes",
       "lost_match": "JSON format check now fails",
@@ -1593,6 +1616,12 @@
       "retained_matches": "Checks still passing",
       "retained_mismatches": "Checks still failing",
       "overlapping_request_pairs": "Pairs with overlapping request IDs"
+    },
+    "jsonFieldsTransitions": {
+      "gained_match": "JSON fields check now passes",
+      "lost_match": "JSON fields check now fails",
+      "retained_match": "JSON fields check still passes",
+      "retained_mismatch": "JSON fields check still fails"
     }
   }
 }

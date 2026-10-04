@@ -14,34 +14,62 @@ const text = (value, cap, plain = false, required = false) => typeof value === '
 const definitionKeys = ['schema_version', 'kind', 'name', 'cases']
 const caseKeys = ['case_id', 'label', 'system_prompt', 'user_prompt', 'temperature', 'max_output_tokens', 'expected_text']
 const checkKinds = ['none', 'exact_text', 'json_object']
+const fieldTypes = ['string', 'number', 'boolean', 'object', 'array', 'null']
 
 // Callers pass admitted cases. Legacy expectations retain their exact semantics
 // without adding fields to v1 definitions or their exported historical reports.
 export function getPromptSuiteCheck(item) {
-  return { kind: item.check_kind ?? (item.expected_text === null ? 'none' : 'exact_text'), expected_text: item.expected_text }
+  return { kind: item.check_kind ?? (item.expected_text === null ? 'none' : 'exact_text'), expected_text: item.expected_text,
+    ...(item.check_kind === 'json_fields' ? { required_fields: item.required_fields } : {}) }
 }
 
 export function evaluatePromptSuiteCheck(item, status, content) {
   if (status !== 'succeeded') return 'not_evaluated'
   const check = getPromptSuiteCheck(item)
   if (check.kind === 'none') return 'not_requested'
-  const matched = check.kind === 'json_object' ? isPromptSuiteJsonObjectReply(content) : content === check.expected_text
+  let matched
+  if (check.kind === 'json_object' || check.kind === 'json_fields') {
+    const reply = parseJsonObjectReply(content)
+    matched = reply !== null && (check.kind === 'json_object' || check.required_fields.every(({ name, type }) => {
+      if (!Object.hasOwn(reply, name)) return false
+      const value = reply[name]
+      const actualType = value === null ? 'null' : Array.isArray(value) ? 'array' : typeof value
+      return actualType === type
+    }))
+  } else matched = content === check.expected_text
   return matched ? 'matched' : 'mismatched'
+}
+
+function acceptRequiredFields(item) {
+  if (item.check_kind !== 'json_fields') {
+    if (item.required_fields !== null) return invalid('definition')
+    return null
+  }
+  if (!Array.isArray(item.required_fields) || item.required_fields.length < 1 || item.required_fields.length > 10) return invalid('definition')
+  const names = new Set()
+  return Array.from(item.required_fields, rule => {
+    if (!exact(rule, ['name', 'type']) || !text(rule.name, 80, true, true) || names.has(rule.name) || !fieldTypes.includes(rule.type)) return invalid('definition')
+    names.add(rule.name)
+    return { name: rule.name, type: rule.type }
+  })
 }
 
 export function acceptPromptSuiteDefinition(source) {
   try {
-    if (!exact(source, definitionKeys) || ![1, 2].includes(source.schema_version) || source.kind !== 'mirofish_local_prompt_suite' ||
+    if (!exact(source, definitionKeys) || ![1, 2, 3].includes(source.schema_version) || source.kind !== 'mirofish_local_prompt_suite' ||
       !text(source.name, 80, true, true) || !Array.isArray(source.cases) || source.cases.length < 1 || source.cases.length > 5) return invalid('definition')
-    const version2 = source.schema_version === 2
+    const explicitCheck = source.schema_version >= 2, version3 = source.schema_version === 3
+    const keys = [...caseKeys, ...(explicitCheck ? ['check_kind'] : []), ...(version3 ? ['required_fields'] : [])]
+    const kinds = version3 ? [...checkKinds, 'json_fields'] : checkKinds
     const ids = new Set()
     const cases = Array.from(source.cases, item => {
-      if (!exact(item, version2 ? [...caseKeys, 'check_kind'] : caseKeys) || !uuid(item.case_id) || ids.has(item.case_id) ||
+      if (!exact(item, keys) || !uuid(item.case_id) || ids.has(item.case_id) ||
         !(item.expected_text === null || text(item.expected_text, 500)) ||
-        (version2 && (!checkKinds.includes(item.check_kind) ||
+        (explicitCheck && (!kinds.includes(item.check_kind) ||
           (item.check_kind === 'exact_text' ? typeof item.expected_text !== 'string' : item.expected_text !== null)))) return invalid('definition')
       ids.add(item.case_id)
-      return { case_id: item.case_id, ...acceptPromptTrialInputs(item), ...(version2 ? { check_kind: item.check_kind } : {}), expected_text: item.expected_text }
+      return { case_id: item.case_id, ...acceptPromptTrialInputs(item), ...(explicitCheck ? { check_kind: item.check_kind } : {}), expected_text: item.expected_text,
+        ...(version3 ? { required_fields: acceptRequiredFields(item) } : {}) }
     })
     const result = { schema_version: source.schema_version, kind: 'mirofish_local_prompt_suite', name: source.name, cases }
     if (bytes(JSON.stringify(result)) > PROMPT_SUITE_MAX_BYTES) return invalid('definition')
@@ -109,15 +137,19 @@ function parseBoundedJson(source, maximumBytes, maximumDepth, kind, strictValues
 
 // These limits apply to response format checks only. Legacy import projection
 // still accepts ignored fields under the original bounded-parser rules.
-export function isPromptSuiteJsonObjectReply(content) {
+function parseJsonObjectReply(content) {
   try {
     const result = parseBoundedJson(content, 64 * 1024, 16, 'JSON object reply', true)
-    return result !== null && typeof result === 'object' && !Array.isArray(result)
-  } catch { return false }
+    return result !== null && typeof result === 'object' && !Array.isArray(result) ? result : null
+  } catch { return null }
+}
+
+export function isPromptSuiteJsonObjectReply(content) {
+  return parseJsonObjectReply(content) !== null
 }
 
 export function parsePromptSuiteDefinition(source) {
-  return acceptPromptSuiteDefinition(parseBoundedJson(source, PROMPT_SUITE_MAX_BYTES, 4, 'definition'))
+  return acceptPromptSuiteDefinition(parseBoundedJson(source, PROMPT_SUITE_MAX_BYTES, 5, 'definition'))
 }
 
 export function parsePromptSuiteReport(source) {
@@ -139,7 +171,7 @@ const timestamp = value => typeof value === 'string' && /^\d{4}-\d{2}-\d{2}T\d{2
 
 export function acceptPromptSuiteReport(source) {
   try {
-    if (!exact(source, reportKeys) || ![1, 2].includes(source.schema_version) || source.kind !== 'mirofish_local_prompt_suite_run' || !uuid(source.run_id) ||
+    if (!exact(source, reportKeys) || ![1, 2, 3].includes(source.schema_version) || source.kind !== 'mirofish_local_prompt_suite_run' || !uuid(source.run_id) ||
       !timestamp(source.started_at) || !(source.finished_at === null || timestamp(source.finished_at)) ||
       !['running', 'completed', 'stopped', 'halted'].includes(source.status) || typeof source.stop_requested !== 'boolean' || !code(source.halt_code)) return invalid('report')
     const definition = acceptPromptSuiteDefinition(source.definition)

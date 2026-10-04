@@ -176,7 +176,11 @@ export function createPromptSuiteRunner(options = {}) {
     let definition
     try {
       definition = acceptPromptSuiteDefinition(source)
-      definition.cases.forEach(Object.freeze); Object.freeze(definition.cases); Object.freeze(definition)
+      definition.cases.forEach(item => {
+        if (item.required_fields) { item.required_fields.forEach(Object.freeze); Object.freeze(item.required_fields) }
+        Object.freeze(item)
+      })
+      Object.freeze(definition.cases); Object.freeze(definition)
     } catch { state.error_code = 'invalid_definition'; emit(); return false }
     const expected = ++generation
     active = { generation: expected, definition, stop: false, automatic: true, index: 0, owner: null, polls: 0, requests: null, captured: false }

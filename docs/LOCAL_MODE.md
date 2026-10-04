@@ -300,11 +300,13 @@ and shared inference gateway as the single-prompt workbench.
 
 1. Name the suite and add one to five cases. Each case has a label, optional
    system prompt, required user prompt, temperature and output-token request
-2. Optionally enable a check and choose **Exact text** or **JSON object**.
+2. Optionally enable a check and choose **Exact text**, **JSON object** or
+   **JSON fields**.
    Exact text is case-sensitive and preserves whitespace, line endings,
    reasoning wrappers and empty strings. An enabled blank exact expectation
    explicitly expects an empty reply. JSON object checks whether the entire
-   reply is a directly parseable object; it needs no expected text. Leaving
+   reply is a directly parseable object; it needs no expected text. JSON fields
+   also requires named top-level properties with their chosen JSON types. Leaving
    the check disabled means no automated comparison
 3. Choose **Run suite once**. The page freezes the cases and runs them
    sequentially. A successful reply that fails its selected check is an ordinary
@@ -378,8 +380,9 @@ contain your prompts, expectations and model replies; choose their destination
 accordingly. There is no automatic browser storage or backend suite archive.
 Reloading, navigation or closing the page loses its in-memory suite observation.
 
-Exact reply checks are simple literal comparisons; JSON checks test object
-format only. Neither judges semantic
+Exact reply checks are simple literal comparisons. JSON object checks test object
+format; JSON fields additionally tests the explicitly named top-level types.
+Neither judges semantic
 correctness, model quality, statistical significance, speed on your GPU or
 whether the model server honored every requested setting. Each trial retains
 its observed configured model name and provider-reported usage separately; those
@@ -388,7 +391,7 @@ configured for local inference, as described above.
 
 Local verification exercises the actual Flask API, Vite proxy, shared gateway,
 Axios client and compiled Vue route with synthetic loopback replies. It checks
-sequential call counts, exact and JSON-format matches/mismatches, empty replies,
+sequential call counts, exact/JSON-format/required-field matches and mismatches, empty replies,
 truncation, lost responses, explicit reconciliation, Stop, navigation and captured
 exports. Pure contract tests also cover strict imports, JSON byte/depth/Unicode
 boundaries, mixed-version compatibility and bounded polling. Saved-run reuse is
@@ -397,6 +400,56 @@ explicitly running them with new execution IDs and comparing the two reports.
 No real model
 weights, GPU quality/performance, native browser rendering/headers or Windows
 behavior is established by these tests.
+
+### Require JSON fields
+
+Choose **JSON fields** to check whether a local model's reply contains the
+structured information your next step needs. Add one to ten required top-level
+field names and choose a JSON type for each: string, number, boolean, object,
+array or null. New rows begin blank; complete them before Run or definition
+export becomes available. For example, requiring `answer` as string and `ok`
+as boolean accepts `{"answer":"yes","ok":true}` and rejects a missing `ok`
+or the string `"true"`. Additional properties are allowed.
+
+The entire reply must first pass the same bounded, strict JSON-object check
+described above. Each required property must be present on that object. A required
+null means an explicitly present null value, not an absent key. False, zero and
+empty strings retain their own types. Object excludes arrays and null; object
+and array requirements do not constrain their contents. There are no nested
+paths, full schema rules, integer subtype, range checks, regexes or semantic
+judgments. Number means a finite parsed JSON number and retains JavaScript
+numeric precision limits; this does not verify the original number token exactly.
+
+Names contain 1–80 Unicode codepoints, must not be all whitespace, and use the
+existing plain-name rule excluding Unicode category C: controls, format marks,
+surrogates, private-use and unassigned characters. Accepted case, Unicode and
+outer spaces remain exact; names are shown quoted so spaces are visible. Dots,
+brackets and names such as `__proto__` are literal property names, not paths or
+object behavior. Duplicate decoded names are refused. A rule for `a.b` requires
+that literal top-level key, not a nested `b` inside `a`.
+
+Choosing JSON fields explicitly promotes the draft to version 3, preserving its
+case IDs, inputs and prior checks. Each v3 case has `required_fields`: an ordered
+array of `{name,type}` for `json_fields`, or null for every other kind. JSON fields
+uses `expected_text: null`. Switching modes clears inapplicable rule data and
+does not downgrade the draft. Versions 1 and 2 remain supported with their
+existing shapes and exported bytes. Choosing only JSON object in a v1 draft
+still promotes it to v2.
+
+Captured definitions clone and freeze their rule data. Later editor changes do
+not change an active run, captured report or imported preview. Rule checks run
+only on a confirmed successful response; a mismatch continues to the next case,
+while truncation and other runtime failures retain the existing halt behavior.
+Imported reports recompute these checks from captured replies and reject a
+contradictory claimed outcome. Importing a saved run preserves all captured rules
+and case IDs without restoring its execution state.
+
+These checks run locally after the reply. They do not insert requirements into
+the prompt or enable a model response-format option. Include the desired output
+in your own prompt, then use the checks to compare observed results. Local tests
+exercise all six types, literal/prototype-like names, strict reply boundaries,
+nested capture isolation, stale rule handlers, both languages and actual
+Flask/Vite/gateway run → export → reuse → fresh run → offline comparison.
 
 ### Reuse cases from a saved run
 
@@ -407,7 +460,8 @@ then choose **Use captured cases as draft**. Selecting the file alone changes
 neither the draft nor the current run.
 
 The action copies the captured definition: suite name, case IDs/order, exact
-prompts, settings, check kinds and expectations. It preserves v1/v2 and includes
+prompts, settings, check kinds, expectations and any required-field rules. It
+preserves v1/v2/v3 and includes
 cases that were never attempted in an interrupted run. You can edit or remove
 cases and download an ordinary definition. Keeping case IDs lets later report
 comparison match the same cases across experiments.
@@ -422,7 +476,7 @@ and token caps, uses the currently configured model and generates new run/reques
 IDs. A historical report does not establish that the present server is ready.
 
 Run files are limited to 1 MiB before and after reading, require valid UTF-8, and
-use the existing strict v1/v2 report admission. Duplicate keys, excessive nesting,
+use the supported v1/v2/v3 report admission. Duplicate keys, excessive nesting,
 invalid identities, contradictory check outcomes, BOMs and unsupported file kinds
 are refused before any cases are copied. A valid definition embedded in an invalid
 report is not extracted. The original definition input keeps its separate 128 KiB
@@ -452,7 +506,8 @@ archive. It can be used after changing a local model and repeating a saved suite
 
 Cases match only by their stable case ID. Added/removed cases and changed
 prompts, settings or expectations remain visible. A paired finding requires
-identical system/user prompts, temperature, output-token request, check kind and expectation,
+identical system/user prompts, temperature, output-token request, check kind,
+expectation and required-field mapping,
 two recorded successful outcomes, and request IDs absent from the opposite
 report. Names and labels do
 not substitute for identity; label changes are displayed separately. Different
@@ -462,11 +517,11 @@ case ID, and is excluded from paired findings.
 The order flag considers only shared cases; it does not call an insertion a move.
 
 A check can be gained, lost or retained only when that pair has the same enabled
-check and expectation. A disabled check differs from expecting an empty reply.
+check, expectation and required-field mapping. A disabled check differs from expecting an empty reply.
 Two valid JSON objects can both pass their format check while their literal
-replies differ. A change between exact text and JSON object is a changed input,
-so it does not produce a paired check finding. V1 none/exact checks are normalized
-internally for comparison with equivalent v2 cases.
+replies differ. A change between exact text, JSON object and JSON fields is a
+changed input, so it does not produce a paired check finding. Older checks are
+normalized internally for comparison with equivalent v2/v3 cases.
 Unknown, running, rejected, not-attempted, truncated, refused and failed outcomes
 are preserved, with unavailable findings shown as unavailable rather than zero.
 The page does not infer coverage from the report's overall status: a halted run
@@ -481,7 +536,7 @@ labels, not authenticated weights or proof the server followed them. Hardware,
 warm-up and other workload conditions are unknown. No pass rate, overall winner,
 accuracy, throughput or statistically significant speed claim is produced.
 
-Imports are limited to 1 MiB each and require valid UTF-8, supported v1 or v2 report
+Imports are limited to 1 MiB each and require valid UTF-8, supported v1/v2/v3 report
 structure and identities. Duplicate keys, excessive nesting and malformed
 captures are rejected before fixed-field projection. A failed or canceled
 replacement retains the accepted historical slot and comparison. An accepted
@@ -494,10 +549,18 @@ uses fixed labels and quoted literal values, escaping control/format characters.
 An export failure keeps the valid screen result. Downloading uses its captured
 bytes and time; comparison bundles are reports, not supported import files.
 The files contain prompts and replies, so choose their destination accordingly.
-Comparing two v1 reports preserves the v1 comparison export. If either report is
-v2, the comparison is v2: rows use `check_transition` instead of
+Comparing two v1 reports preserves the v1 comparison export. When the highest
+input version is v2, the comparison is v2: rows use `check_transition` instead of
 `exact_transition`, and `input_changes` includes `check_kind`. These versioned
 exports retain the original accepted run reports.
+
+If either input is v3, the comparison is v3 and also records
+`input_changes.required_fields`. Adding, removing, renaming or changing a field's
+type makes evaluation inputs different and excludes paired findings. Rule order
+has no checking meaning, so reordering the same name/type mapping alone keeps
+the pair eligible; the captured arrays retain their original order. Older checks
+have no field requirements and can pair with equivalent v3 cases whose
+`required_fields` is null. Both sides display their captured rules literally.
 
 Local tests import actual suite exports generated through Flask, the shared
 gateway, a synthetic loopback model, Axios and the compiled suite editor. The

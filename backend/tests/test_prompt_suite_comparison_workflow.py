@@ -20,7 +20,7 @@ from app.services.simulation_runner import SimulationRunner
 
 
 @contextmanager
-def comparison_model(*, truncated, json_checks=False):
+def comparison_model(*, truncated, json_checks=False, field_checks=False):
     calls = []
 
     class Handler(BaseHTTPRequestHandler):
@@ -42,6 +42,15 @@ def comparison_model(*, truncated, json_checks=False):
                     3: ' {"b":[true,null],"a":"<script>literal 雪</script>"} ' if candidate
                     else '{"a":"<script>literal 雪</script>","b":[true,null]}',
                     4: "yes",
+                }[number]
+            if field_checks:
+                reply = {
+                    1: '{"answer":"yes"}' if candidate else '{"answer":7}',
+                    2: '{"ok":"true"}' if candidate else '{"ok":true}',
+                    3: '{"ok":false,"a.b":"literal 雪","empty":null,"items":[],"count":0,"__proto__":{"safe":true},"extra":1}' if candidate
+                    else '{"__proto__":{},"count":0,"items":[],"empty":null,"a.b":"literal 雪","ok":false}',
+                    4: '{}',
+                    5: 'yes',
                 }[number]
             body = json.dumps({
                 "id": "fixture-comparison", "object": "chat.completion", "created": 1,
@@ -69,7 +78,8 @@ def comparison_model(*, truncated, json_checks=False):
         assert not thread.is_alive()
 
 
-@pytest.mark.parametrize("scenario", ["completed", "truncated", "json_completed", "json_truncated"])
+@pytest.mark.parametrize("scenario", ["completed", "truncated", "json_completed", "json_truncated",
+                                      "fields_completed", "fields_truncated"])
 def test_generated_suite_reports_reopen_and_compare_without_network(monkeypatch, scenario, caplog):
     repo = Path(__file__).resolve().parents[2]
     node = shutil.which("node")
@@ -109,9 +119,10 @@ def test_generated_suite_reports_reopen_and_compare_without_network(monkeypatch,
         monkeypatch.setattr(Config, name, value)
 
     json_checks = scenario.startswith("json_")
+    field_checks = scenario.startswith("fields_")
     truncated = scenario.endswith("truncated")
-    case_count = 4 if json_checks else 3
-    with comparison_model(truncated=truncated, json_checks=json_checks) as (model_url, calls):
+    case_count = 5 if field_checks else 4 if json_checks else 3
+    with comparison_model(truncated=truncated, json_checks=json_checks, field_checks=field_checks) as (model_url, calls):
         monkeypatch.setattr(Config, "LLM_BASE_URL", model_url)
         monkeypatch.setattr(Config, "LOCAL_EMBEDDING_BASE_URL", model_url)
         app = create_app()
@@ -155,7 +166,8 @@ def test_generated_suite_reports_reopen_and_compare_without_network(monkeypatch,
                                (1 if truncated else case_count) + (["fixture-recovery"] * case_count if truncated else []))
             assert [body["model"] for _path, body in calls] == expected_models
             assert all("response_format" not in body and "tools" not in body and
-                       "check_kind" not in body and "expected_text" not in body for _path, body in calls)
+                       "check_kind" not in body and "expected_text" not in body and
+                       "required_fields" not in body for _path, body in calls)
             assert "PROMPT_BODY_PRIVATE" not in caplog.text
             assert "SECRET_CONFIG_KEY" not in caplog.text
             assert "请求: GET /api/runtime/trials" in caplog.text

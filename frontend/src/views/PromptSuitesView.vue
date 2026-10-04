@@ -39,7 +39,7 @@
               <dl class="result-grid" data-testid="suite-import-provenance"><div><dt>{{ t('promptSuites.runId') }}</dt><dd>{{ importView.preview.provenance.run_id }}</dd></div><div><dt>{{ t('promptSuites.historicalStatus') }}</dt><dd>{{ t(`promptSuites.runStates.${importView.preview.provenance.status}`) }}</dd></div><div><dt>{{ t('promptTrials.startedAt') }}</dt><dd><time :datetime="importView.preview.provenance.started_at">{{ importView.preview.provenance.started_at }}</time></dd></div><div><dt>{{ t('promptTrials.finishedAt') }}</dt><dd><time v-if="importView.preview.provenance.finished_at" :datetime="importView.preview.provenance.finished_at">{{ importView.preview.provenance.finished_at }}</time><span v-else>{{ t('promptTrials.unknown') }}</span></dd></div><div><dt>{{ t('promptSuites.summary.attempted') }}</dt><dd>{{ importView.preview.provenance.attempted }}</dd></div><div><dt>{{ t('promptSuites.summary.total') }}</dt><dd>{{ importView.preview.provenance.total }}</dd></div></dl>
             </template>
             <p v-else>{{ t('promptSuites.previewNote', { count: importView.preview.definition.cases.length }) }}</p>
-            <ol><li v-for="item in importView.preview.definition.cases" :key="item.case_id"><strong>{{ item.label }}</strong><dl class="result-grid"><div><dt>{{ t('promptTrials.temperature') }}</dt><dd>{{ item.temperature }}</dd></div><div><dt>{{ t('promptTrials.maxOutputTokens') }}</dt><dd>{{ item.max_output_tokens }}</dd></div></dl><details><summary>{{ t('promptSuites.reviewCase') }}</summary><h4>{{ t('promptTrials.systemPrompt') }}</h4><pre>{{ item.system_prompt }}</pre><h4>{{ t('promptTrials.userPrompt') }}</h4><pre>{{ item.user_prompt }}</pre><h4>{{ t('promptSuites.checkKind') }}</h4><p>{{ t(`promptSuites.checkKinds.${checkKind(item)}`) }}</p><p v-if="checkKind(item) === 'json_object'" class="reading-note">{{ t('promptSuites.jsonObjectHint') }}</p><template v-if="checkKind(item) === 'exact_text'"><h4>{{ t('promptSuites.expected') }}</h4><pre>{{ item.expected_text }}</pre><small v-if="item.expected_text === ''">{{ t('promptSuites.emptyExpected') }}</small></template></details></li></ol>
+            <ol><li v-for="(item, index) in importView.preview.definition.cases" :key="item.case_id"><strong>{{ item.label }}</strong><dl class="result-grid"><div><dt>{{ t('promptTrials.temperature') }}</dt><dd>{{ item.temperature }}</dd></div><div><dt>{{ t('promptTrials.maxOutputTokens') }}</dt><dd>{{ item.max_output_tokens }}</dd></div></dl><details><summary>{{ t('promptSuites.reviewCase') }}</summary><h4>{{ t('promptTrials.systemPrompt') }}</h4><pre>{{ item.system_prompt }}</pre><h4>{{ t('promptTrials.userPrompt') }}</h4><pre>{{ item.user_prompt }}</pre><h4>{{ t('promptSuites.checkKind') }}</h4><p>{{ t(`promptSuites.checkKinds.${checkKind(item)}`) }}</p><p v-if="checkKind(item) === 'json_object'" class="reading-note">{{ t('promptSuites.jsonObjectHint') }}</p><template v-if="checkKind(item) === 'json_fields'"><h4>{{ t('promptSuites.requiredFields') }}</h4><pre :data-testid="`suite-import-case-${index}-required-fields`">{{ requiredFieldsText(item) }}</pre><p class="reading-note">{{ t('promptSuites.jsonFieldsHint') }}</p></template><template v-if="checkKind(item) === 'exact_text'"><h4>{{ t('promptSuites.expected') }}</h4><pre>{{ item.expected_text }}</pre><small v-if="item.expected_text === ''">{{ t('promptSuites.emptyExpected') }}</small></template></details></li></ol>
             <div class="toolbar"><button type="button" class="primary" data-testid="suite-import-use" @click="importView.use">{{ t(importView.preview.provenance ? 'promptSuites.useCapturedCases' : 'promptSuites.useImport') }}</button><button type="button" data-testid="suite-import-cancel" @click="importView.cancel">{{ t('promptSuites.cancelImport') }}</button></div>
           </article>
           <button v-else-if="importView.loading" type="button" data-testid="suite-import-cancel" @click="importView.cancel">{{ t('promptSuites.cancelImport') }}</button>
@@ -59,9 +59,20 @@
             <div class="field"><label :for="`suite-output-${item.case_id}`">{{ t('promptTrials.maxOutputTokens') }}</label><input :id="`suite-output-${item.case_id}`" :data-testid="`suite-case-${index}-max_output_tokens`" type="number" min="1" max="512" step="1" required :value="item.max_output_tokens" @input="item.max_output_tokens = numeric($event.target.value)"><small>{{ t('promptTrials.outputHint', { cap: state.latest?.limits.max_output_tokens ?? t('promptTrials.unknown') }) }}</small></div>
           </div>
           <label class="check-control"><input type="checkbox" :data-testid="`suite-case-${index}-check_enabled`" :checked="checkKind(item) !== 'none'" @change="setCheckEnabled(item, $event.target.checked)">{{ t('promptSuites.enableCheck') }}</label>
-          <div v-if="checkKind(item) !== 'none'" class="field"><label :for="`suite-check-kind-${item.case_id}`">{{ t('promptSuites.checkKind') }}</label><select :id="`suite-check-kind-${item.case_id}`" :data-testid="`suite-case-${index}-check_kind`" :value="checkKind(item)" @change="setCheckKind(item, $event.target.value)"><option value="exact_text">{{ t('promptSuites.checkKinds.exact_text') }}</option><option value="json_object">{{ t('promptSuites.checkKinds.json_object') }}</option></select></div>
+          <div v-if="checkKind(item) !== 'none'" class="field"><label :for="`suite-check-kind-${item.case_id}`">{{ t('promptSuites.checkKind') }}</label><select :id="`suite-check-kind-${item.case_id}`" :data-testid="`suite-case-${index}-check_kind`" :value="checkKind(item)" @change="setCheckKind(item, $event.target.value)"><option value="exact_text">{{ t('promptSuites.checkKinds.exact_text') }}</option><option value="json_object">{{ t('promptSuites.checkKinds.json_object') }}</option><option value="json_fields">{{ t('promptSuites.checkKinds.json_fields') }}</option></select></div>
           <div v-if="checkKind(item) === 'exact_text'" class="field"><label :for="`suite-expected-${item.case_id}`">{{ t('promptSuites.expected') }}</label><textarea :id="`suite-expected-${item.case_id}`" :data-testid="`suite-case-${index}-expected_text`" rows="2" :value="item.expected_text" @input="setExpectedText(item, $event.target.value)" /><small>{{ t('promptSuites.expectedHint') }}</small></div>
           <p v-if="checkKind(item) === 'json_object'" class="reading-note">{{ t('promptSuites.jsonObjectHint') }}</p>
+          <section v-for="fieldsView in requiredFieldViews(item)" :key="'required-fields'" class="required-fields" :aria-label="t('promptSuites.requiredFields')">
+            <h4>{{ t('promptSuites.requiredFields') }} <small>{{ fieldsView.fields.length }}/10</small></h4>
+            <p class="reading-note">{{ t('promptSuites.requiredFieldsHint') }}</p>
+            <div v-for="(fieldView, ruleIndex) in fieldsView.rules" :key="ruleIndex" class="required-field-row">
+              <div class="field"><label :for="`suite-field-name-${item.case_id}-${ruleIndex}`">{{ t('promptSuites.fieldName', { number: ruleIndex + 1 }) }}</label><input :id="`suite-field-name-${item.case_id}-${ruleIndex}`" :data-testid="`suite-case-${index}-required-field-${ruleIndex}-name`" :value="fieldView.rule.name" maxlength="160" required @input="fieldView.name"></div>
+              <div class="field"><label :for="`suite-field-type-${item.case_id}-${ruleIndex}`">{{ t('promptSuites.fieldType') }}</label><select :id="`suite-field-type-${item.case_id}-${ruleIndex}`" :data-testid="`suite-case-${index}-required-field-${ruleIndex}-type`" :value="fieldView.rule.type" required @change="fieldView.type"><option value="">{{ t('promptSuites.chooseFieldType') }}</option><option v-for="type in fieldTypes" :key="type" :value="type">{{ t(`promptSuites.fieldTypes.${type}`) }}</option></select></div>
+              <button type="button" :data-testid="`suite-case-${index}-required-field-${ruleIndex}-remove`" :disabled="fieldsView.fields.length <= 1" @click="fieldView.remove">{{ t('promptSuites.removeField') }}</button>
+            </div>
+            <button type="button" :data-testid="`suite-case-${index}-add-required-field`" :disabled="fieldsView.fields.length >= 10" @click="fieldsView.add">{{ t('promptSuites.addField') }}</button>
+            <p class="reading-note">{{ t('promptSuites.jsonFieldsHint') }}</p>
+          </section>
           <button type="button" :data-testid="`suite-case-${index}-remove`" :disabled="draft.cases.length === 1" @click="removeCase(item.case_id)">{{ t('promptSuites.removeCase') }}</button>
         </fieldset>
         <div class="toolbar"><button type="button" data-testid="suite-add-case" :disabled="draft.cases.length === 5" @click="addCase">{{ t('promptSuites.addCase') }}</button></div>
@@ -82,13 +93,13 @@
           <p v-if="canReconcile" class="notice warning">{{ t('promptSuites.reconcileNote') }}</p>
           <button v-if="canReconcile" type="button" data-testid="suite-reconcile" @click="runner.reconcile()">{{ t('promptSuites.reconcile') }}</button>
           <dl class="result-grid"><div><dt>{{ t('promptSuites.runId') }}</dt><dd>{{ state.report.run_id }}</dd></div><div><dt>{{ t('promptTrials.startedAt') }}</dt><dd>{{ formatDate(state.report.started_at) }}</dd></div><div><dt>{{ t('promptTrials.finishedAt') }}</dt><dd>{{ formatDate(state.report.finished_at) }}</dd></div></dl>
-          <dl class="summary-grid" data-testid="suite-summary"><div v-for="key in summaryFields" :key="key"><dt>{{ t(`promptSuites.${state.report.schema_version === 2 ? 'checkSummary' : 'summary'}.${key}`) }}</dt><dd>{{ summary[key] }}</dd></div></dl>
-          <p class="reading-note">{{ t(state.report.schema_version === 2 ? 'promptSuites.formatCheckNote' : 'promptSuites.checkNote') }}</p>
+          <dl class="summary-grid" data-testid="suite-summary"><div v-for="key in summaryFields" :key="key"><dt>{{ t(`promptSuites.${state.report.schema_version >= 2 ? 'checkSummary' : 'summary'}.${key}`) }}</dt><dd>{{ summary[key] }}</dd></div></dl>
+          <p class="reading-note">{{ t(state.report.schema_version >= 2 ? 'promptSuites.formatCheckNote' : 'promptSuites.checkNote') }}</p>
           <article v-for="(result, index) in state.report.cases" :key="result.case_id" class="case-result" :data-testid="`suite-result-${index}`" :data-status="result.status" :data-check="result.check">
             <h3>{{ index + 1 }}. {{ state.report.definition.cases[index].label }}</h3>
             <div class="toolbar"><span class="badge" :data-testid="`suite-result-${index}-status`">{{ t(`promptSuites.caseStates.${result.status}`) }}</span><span class="badge" :data-testid="`suite-result-${index}-check`">{{ checkLabel(state.report.definition.cases[index], result.check) }}</span></div>
             <p v-if="result.error_code" class="notice warning">{{ t(`promptSuites.errors.${result.error_code}`) }}</p>
-            <details><summary>{{ t('promptSuites.capturedCase') }}</summary><h4>{{ t('promptTrials.systemPrompt') }}</h4><pre>{{ state.report.definition.cases[index].system_prompt }}</pre><h4>{{ t('promptTrials.userPrompt') }}</h4><pre>{{ state.report.definition.cases[index].user_prompt }}</pre><h4>{{ t('promptSuites.checkKind') }}</h4><p :data-testid="`suite-result-${index}-kind`">{{ t(`promptSuites.checkKinds.${checkKind(state.report.definition.cases[index])}`) }}</p><p v-if="checkKind(state.report.definition.cases[index]) === 'json_object'" class="reading-note">{{ t('promptSuites.jsonObjectHint') }}</p><template v-if="checkKind(state.report.definition.cases[index]) === 'exact_text'"><h4>{{ t('promptSuites.expected') }}</h4><pre>{{ state.report.definition.cases[index].expected_text }}</pre><small v-if="state.report.definition.cases[index].expected_text === ''">{{ t('promptSuites.emptyExpected') }}</small></template></details>
+            <details><summary>{{ t('promptSuites.capturedCase') }}</summary><h4>{{ t('promptTrials.systemPrompt') }}</h4><pre>{{ state.report.definition.cases[index].system_prompt }}</pre><h4>{{ t('promptTrials.userPrompt') }}</h4><pre>{{ state.report.definition.cases[index].user_prompt }}</pre><h4>{{ t('promptSuites.checkKind') }}</h4><p :data-testid="`suite-result-${index}-kind`">{{ t(`promptSuites.checkKinds.${checkKind(state.report.definition.cases[index])}`) }}</p><p v-if="checkKind(state.report.definition.cases[index]) === 'json_object'" class="reading-note">{{ t('promptSuites.jsonObjectHint') }}</p><template v-if="checkKind(state.report.definition.cases[index]) === 'json_fields'"><h4>{{ t('promptSuites.requiredFields') }}</h4><pre :data-testid="`suite-result-${index}-required-fields`">{{ requiredFieldsText(state.report.definition.cases[index]) }}</pre><p class="reading-note">{{ t('promptSuites.jsonFieldsHint') }}</p></template><template v-if="checkKind(state.report.definition.cases[index]) === 'exact_text'"><h4>{{ t('promptSuites.expected') }}</h4><pre>{{ state.report.definition.cases[index].expected_text }}</pre><small v-if="state.report.definition.cases[index].expected_text === ''">{{ t('promptSuites.emptyExpected') }}</small></template></details>
             <template v-if="result.snapshot">
               <dl class="result-grid"><div><dt>{{ t('promptTrials.requestId') }}</dt><dd>{{ result.request_id }}</dd></div><div><dt>{{ t('promptTrials.capturedModel') }}</dt><dd :data-testid="`suite-result-${index}-model`">{{ result.snapshot.run.configuration.model }}</dd></div><div><dt>{{ t('promptTrials.reasoningEffort') }}</dt><dd>{{ result.snapshot.run.configuration.reasoning_effort ?? t('promptTrials.serverDefault') }}</dd></div><div><dt>{{ t('promptTrials.temperature') }}</dt><dd>{{ result.snapshot.run.request.temperature }}</dd></div><div><dt>{{ t('promptTrials.maxOutputTokens') }}</dt><dd>{{ result.snapshot.run.request.max_output_tokens }}</dd></div><div><dt>{{ t('promptTrials.finishReason') }}</dt><dd>{{ value(result.snapshot.run.response?.finish_reason) }}</dd></div><div><dt>{{ t('promptTrials.requestDuration') }}</dt><dd>{{ value(result.snapshot.run.request_duration_ms) }}</dd></div><div><dt>{{ t('promptTrials.overallDuration') }}</dt><dd>{{ result.snapshot.run.elapsed_ms }}</dd></div><div><dt>{{ t('promptTrials.promptTokens') }}</dt><dd>{{ value(result.snapshot.run.response?.usage.prompt_tokens) }}</dd></div><div><dt>{{ t('promptTrials.completionTokens') }}</dt><dd>{{ value(result.snapshot.run.response?.usage.completion_tokens) }}</dd></div><div><dt>{{ t('promptTrials.totalTokens') }}</dt><dd>{{ value(result.snapshot.run.response?.usage.total_tokens) }}</dd></div><div><dt>{{ t('promptTrials.cleanup') }}</dt><dd>{{ t(`promptTrials.cleanupStates.${result.snapshot.run.cleanup.state}`) }}</dd></div></dl>
               <p v-if="result.snapshot.run.error_code" class="notice error">{{ t(`promptTrials.errors.${result.snapshot.run.error_code}`) }}</p>
@@ -128,25 +139,54 @@ const canStop = computed(() => !retired && (state.value.phase === 'checking' || 
 const canReconcile = computed(() => !retired && !state.value.busy && state.value.report?.cases.some(item => item.status === 'unknown'))
 const summaryFields = ['total', 'attempted', 'succeeded', 'evaluated', 'matched', 'mismatched', 'not_requested', 'not_evaluated']
 const summary = computed(() => state.value.report ? summarizePromptSuiteReport(state.value.report) : null)
-function newCase(number, version = 1) { return { case_id: crypto.randomUUID(), label: t('promptSuites.caseNumber', { number }), system_prompt: '', user_prompt: '', temperature: 0.2, max_output_tokens: 128, expected_text: null, ...(version === 2 ? { check_kind: 'none' } : {}) } }
+const fieldTypes = ['string', 'number', 'boolean', 'object', 'array', 'null']
+function newCase(number, version = 1) { return { case_id: crypto.randomUUID(), label: t('promptSuites.caseNumber', { number }), system_prompt: '', user_prompt: '', temperature: 0.2, max_output_tokens: 128, expected_text: null, ...(version >= 2 ? { check_kind: 'none' } : {}), ...(version >= 3 ? { required_fields: null } : {}) } }
 function checkKind(item) { return getPromptSuiteCheck(item).kind }
-function checkLabel(item, state) { return t(`promptSuites.${checkKind(item) === 'json_object' ? 'jsonChecks' : 'checks'}.${state}`) }
+function checkLabel(item, state) {
+  const kind = checkKind(item)
+  return t(`promptSuites.${kind === 'json_fields' ? 'jsonFieldsChecks' : kind === 'json_object' ? 'jsonChecks' : 'checks'}.${state}`)
+}
+function requiredFieldsText(item) { return item.required_fields.map(rule => `${JSON.stringify(rule.name)}: ${rule.type}`).join('\n') }
 function ownsCase(item) { return !retired && draft.value.cases.includes(item) }
 function setCheckEnabled(item, enabled) {
   if (!ownsCase(item) || enabled === (checkKind(item) !== 'none')) return
   item.expected_text = enabled ? '' : null
-  if (draft.value.schema_version === 2) item.check_kind = enabled ? 'exact_text' : 'none'
+  if (draft.value.schema_version >= 2) item.check_kind = enabled ? 'exact_text' : 'none'
+  if (draft.value.schema_version >= 3) item.required_fields = null
 }
 function setCheckKind(item, kind) {
-  if (!ownsCase(item) || checkKind(item) === 'none' || !['exact_text', 'json_object'].includes(kind)) return
-  if (kind === 'json_object' && draft.value.schema_version === 1) {
+  if (!ownsCase(item) || checkKind(item) === 'none' || checkKind(item) === kind || !['exact_text', 'json_object', 'json_fields'].includes(kind)) return
+  if (kind !== 'exact_text' && draft.value.schema_version === 1) {
     for (const current of draft.value.cases) current.check_kind = checkKind(current)
     draft.value.schema_version = 2
   }
+  if (kind === 'json_fields' && draft.value.schema_version < 3) {
+    for (const current of draft.value.cases) current.required_fields = null
+    draft.value.schema_version = 3
+  }
   item.expected_text = kind === 'exact_text' ? item.expected_text ?? '' : null
-  if (draft.value.schema_version === 2) item.check_kind = kind
+  if (draft.value.schema_version >= 2) item.check_kind = kind
+  if (draft.value.schema_version >= 3) item.required_fields = kind === 'json_fields' ? [{ name: '', type: '' }] : null
 }
 function setExpectedText(item, value) { if (ownsCase(item) && checkKind(item) === 'exact_text') item.expected_text = value }
+function ownsRequiredFields(item, fields) { return ownsCase(item) && checkKind(item) === 'json_fields' && item.required_fields === fields }
+function ownsRequiredField(item, fields, rule) { return ownsRequiredFields(item, fields) && fields.includes(rule) }
+// Each rendered action owns its case, list and rule. Replacing a list during a
+// mode change retires its old actions even if the same case becomes JSON again.
+function requiredFieldViews(item) {
+  if (checkKind(item) !== 'json_fields') return []
+  const fields = item.required_fields
+  return [{
+    fields,
+    add() { if (ownsRequiredFields(item, fields) && fields.length < 10) fields.push({ name: '', type: '' }) },
+    rules: fields.map(rule => ({
+      rule,
+      name(event) { if (ownsRequiredField(item, fields, rule)) rule.name = event.target.value },
+      type(event) { if (ownsRequiredField(item, fields, rule)) rule.type = event.target.value },
+      remove() { if (ownsRequiredField(item, fields, rule) && fields.length > 1) fields.splice(fields.indexOf(rule), 1) },
+    })),
+  }]
+}
 function numeric(input) { return input === '' ? '' : Number(input) }
 function addCase() { if (!retired && draft.value.cases.length < 5) draft.value.cases.push(newCase(draft.value.cases.length + 1, draft.value.schema_version)) }
 function removeCase(id) { if (!retired && draft.value.cases.length > 1) draft.value.cases = draft.value.cases.filter(item => item.case_id !== id) }
@@ -237,5 +277,6 @@ p { line-height: 1.65; }.scope-note { border-left: 4px solid #6287b0; background
 button { padding: 9px 14px; font: inherit; font-weight: 600; font-size: 14px; background: #fff; color: #294c78; border: 1px solid #aabbd0; border-radius: 5px; cursor: pointer; }button.primary { background: #255b93; color: white; border-color: #255b93; }button:disabled { opacity: .45; cursor: not-allowed; }button:focus-visible, a:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-visible, summary:focus-visible { outline: 3px solid #92bdf3; outline-offset: 3px; }
 .case-editor { min-width: 0; border: 1px solid #dce2eb; border-radius: 7px; padding: 18px; margin: 24px 0; }.case-editor legend { padding: 0 8px; }.check-control { display: flex; align-items: center; gap: 9px; margin: 0 0 16px; }.file-label { display: flex; flex-direction: column; gap: 8px; }.file-label input { max-width: 380px; }.notice { padding: 12px 15px; border-radius: 5px; background: #eef3fa; }.warning { background: #fff6e6; color: #76520c; }.error { background: #fff0ef; color: #9e2e27; }.badge { font-size: 13px; font-weight: 600; background: #edf2f8; border-radius: 5px; padding: 6px 9px; }.case-result { border-top: 1px solid #dce2eb; margin-top: 26px; padding-top: 12px; }.import-preview { margin-top: 20px; padding: 18px; border: 1px solid #b4c8e3; border-radius: 7px; }.import-preview li { margin: 18px 0; }
 .result-grid, .summary-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 16px; margin: 20px 0; }dt { font-size: 12px; color: #52647d; }dd { margin: 5px 0 0; overflow-wrap: anywhere; } .summary-grid { background: #f4f7fb; border-radius: 7px; padding: 16px; }.summary-grid dd { font-size: 22px; font-weight: 700; }pre { white-space: pre-wrap; overflow-wrap: anywhere; min-height: 1.4em; background: #f4f6f9; border: 1px solid #e3e8ef; border-radius: 5px; padding: 14px; font-size: 13px; line-height: 1.6; }summary { cursor: pointer; margin-top: 18px; color: #355d88; }h4 { margin: 20px 0 8px; }
-@media (max-width: 650px) { .app-header { align-items: flex-start; flex-direction: column; gap: 12px; }.header-actions { gap: 10px; font-size: 13px; }.panel { padding: 16px; }.settings-grid { grid-template-columns: 1fr; gap: 0; }.case-editor { padding: 12px; }.toolbar { align-items: flex-start; }.result-grid, .summary-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+.required-fields { border: 1px solid #dce2eb; border-radius: 6px; padding: 16px; margin: 16px 0; }.required-fields h4 { margin-top: 0; }.required-field-row { display: grid; grid-template-columns: minmax(0, 2fr) minmax(0, 1fr) auto; align-items: end; gap: 12px; margin-bottom: 14px; }.required-field-row .field { margin-bottom: 0; }
+@media (max-width: 650px) { .required-field-row { grid-template-columns: 1fr; }.required-field-row button { justify-self: start; } .app-header { align-items: flex-start; flex-direction: column; gap: 12px; }.header-actions { gap: 10px; font-size: 13px; }.panel { padding: 16px; }.settings-grid { grid-template-columns: 1fr; gap: 0; }.case-editor { padding: 12px; }.toolbar { align-items: flex-start; }.result-grid, .summary-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 </style>
