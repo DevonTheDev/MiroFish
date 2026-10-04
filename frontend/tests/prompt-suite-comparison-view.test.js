@@ -2,6 +2,7 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 import { mountSuiteComparison, trialSnapshot, trialRequest, flush } from './helpers/prompt-suite-comparison-view-fixture.js'
 import { acceptPromptTrialSnapshot } from '../src/api/promptTrials.js'
+import { evaluatePromptSuiteCheck } from '../src/utils/promptSuites.js'
 
 export const id = n => `12345678-1234-4234-9234-${String(n).padStart(12, '0')}`
 export function report(n = 1, options = {}) {
@@ -309,5 +310,81 @@ test('export preparation failure retains the valid comparison and disables unava
     assert.ok(view.byId('comparison-export-json').props.disabled); assert.ok(view.byId('comparison-export-txt').props.disabled)
     assert.equal(view.text(view.byId('comparison-row-0-comparison-reply')), 'Hello back')
     assert.doesNotMatch(view.text(), /Private export preparation failure/); noRequests(view)
+  } finally { view.unmount() }
+})
+
+function withVersion2(source, kind = 'json_object') {
+  source.schema_version = 2; source.definition.schema_version = 2
+  for (const item of source.definition.cases) { item.check_kind = kind; if (kind !== 'exact_text') item.expected_text = null }
+  source.cases.forEach((section, index) => { section.check = evaluatePromptSuiteCheck(source.definition.cases[index], section.status, section.snapshot?.run.response?.content) })
+  return source
+}
+
+for (const locale of ['en', 'zh']) test(`JSON comparison displays format checks and neutral totals without mutating v2 exports in ${locale}`, async () => {
+  const view = await mountSuiteComparison({ locale })
+  try {
+    const left = withVersion2(report(1, { reply: '{"a":1,"a":2}' }))
+    const right = withVersion2(report(2, { reply: ' {"a":2} ' }))
+    await view.file('baseline', reportFile(left))
+    assert.match(view.text(view.byId('comparison-baseline-preview')), locale === 'en' ? /JSON object/ : /JSON 对象/)
+    await view.click('comparison-baseline-use'); await accept(view, 'comparison', right); await view.click('comparison-run')
+    assert.equal(view.text(view.byId('comparison-row-0-transition')), locale === 'en' ? 'JSON format check now passes' : 'JSON 格式检查转为通过')
+    assert.match(view.text(view.byId('comparison-row-0-baseline-status')), locale === 'en' ? /JSON object format failed/ : /JSON 对象格式未通过/)
+    assert.match(view.text(view.byId('comparison-row-0-comparison-status')), locale === 'en' ? /JSON object format passed/ : /JSON 对象格式通过/)
+    assert.match(view.text(view.byId('comparison-summary')), locale === 'en' ? /Pairs with a check.*Checks now passing/s : /启用检查的配对.*转为通过的检查/s)
+    assert.equal(view.byId('comparison-row-0-baseline-expected'), undefined)
+    assert.match(view.text(view.byId('comparison-row-0-baseline-kind')), locale === 'en' ? /JSON object/ : /JSON 对象/)
+    await view.click('comparison-export-json')
+    const saved = JSON.parse(await view.downloads[0].blob.text())
+    assert.equal(saved.schema_version, 2); assert.equal(saved.rows[0].check_transition, 'gained_match')
+    assert.equal(Object.hasOwn(saved.rows[0], 'exact_transition'), false)
+    assert.equal(Object.hasOwn(saved.rows[0], 'transition'), false)
+    assert.equal(saved.rows[0].input_changes.check_kind, false)
+    assert.equal(saved.baseline.cases[0].check, 'mismatched'); assert.equal(saved.comparison.cases[0].check, 'matched')
+    const staleDownload = handler(view, 'comparison-export-json')
+    await accept(view, 'baseline', withVersion2(report(3, { reply: '{}' })))
+    await invoke(staleDownload); assert.equal(view.downloads.length, 1)
+    noRequests(view); assert.deepEqual(view.warnings, [])
+  } finally { view.unmount() }
+})
+
+for (const locale of ['en', 'zh']) test(`mixed v1/v2 exact checks stay comparable and changed kinds are explained in ${locale}`, async () => {
+  const view = await mountSuiteComparison({ locale })
+  try {
+    const left = report(1, { item: { expected_text: '{}' }, reply: '{}' })
+    const right = withVersion2(report(2, { item: { expected_text: '{}' }, reply: '{}' }), 'exact_text')
+    await compare(view, left, right)
+    assert.equal(view.byId('comparison-row-0').props['data-paired'], true)
+    assert.equal(view.text(view.byId('comparison-row-0-transition')), locale === 'en' ? 'Retained exact match' : '保持精确匹配')
+    assert.equal(view.text(view.byId('comparison-row-0-comparison-expected')), '{}')
+    await view.click('comparison-export-json')
+    const saved = JSON.parse(await view.downloads[0].blob.text())
+    assert.equal(saved.schema_version, 2); assert.equal(saved.baseline.schema_version, 1)
+    assert.equal(Object.hasOwn(saved.baseline.definition.cases[0], 'check_kind'), false)
+    assert.equal(saved.rows[0].check_transition, 'retained_match'); assert.equal(saved.rows[0].input_changes.check_kind, false)
+    await accept(view, 'comparison', withVersion2(report(3, { reply: '{}' }))); await view.click('comparison-run')
+    assert.equal(view.byId('comparison-row-0').props['data-paired'], false)
+    assert.match(view.text(view.byId('comparison-row-0-changed-inputs')), locale === 'en' ? /Check kind/ : /检查类型/)
+    assert.equal(view.text(view.byId('comparison-row-0-transition')), locale === 'en' ? 'Not comparable' : '不可比较')
+    noRequests(view); assert.deepEqual(view.warnings, [])
+  } finally { view.unmount() }
+})
+
+test('forged v2 check outcomes are rejected while accepted reports and fixed downloads remain intact', async () => {
+  const view = await mountSuiteComparison()
+  try {
+    await compare(view, withVersion2(report(1, { reply: '{}' })), withVersion2(report(2, { reply: '{}' })))
+    await view.click('comparison-export-json')
+    const original = await view.downloads[0].blob.text()
+    const forged = withVersion2(report(3, { reply: '{"a":1,"a":2}' }))
+    forged.cases[0].check = 'matched'
+    await view.file('baseline', reportFile(forged))
+    assert.ok(view.byId('comparison-baseline-error')); assert.ok(view.byId('comparison-baseline-retained'))
+    assert.equal(view.byId('comparison-baseline-preview'), undefined)
+    assert.match(view.text(view.byId('comparison-baseline-accepted')), /Run 1/)
+    assert.ok(view.byId('comparison-result'))
+    await view.click('comparison-export-json')
+    assert.equal(await view.downloads[1].blob.text(), original)
+    noRequests(view)
   } finally { view.unmount() }
 })

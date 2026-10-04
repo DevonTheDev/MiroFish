@@ -1365,21 +1365,21 @@
     "backendBusy": "The backend reports a running trial. Wait for it to finish, then refresh readiness.",
     "exportError": "The download could not be prepared. Your draft and captured run are unchanged.",
     "filesTitle": "Suite files",
-    "filesNote": "Import a definition up to 128 KiB, review it, then choose whether to replace the draft. Editing and definition downloads work offline.",
+    "filesNote": "Import a definition up to 128 KiB, review it, then choose whether to replace the draft. Editing and definition downloads work offline. Version 1 stays unchanged until you choose JSON object, which upgrades the draft and its exports to version 2; switching back keeps version 2.",
     "import": "Import suite definition",
     "exportDefinition": "Download definition",
     "importLoading": "Reading the selected definition…",
     "importError": "This file is not a valid suite definition, could not be read, or exceeds 128 KiB. The draft is unchanged.",
     "previewTitle": "Import preview",
     "previewNote": "Review all {count} cases below. Using this definition replaces the draft and keeps the captured run. It does not run any prompts.",
-    "reviewCase": "Review exact prompts and expected reply",
+    "reviewCase": "Review exact prompts and check",
     "useImport": "Use imported suite",
     "cancelImport": "Discard import",
     "editorTitle": "Suite draft",
     "name": "Suite name",
     "nameHint": "1–80 plain characters; whitespace is preserved.",
     "caseNumber": "Case {number}",
-    "enableCheck": "Check the complete reply for exact equality",
+    "enableCheck": "Enable check",
     "expected": "Expected complete reply",
     "expectedHint": "0–500 characters. Casing, whitespace, line endings and wrappers must match exactly. An empty field intentionally expects an empty reply.",
     "emptyExpected": "The expected reply is the empty string.",
@@ -1400,7 +1400,7 @@
     "reconcile": "Reconcile unresolved case",
     "runId": "Suite run ID",
     "checkNote": "Exact reply checks are literal comparisons, not a measure of model accuracy or answer quality. Only confirmed successful replies are evaluated; a mismatch may continue, while other outcomes halt the suite.",
-    "capturedCase": "Captured prompts and expected reply",
+    "capturedCase": "Captured prompts and check",
     "privacy": "Definitions contain your prompts; captured-run downloads also contain replies and model observations. Keep these files private as needed. Downloads never call the model.",
     "phases": {
       "idle": "Idle",
@@ -1459,6 +1459,30 @@
       "observation_limit": "The bounded observation window ended. Reconcile the unresolved case explicitly.",
       "invalid_identity": "A valid unique request identity could not be prepared. No additional cases will start.",
       "runtime_failed": "This case did not complete successfully. Remaining cases were not attempted."
+    },
+    "checkKind": "Check kind",
+    "checkKinds": {
+      "none": "No check",
+      "exact_text": "Exact text",
+      "json_object": "JSON object"
+    },
+    "jsonObjectHint": "Checks format only: the entire reply must be one JSON object, including an empty object. Surrounding JSON whitespace and nested arrays are allowed. Limit: 64 KiB of UTF-8 and value depth 16 (root depth 0). Rejects wrappers, trailing content, duplicate decoded keys, nonfinite numbers and unpaired surrogates. No repair, schema validation, numeric-precision guarantee or answer-quality assessment. This does not request a JSON response format from the model.",
+    "formatCheckNote": "Checks evaluate only confirmed successful replies. Exact text checks compare the complete reply literally; JSON object checks verify bounded format only. They do not measure model accuracy or answer quality. A failed check may continue; other run outcomes halt the suite.",
+    "jsonChecks": {
+      "not_evaluated": "JSON object check not evaluated",
+      "not_requested": "No check requested",
+      "matched": "JSON object format passed",
+      "mismatched": "JSON object format failed"
+    },
+    "checkSummary": {
+      "total": "Cases",
+      "attempted": "Attempted",
+      "succeeded": "Successful replies",
+      "evaluated": "Checks evaluated",
+      "matched": "Checks passed",
+      "mismatched": "Checks failed",
+      "not_requested": "Checks not requested",
+      "not_evaluated": "Checks not evaluated"
     }
   },
   "promptSuiteComparison": {
@@ -1467,7 +1491,7 @@
     "title": "Compare captured prompt-suite runs",
     "scope": "Import two exported runs to inspect exact replies, inputs and recorded observations side by side.",
     "offline": "This page works offline. Reading files, comparing and downloading make no backend or model requests. Reports stay in page memory; leaving clears them. Report data is not saved to browser storage.",
-    "limits": "Choose exported version 1 suite-run JSON files, up to 1 MiB each. Review each preview, then explicitly use it. Comparison bundles cannot be imported as runs.",
+    "limits": "Choose exported version 1 or 2 suite-run JSON files, up to 1 MiB each. Review each preview, then explicitly use it. Comparison bundles cannot be imported as runs.",
     "baseline": "Baseline",
     "comparison": "Comparison",
     "chooseFile": "Choose a captured run (.json)",
@@ -1541,6 +1565,29 @@
       "retained_mismatches": "Retained exact mismatches",
       "overlapping_request_pairs": "Pairs with overlapping request IDs"
     },
-    "requestIdOverlap": "A request ID for this case also appears in the other report; paired findings are excluded."
+    "requestIdOverlap": "A request ID for this case also appears in the other report; paired findings are excluded.",
+    "checkTransition": "Check transition",
+    "checkFindingsNote": "Paired findings require identical evaluation inputs and check kinds, two successful recorded rows and request IDs absent from the other report. Check transitions also require an enabled check; exact text requires the same expected reply. JSON checks validate bounded object format only, not schema or answer quality. Literal reply equality still compares the full text.",
+    "jsonTransitions": {
+      "gained_match": "JSON format check now passes",
+      "lost_match": "JSON format check now fails",
+      "retained_match": "JSON format check still passes",
+      "retained_mismatch": "JSON format check still fails"
+    },
+    "checkSummary": {
+      "baseline_cases": "Baseline cases",
+      "comparison_cases": "Comparison cases",
+      "added": "Added",
+      "removed": "Removed",
+      "shared": "Shared",
+      "same_inputs": "Shared with identical inputs",
+      "paired_succeeded": "Eligible paired successes",
+      "evaluated_pairs": "Pairs with a check",
+      "gained_matches": "Checks now passing",
+      "lost_matches": "Checks now failing",
+      "retained_matches": "Checks still passing",
+      "retained_mismatches": "Checks still failing",
+      "overlapping_request_pairs": "Pairs with overlapping request IDs"
+    }
   }
 }

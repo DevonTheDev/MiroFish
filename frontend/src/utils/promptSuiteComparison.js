@@ -1,4 +1,4 @@
-import { acceptPromptSuiteReport } from './promptSuites.js'
+import { acceptPromptSuiteReport, getPromptSuiteCheck } from './promptSuites.js'
 
 export const PROMPT_SUITE_COMPARISON_MAX_BYTES = 4 * 1024 * 1024
 const evaluationInputs = ['system_prompt', 'user_prompt', 'temperature', 'max_output_tokens', 'expected_text']
@@ -30,9 +30,10 @@ function configurations(report) {
   return { observed, missing_cases: missingCases, mixed: observed.length > 1 }
 }
 
-function compareRow(caseId, baseline, comparison, baselineRequestIds, comparisonRequestIds) {
+function compareRow(caseId, baseline, comparison, baselineRequestIds, comparisonRequestIds, version2) {
   const shared = baseline !== undefined && comparison !== undefined
   const inputChanges = shared ? Object.fromEntries(evaluationInputs.map(key => [key, baseline.input[key] !== comparison.input[key]])) : null
+  if (shared && version2) inputChanges.check_kind = getPromptSuiteCheck(baseline.input).kind !== getPromptSuiteCheck(comparison.input).kind
   const sameInputs = shared ? !Object.values(inputChanges).some(Boolean) : null
   // A reused request can appear under a different case ID, including an added
   // or removed case. Membership still joins only by case ID; observation reuse
@@ -45,7 +46,7 @@ function compareRow(caseId, baseline, comparison, baselineRequestIds, comparison
     const left = baseline.row.snapshot.run, right = comparison.row.snapshot.run
     replyEqual = left.response.content === right.response.content
     if (left.request_duration_ms !== null && right.request_duration_ms !== null) durationDelta = right.request_duration_ms - left.request_duration_ms
-    if (baseline.input.expected_text !== null) {
+    if (getPromptSuiteCheck(baseline.input).kind !== 'none') {
       const leftMatched = baseline.row.check === 'matched', rightMatched = comparison.row.check === 'matched'
       transition = leftMatched ? (rightMatched ? 'retained_match' : 'lost_match') : (rightMatched ? 'gained_match' : 'retained_mismatch')
     }
@@ -54,27 +55,29 @@ function compareRow(caseId, baseline, comparison, baselineRequestIds, comparison
     baseline_position: baseline?.position ?? null, comparison_position: comparison?.position ?? null,
     label_changed: shared ? baseline.input.label !== comparison.input.label : false,
     input_changes: inputChanges, same_inputs: sameInputs, request_id_overlap: requestIdOverlap,
-    paired_succeeded: eligible, exact_transition: transition, reply_equal: replyEqual, request_duration_delta_ms: durationDelta }
+    paired_succeeded: eligible, [version2 ? 'check_transition' : 'exact_transition']: transition, reply_equal: replyEqual, request_duration_delta_ms: durationDelta }
 }
 
-// The only admitted inputs are v1 suite-run reports. Every result belongs to this
+// The only admitted inputs are versioned suite-run reports. Every result belongs to this
 // immutable historical capture; later slot edits and returned-object edits cannot
 // alter it, and downloads never recalculate findings or query the runtime.
 export function comparePromptSuiteReports(baselineSource, comparisonSource, { capturedAt = new Date().toISOString() } = {}) {
   try {
     const baseline = acceptPromptSuiteReport(baselineSource), comparison = acceptPromptSuiteReport(comparisonSource)
     if (baseline.run_id === comparison.run_id || !timestamp(capturedAt)) return invalid()
+    const version2 = baseline.schema_version === 2 || comparison.schema_version === 2
+    const transitionKey = version2 ? 'check_transition' : 'exact_transition'
     const indexed = report => new Map(report.definition.cases.map((input, index) =>
       [input.case_id, { input, row: report.cases[index], position: index + 1 }]))
     const baselineCases = indexed(baseline), comparisonCases = indexed(comparison)
     const requestIds = report => new Set(report.cases.map(row => row.request_id).filter(id => id !== null))
     const baselineRequestIds = requestIds(baseline), comparisonRequestIds = requestIds(comparison)
     const ids = [...comparisonCases.keys(), ...[...baselineCases.keys()].filter(id => !comparisonCases.has(id))]
-    const rows = ids.map(id => compareRow(id, baselineCases.get(id), comparisonCases.get(id), baselineRequestIds, comparisonRequestIds))
+    const rows = ids.map(id => compareRow(id, baselineCases.get(id), comparisonCases.get(id), baselineRequestIds, comparisonRequestIds, version2))
     const baselineShared = [...baselineCases.keys()].filter(id => comparisonCases.has(id))
     const comparisonShared = [...comparisonCases.keys()].filter(id => baselineCases.has(id))
     const count = predicate => rows.filter(predicate).length
-    const report = freeze({ schema_version: 1, kind: 'mirofish_local_prompt_suite_comparison', captured_at: capturedAt,
+    const report = freeze({ schema_version: version2 ? 2 : 1, kind: 'mirofish_local_prompt_suite_comparison', captured_at: capturedAt,
       baseline, comparison,
       definition_changes: { name: baseline.definition.name !== comparison.definition.name,
         relative_order: baselineShared.some((id, index) => comparisonShared[index] !== id) },
@@ -82,9 +85,9 @@ export function comparePromptSuiteReports(baselineSource, comparisonSource, { ca
       summary: { baseline_cases: baseline.cases.length, comparison_cases: comparison.cases.length,
         added: count(row => row.membership === 'added'), removed: count(row => row.membership === 'removed'), shared: count(row => row.membership === 'shared'),
         same_inputs: count(row => row.same_inputs === true), paired_succeeded: count(row => row.paired_succeeded),
-        evaluated_pairs: count(row => row.exact_transition !== null), gained_matches: count(row => row.exact_transition === 'gained_match'),
-        lost_matches: count(row => row.exact_transition === 'lost_match'), retained_matches: count(row => row.exact_transition === 'retained_match'),
-        retained_mismatches: count(row => row.exact_transition === 'retained_mismatch'), overlapping_request_pairs: count(row => row.request_id_overlap === true) } })
+        evaluated_pairs: count(row => row[transitionKey] !== null), gained_matches: count(row => row[transitionKey] === 'gained_match'),
+        lost_matches: count(row => row[transitionKey] === 'lost_match'), retained_matches: count(row => row[transitionKey] === 'retained_match'),
+        retained_mismatches: count(row => row[transitionKey] === 'retained_mismatch'), overlapping_request_pairs: count(row => row.request_id_overlap === true) } })
     const capture = Object.freeze({ toReport: () => detach(report) })
     captures.set(capture, report)
     return capture
@@ -106,6 +109,7 @@ export function exportPromptSuiteComparison(capture) {
       'Recorded observations only. Model and reasoning labels do not verify weights or honored settings.',
       'Request duration excludes startup and cleanup; elapsed time is separate. Hardware and warm-up equivalence are unknown.',
       'Paired findings require unchanged evaluation inputs, two succeeded rows and neither request ID appearing anywhere in the opposite report.',
+      ...(report.schema_version === 2 ? ['JSON-object matches verify bounded object format only, not fields, schema or meaning. Reply equality remains literal.'] : []),
       'Null means unavailable or inapplicable; zero is a recorded numeric value.',
       `Captured at: ${literalJson(report.captured_at)}`,
       'Definition changes:', literalJson(report.definition_changes),

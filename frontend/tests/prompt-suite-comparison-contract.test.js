@@ -361,6 +361,7 @@ test('export byte-limit failures leave the valid capture intact and retryable', 
     .replace(/^import .*$/gm, '').replace(/export (const|function) /g, '$1 ')
   const module = vm.runInNewContext(source + '\n;({comparePromptSuiteReports, exportPromptSuiteComparison})', {
     acceptPromptSuiteReport: suites.acceptPromptSuiteReport,
+    getPromptSuiteCheck: suites.getPromptSuiteCheck,
     TextEncoder: class { encode(value) {
       return measuredSize !== null && (oversizedKind === 'json' ? value.startsWith('{') : value.startsWith('MiroFish'))
         ? { length: measuredSize } : new TextEncoder().encode(value)

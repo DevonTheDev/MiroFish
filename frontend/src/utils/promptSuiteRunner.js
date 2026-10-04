@@ -1,6 +1,6 @@
 import { acceptPromptTrialInputs, acceptPromptTrialRequest, acceptPromptTrialSnapshot, getPromptTrial, getPromptTrials,
   samePromptTrialRequest, startPromptTrial } from '../api/promptTrials.js'
-import { acceptPromptSuiteDefinition } from './promptSuites.js'
+import { acceptPromptSuiteDefinition, evaluatePromptSuiteCheck } from './promptSuites.js'
 
 const copy = value => JSON.parse(JSON.stringify(value))
 const definitiveAdmission = { invalid_request: 400, local_mode_required: 403, local_browser_required: 403, already_running: 409, request_conflict: 409 }
@@ -99,8 +99,7 @@ export function createPromptSuiteRunner(options = {}) {
     owner.fingerprint = snapshot.run.fingerprint
     const row = state.report.cases[active.index], item = active.definition.cases[active.index]
     row.snapshot = snapshot; row.status = snapshot.run.state; row.error_code = null
-    row.check = row.status !== 'succeeded' ? 'not_evaluated' : item.expected_text === null ? 'not_requested' :
-      snapshot.run.response.content === item.expected_text ? 'matched' : 'mismatched'
+    row.check = evaluatePromptSuiteCheck(item, row.status, snapshot.run.response?.content)
     state.latest = copy(snapshot); state.latest_stale = false; state.error_code = null
     return null
   }
@@ -193,7 +192,7 @@ export function createPromptSuiteRunner(options = {}) {
       runId = freshId()
       active.requests = definition.cases.map(item => Object.freeze(acceptPromptTrialRequest({ request_id: freshId(), ...acceptPromptTrialInputs(item) })))
     } catch { active = null; idle('invalid_identity'); return false }
-    state.report = { schema_version: 1, kind: 'mirofish_local_prompt_suite_run', run_id: runId, definition, started_at: stamp(), finished_at: null,
+    state.report = { schema_version: definition.schema_version, kind: 'mirofish_local_prompt_suite_run', run_id: runId, definition, started_at: stamp(), finished_at: null,
       status: 'running', stop_requested: false, halt_code: null,
       cases: definition.cases.map(item => ({ case_id: item.case_id, request_id: null, status: 'not_attempted', check: 'not_evaluated', snapshot: null, error_code: null })) }
     active.captured = true

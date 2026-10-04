@@ -14,7 +14,9 @@ import { mountSuiteComparison } from '../helpers/prompt-suite-comparison-view-fi
 
 const [backendURL, scenario] = process.argv.slice(2)
 assert.match(backendURL, /^http:\/\/127\.0\.0\.1:[0-9]+$/)
-assert.ok(['completed', 'truncated'].includes(scenario))
+assert.ok(['completed', 'truncated', 'json_completed', 'json_truncated'].includes(scenario))
+const jsonChecks = scenario.startsWith('json_'), truncated = scenario.endsWith('truncated')
+const caseCount = jsonChecks ? 4 : 3
 const root = fileURLToPath(new URL('../../', import.meta.url))
 const cacheDir = await mkdtemp(path.join(tmpdir(), 'miro-suite-comparison-vite-'))
 let proxy, suites, comparison
@@ -35,13 +37,27 @@ try {
   api.service.interceptors.request.use(config => { calls.push({ method: config.method, url: config.url }); return config })
   suites = await mountSuites({ api, timers: { setTimeout, clearTimeout } })
   await suites.waitFor(() => suites.byId('suite-run')?.props.disabled === true && !suites.byId('suite-stale'), { timeout: 15000 })
-  const definition = { schema_version: 1, kind: 'mirofish_local_prompt_suite', name: 'Model comparison <literal>',
-    cases: [1, 2, 3].map(number => ({ case_id: `12345678-1234-4234-9234-123456789ab${number}`,
+  let definition = { schema_version: 1, kind: 'mirofish_local_prompt_suite', name: 'Model comparison <literal>',
+    cases: Array.from({ length: caseCount }, (_, index) => index + 1).map(number => ({ case_id: `12345678-1234-4234-9234-123456789ab${number}`,
       label: `Case ${number}`, system_prompt: 'Reply literally.', user_prompt: `PROMPT_BODY_PRIVATE case ${number}`,
-      temperature: 0.2, max_output_tokens: 128, expected_text: number < 3 ? 'yes' : null })) }
+      temperature: 0.2, max_output_tokens: 128, expected_text: (jsonChecks ? number === 4 : number < 3) ? 'yes' : null })) }
   const definitionText = JSON.stringify(definition)
   await suites.file({ name: 'suite.json', size: new TextEncoder().encode(definitionText).length, text: async () => definitionText })
   await suites.click('suite-import-use')
+  await suites.click('suite-export-definition')
+  assert.deepEqual(JSON.parse(await suites.downloads.at(-1).blob.text()), definition, 'Import preserves v1')
+  if (jsonChecks) {
+    const original = structuredClone(definition)
+    for (let index = 0; index < 3; index++) {
+      await suites.change(`suite-case-${index}-check_enabled`, true)
+      await suites.change(`suite-case-${index}-check_kind`, 'json_object')
+    }
+    await suites.click('suite-export-definition')
+    definition = JSON.parse(await suites.downloads.at(-1).blob.text())
+    assert.deepEqual(definition, { ...original, schema_version: 2,
+      cases: original.cases.map((item, index) => ({ ...item, check_kind: index < 3 ? 'json_object' : 'exact_text' })) })
+    assert.equal(calls.filter(call => call.method === 'post').length, 0, 'Editing does not infer')
+  }
   async function runAndExport(status, previousId = null) {
     await suites.submit('suite-form')
     await suites.waitFor(() => suites.byId('suite-run-report')?.props['data-status'] === status &&
@@ -54,16 +70,27 @@ try {
     return { content, report }
   }
   const baseline = await runAndExport('completed')
+  assert.deepEqual(baseline.report.definition, definition)
+  assert.equal(baseline.report.schema_version, jsonChecks ? 2 : 1)
   assert.equal(baseline.report.cases[0].check, 'mismatched')
   assert.equal(baseline.report.cases[1].check, 'matched')
   await api.service.post('/api/fixture/comparison-config')
   await suites.click('suite-refresh')
   await suites.waitFor(() => !suites.byId('suite-stale') && suites.byId('suite-run').props.disabled === false, { timeout: 15000 })
-  const candidate = await runAndExport(scenario === 'truncated' ? 'halted' : 'completed', baseline.report.run_id)
+  const candidate = await runAndExport(truncated ? 'halted' : 'completed', baseline.report.run_id)
   assert.equal(candidate.report.cases[0].snapshot.run.configuration.model, 'fixture-candidate')
   assert.equal(baseline.report.cases[0].snapshot.run.configuration.model, 'fixture-baseline')
   assert.equal(calls.filter(call => call.method === 'post' && call.url === '/api/runtime/trials').length,
-    scenario === 'completed' ? 6 : 4)
+    caseCount + (truncated ? 1 : caseCount))
+  if (jsonChecks) {
+    assert.equal(baseline.report.cases[2].check, 'matched')
+    assert.equal(baseline.report.cases[3].check, 'matched')
+    assert.equal(candidate.report.cases[0].check, truncated ? 'not_evaluated' : 'matched')
+    if (!truncated) {
+      assert.equal(candidate.report.cases[1].check, 'mismatched', 'Overflow fails format check')
+      assert.equal(candidate.report.cases[2].check, 'matched', 'Different JSON formatting remains valid')
+    }
+  }
   assert.deepEqual(suites.warnings, [])
   suites.unmount(); suites = null
   await proxy.close(); proxy = null
@@ -75,7 +102,7 @@ try {
     [net.Socket.prototype, 'connect'], [globalThis, 'fetch']]) {
     const previous = target[key]; target[key] = reject; restored.push(() => { target[key] = previous })
   }
-  comparison = await mountSuiteComparison({ locale: scenario === 'truncated' ? 'zh' : 'en',
+  comparison = await mountSuiteComparison({ locale: truncated ? 'zh' : 'en',
     api: { getPromptTrials: reject, getPromptTrial: reject, startPromptTrial: reject } })
   const count = calls.length
   for (const [side, source] of [['baseline', baseline], ['comparison', candidate]]) {
@@ -93,14 +120,20 @@ try {
   const captured = JSON.parse(jsonText)
   assert.deepEqual(captured.baseline, baseline.report)
   assert.deepEqual(captured.comparison, candidate.report)
-  assert.equal(captured.summary.shared, 3)
-  assert.equal(captured.summary.paired_succeeded, scenario === 'completed' ? 3 : 0)
-  assert.equal(captured.summary.evaluated_pairs, scenario === 'completed' ? 2 : 0)
-  assert.equal(captured.summary.gained_matches, scenario === 'completed' ? 1 : 0)
-  assert.equal(captured.summary.lost_matches, scenario === 'completed' ? 1 : 0)
-  for (let index = 0; index < 3; index++) {
+  assert.equal(captured.schema_version, jsonChecks ? 2 : 1)
+  assert.equal(captured.summary.shared, caseCount)
+  assert.equal(captured.summary.paired_succeeded, truncated ? 0 : caseCount)
+  assert.equal(captured.summary.evaluated_pairs, truncated ? 0 : jsonChecks ? 4 : 2)
+  assert.equal(captured.summary.gained_matches, truncated ? 0 : 1)
+  assert.equal(captured.summary.lost_matches, truncated ? 0 : 1)
+  if (jsonChecks) {
+    assert.ok(captured.rows.every(row => Object.hasOwn(row, 'check_transition') && !Object.hasOwn(row, 'exact_transition')))
+    assert.equal(captured.rows[2].reply_equal, truncated ? null : false)
+    assert.equal(captured.summary.retained_matches, truncated ? 0 : 2)
+  }
+  for (let index = 0; index < caseCount; index++) {
     assert.equal(captured.rows[index].case_id, definition.cases[index].case_id)
-    const expected = scenario === 'completed'
+    const expected = !truncated
       ? candidate.report.cases[index].snapshot.run.request_duration_ms - baseline.report.cases[index].snapshot.run.request_duration_ms
       : null
     assert.equal(captured.rows[index].request_duration_delta_ms, expected)

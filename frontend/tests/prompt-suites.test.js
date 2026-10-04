@@ -45,6 +45,7 @@ for (const locale of ['en', 'zh']) test(`real suite editor mounts passively and 
     await view.click('suite-export-definition')
     const saved = JSON.parse(await view.downloads[0].blob.text())
     assert.equal(saved.kind, 'mirofish_local_prompt_suite')
+    assert.equal(saved.schema_version, 1); assert.equal(Object.hasOwn(saved.cases[0], 'check_kind'), false)
     assert.equal(saved.cases[0].user_prompt, 'Hello')
     assert.equal(saved.cases[0].expected_text, null)
     assert.equal(view.revokedUrls.length, 1)
@@ -403,5 +404,108 @@ test('a denied new run preserves the previous report until a later explicit fres
     assert.equal(view.requests.calls.startPromptTrial.length, 2)
     assert.match(view.text(view.byId('suite-run-report')), /Second run/)
     assert.doesNotMatch(view.text(view.byId('suite-run-report')), /Two precise replies/)
+  } finally { view.unmount() }
+})
+
+for (const locale of ['en', 'zh']) test(`explicit JSON mode promotes the draft once and preserves other case inputs in ${locale}`, async () => {
+  const view = await mountSuites({ locale })
+  try {
+    await idle(view)
+    const imported = definition('Imported v1 with checks')
+    imported.cases[0].expected_text = ' {"answer": 1} '
+    imported.cases.push({ ...imported.cases[0], case_id: '12345678-1234-4234-9234-123456789abd', label: 'Unchecked case', expected_text: null })
+    imported.cases.push({ ...imported.cases[0], case_id: '12345678-1234-4234-9234-123456789abe', label: 'Empty exact case', expected_text: '' })
+    imported.cases.push({ ...imported.cases[0], case_id: '12345678-1234-4234-9234-123456789abf', label: 'Kept unchecked case', expected_text: null })
+    await view.file(suiteFile(imported)); await view.click('suite-import-use')
+    assert.equal(view.byId('suite-case-0-check_kind')?.props.value, 'exact_text')
+    assert.equal(view.byId('suite-case-1-check_kind'), undefined)
+    await view.click('suite-export-definition')
+    assert.deepEqual(JSON.parse(await view.downloads[0].blob.text()), imported)
+    await view.change('suite-case-1-check_enabled', true)
+    assert.equal(view.byId('suite-case-1-check_kind').props.value, 'exact_text')
+    await view.change('suite-case-1-check_kind', 'json_object')
+    assert.equal(view.byId('suite-case-1-expected_text'), undefined)
+    assert.match(view.text(), locale === 'en' ? /format only.*64 KiB/s : /仅检查格式.*64 KiB/s)
+    await view.click('suite-export-definition')
+    const promoted = JSON.parse(await view.downloads[1].blob.text())
+    assert.equal(promoted.schema_version, 2)
+    assert.deepEqual(promoted.cases, imported.cases.map((item, index) => ({ ...item, check_kind: index === 1 ? 'json_object' : item.expected_text === null ? 'none' : 'exact_text' })))
+    await view.click('suite-add-case'); await fill(view, 4)
+    await view.change('suite-case-1-check_kind', 'exact_text')
+    assert.equal(view.byId('suite-case-1-expected_text').props.value, '')
+    await view.change('suite-case-1-check_enabled', false)
+    await view.click('suite-export-definition')
+    const edited = JSON.parse(await view.downloads[2].blob.text())
+    assert.equal(edited.schema_version, 2)
+    assert.equal(edited.cases[1].check_kind, 'none'); assert.equal(edited.cases[1].expected_text, null)
+    assert.equal(edited.cases[3].check_kind, 'none'); assert.equal(edited.cases[3].expected_text, null)
+    assert.equal(edited.cases[4].check_kind, 'none'); assert.equal(edited.cases[4].expected_text, null)
+    assert.equal(view.requests.calls.startPromptTrial.length, 0)
+    assert.deepEqual(view.warnings, [])
+  } finally { view.unmount() }
+})
+
+for (const locale of ['en', 'zh']) for (const [reply, check] of [[' {"items": [1, {}]} \n', 'matched'], ['{"a":1,"a":2}', 'mismatched']]) test(`captured JSON ${check} and imported kind render correctly in ${locale}`, async () => {
+  const view = await mountSuites({ locale })
+  try {
+    await idle(view)
+    const imported = definition('JSON format check', { schema_version: 2 })
+    imported.cases[0].check_kind = 'json_object'
+    await view.file(suiteFile(imported))
+    assert.match(view.text(view.byId('suite-import-preview')), locale === 'en' ? /JSON object/ : /JSON 对象/)
+    await view.click('suite-import-use')
+    assert.equal(view.byId('suite-case-0-check_enabled').props.checked, true)
+    assert.equal(view.byId('suite-case-0-check_kind').props.value, 'json_object')
+    assert.equal(view.byId('suite-case-0-expected_text'), undefined)
+    await begin(view)
+    assert.deepEqual(Object.keys(view.requests.calls.startPromptTrial[0].args[0]).sort(), [...Object.keys(trialRequest()), 'request_id'].sort())
+    await view.change('suite-case-0-check_kind', 'exact_text')
+    await view.input('suite-case-0-expected_text', 'Edited after capture')
+    view.requests.calls.startPromptTrial[0].resolve(ok(ownedSnapshot(view, 'succeeded', reply))); await flush()
+    assert.equal(view.byId('suite-result-0').props['data-check'], check)
+    assert.match(view.text(view.byId('suite-result-0-check')), locale === 'en' ? /JSON object format/ : /JSON 对象格式/)
+    assert.doesNotMatch(view.text(view.byId('suite-result-0-check')), /Exact reply|完整回复/)
+    assert.match(view.text(view.byId('suite-result-0-kind')), locale === 'en' ? /JSON object/ : /JSON 对象/)
+    assert.match(view.text(view.byId('suite-summary')), locale === 'en' ? /Checks passed.*Checks failed/s : /检查通过.*检查未通过/s)
+    assert.equal(view.text(view.byId('suite-result-0-reply')), reply)
+    await view.click('suite-export-run')
+    const saved = JSON.parse(await view.downloads[0].blob.text())
+    assert.equal(saved.schema_version, 2); assert.deepEqual(saved.definition, imported)
+    assert.equal(saved.cases[0].check, check)
+    assert.deepEqual(view.warnings, [])
+  } finally { view.unmount() }
+})
+
+test('check handlers for replaced or retired drafts cannot change a new import', async () => {
+  const view = await mountSuites()
+  try {
+    await idle(view); await fill(view); await view.change('suite-case-0-check_enabled', true)
+    const oldMode = view.byId('suite-case-0-check_kind')?.props.onChange
+    assert.equal(typeof oldMode, 'function')
+    await view.file(suiteFile(definition('Replacement'))); await view.click('suite-import-use')
+    oldMode({ target: { value: 'json_object' } }); await flush()
+    await view.click('suite-export-definition')
+    assert.equal(JSON.parse(await view.downloads[0].blob.text()).schema_version, 1)
+    await view.navigate('/prompt-trials'); oldMode({ target: { value: 'json_object' } }); await flush()
+    assert.equal(view.downloads.length, 1)
+  } finally { view.unmount() }
+})
+
+test('queued hidden check controls cannot re-enable a check or restore a JSON expectation', async () => {
+  const view = await mountSuites()
+  try {
+    await idle(view); await fill(view); await view.change('suite-case-0-check_enabled', true)
+    const oldMode = view.byId('suite-case-0-check_kind').props.onChange
+    const oldExpected = view.byId('suite-case-0-expected_text').props.onInput
+    await view.change('suite-case-0-check_enabled', false)
+    oldMode({ target: { value: 'json_object' } }); await flush()
+    await view.click('suite-export-definition')
+    assert.equal(JSON.parse(await view.downloads[0].blob.text()).schema_version, 1)
+    await view.change('suite-case-0-check_enabled', true); await view.change('suite-case-0-check_kind', 'json_object')
+    oldExpected({ target: { value: 'Stale expectation' } }); await flush()
+    assert.equal(view.byId('suite-export-definition').props.disabled, false)
+    await view.click('suite-export-definition')
+    const saved = JSON.parse(await view.downloads[1].blob.text())
+    assert.equal(saved.schema_version, 2); assert.equal(saved.cases[0].check_kind, 'json_object'); assert.equal(saved.cases[0].expected_text, null)
   } finally { view.unmount() }
 })

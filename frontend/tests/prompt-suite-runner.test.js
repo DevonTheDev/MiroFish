@@ -125,3 +125,60 @@ test('invalid definitions and broken UUID sources send no inference',async()=>{
 test('partial submitting, active, stopped and unknown reports export captured state without reads',async()=>{
   const f=fixture();await ready(f);assert.equal(JSON.parse(exportPromptSuiteReport(f.state().report)).cases[0].status,'submitting');await admit(f);assert.equal(JSON.parse(exportPromptSuiteReport(f.state().report)).cases[0].status,'running');f.runner.stop();await f.timers.advance(1500);f.calls.getPromptTrial[0].reject(new Error());await flush();const saved=JSON.parse(exportPromptSuiteReport(f.state().report));assert.equal(saved.status,'halted');assert.equal(saved.stop_requested,true);assert.equal(saved.cases[0].status,'unknown');assert.equal(saved.cases[0].snapshot.run.state,'running');assert.equal(f.calls.getPromptTrials.length,1);assert.equal(f.calls.getPromptTrial.length,1)
 })
+
+const jsonSuite = (length = 2) => {
+  const definition = suite(length); definition.schema_version = 2
+  definition.cases.forEach(item => { item.check_kind = 'json_object'; item.expected_text = null })
+  return definition
+}
+
+test('v2 runs freeze explicit checks, preserve report version and send only existing trial request fields', async () => {
+  const f = fixture(), definition = jsonSuite(5)
+  definition.cases[2].check_kind = 'exact_text'; definition.cases[2].expected_text = '{}'
+  definition.cases[3].check_kind = 'exact_text'; definition.cases[3].expected_text = ''
+  definition.cases[4].check_kind = 'none'
+  await ready(f, definition)
+  assert.equal(f.state().report.schema_version, 2)
+  assert.equal(JSON.parse(exportPromptSuiteReport(f.state().report)).cases[0].check, 'not_evaluated')
+  definition.cases[0].check_kind = 'none'; definition.cases[1].user_prompt = 'MUTATED'
+  for (const [index, content] of [' { "ok": true } ', '{"duplicate":1,"duplicate":2}', '{ }', '', 'anything'].entries()) {
+    const sent = f.calls.startPromptTrial[index].args[0]
+    assert.deepEqual(Object.keys(sent), ['request_id', 'label', 'system_prompt', 'user_prompt', 'temperature', 'max_output_tokens'])
+    assert.equal(sent.user_prompt, 'Hello')
+    await admit(f, 'succeeded', content)
+    if (index < 4) await next(f)
+  }
+  const saved = JSON.parse(exportPromptSuiteReport(f.state().report))
+  assert.equal(saved.schema_version, 2); assert.equal(saved.definition.schema_version, 2)
+  assert.equal(saved.status, 'completed')
+  assert.equal(saved.definition.cases[0].check_kind, 'json_object')
+  assert.deepEqual(saved.cases.map(row => row.check), ['matched', 'mismatched', 'mismatched', 'matched', 'not_requested'])
+  assert.deepEqual(saved.cases.map(row => row.snapshot.run.response.content),
+    [' { "ok": true } ', '{"duplicate":1,"duplicate":2}', '{ }', '', 'anything'])
+  assert.equal(f.calls.getPromptTrial.length, 0)
+})
+
+for (const status of ['truncated', 'refused', 'failed', 'timed_out', 'cancelled']) test(`v2 JSON checks remain unevaluated for ${status}`, async () => {
+  const f = fixture(); await ready(f, jsonSuite()); await admit(f, status, '{}')
+  const saved = JSON.parse(exportPromptSuiteReport(f.state().report))
+  assert.equal(saved.schema_version, 2)
+  assert.equal(saved.cases[0].check, 'not_evaluated')
+  assert.equal(saved.cases[1].status, 'not_attempted')
+  assert.equal(saved.status, 'halted')
+  assert.equal(f.calls.startPromptTrial.length, 1)
+})
+
+test('v2 explicit reconciliation evaluates captured JSON mode without admitting later cases', async () => {
+  const f = fixture(); await ready(f, jsonSuite())
+  f.calls.startPromptTrial[0].reject(new Error('lost response')); await flush()
+  f.calls.getPromptTrial[0].reject(new Error('lost observation')); await flush()
+  assert.equal(f.state().report.cases[0].check, 'not_evaluated')
+  f.runner.reconcile(); await flush()
+  f.calls.getPromptTrial[1].resolve(ok(owned(f, 'succeeded', '{}'))); await flush(); await f.timers.advance(100000)
+  const saved = JSON.parse(exportPromptSuiteReport(f.state().report))
+  assert.equal(saved.schema_version, 2)
+  assert.equal(saved.cases[0].check, 'matched')
+  assert.equal(saved.cases[1].status, 'not_attempted')
+  assert.equal(saved.status, 'halted')
+  assert.equal(f.calls.startPromptTrial.length, 1)
+})

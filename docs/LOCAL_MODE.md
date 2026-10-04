@@ -300,13 +300,15 @@ and shared inference gateway as the single-prompt workbench.
 
 1. Name the suite and add one to five cases. Each case has a label, optional
    system prompt, required user prompt, temperature and output-token request
-2. Optionally enable an **exact reply** check and enter the expected text.
-   Checking is case-sensitive and preserves whitespace, line endings, reasoning
-   wrappers and empty strings. An enabled blank expectation explicitly expects
-   an empty reply; leaving the check disabled means no automated comparison
+2. Optionally enable a check and choose **Exact text** or **JSON object**.
+   Exact text is case-sensitive and preserves whitespace, line endings,
+   reasoning wrappers and empty strings. An enabled blank exact expectation
+   explicitly expects an empty reply. JSON object checks whether the entire
+   reply is a directly parseable object; it needs no expected text. Leaving
+   the check disabled means no automated comparison
 3. Choose **Run suite once**. The page freezes the cases and runs them
-   sequentially. A successful reply whose text differs from the expectation is
-   an ordinary mismatch, so the next case still runs
+   sequentially. A successful reply that fails its selected check is an ordinary
+   mismatch, so the next case still runs
 4. Inspect the captured outcomes and download the run report. Change the draft
    and explicitly run again when ready; the new run replaces the displayed
    report only after its readiness check succeeds
@@ -319,7 +321,7 @@ checks latest status again. A race with another caller, or a backend worker that
 has not finished exiting, can still reject admission; that halts the suite
 without retrying the POST.
 
-Only a confirmed successful reply receives an exact-text check. Refusal,
+Only a confirmed successful reply receives its selected check. Refusal,
 truncation, timeout, runtime failure or an unknown result halts later cases,
 which remain **not attempted**. Those outcomes are not counted as mismatches or
 successful checks. A lost Start response is reconciled by its exact request ID,
@@ -344,8 +346,29 @@ duplicate object keys, unknown fields, endpoints, model overrides and captured
 result files are refused. Existing trial text/settings bounds apply, suite names
 use up to 80 characters, and an enabled expected reply has up to 500 characters.
 
+Definitions and reports from version 1 remain supported and retain their v1
+shape when imported, exported or run. Choosing JSON object in the editor
+explicitly promotes that draft to version 2, preserving its case IDs, inputs and
+other expectations. Each v2 case has `check_kind` (`none`, `exact_text` or
+`json_object`) and `expected_text`: a string for exact checks, null otherwise.
+Switching modes later does not downgrade the draft. Its captured run report uses
+the same version. Imported check outcomes are recomputed from captured replies;
+a report whose claimed outcome disagrees is rejected.
+
+**JSON object** accepts `{}`, nested objects/arrays and surrounding JSON
+whitespace. Property order and whitespace do not affect validity. It rejects
+top-level arrays, primitives or null, Markdown fences, reasoning wrappers,
+trailing prose, duplicate decoded keys (including escaped aliases), malformed
+syntax, nonfinite parsed numbers such as `1e400`, and decoded unpaired surrogate
+characters in keys or values. The whole reply is limited to 64 KiB UTF-8 and
+value depth 16, with the root at depth 0. It never repairs or rewrites the
+captured reply. These are bounded format checks, not required-field/schema
+validation, numeric-precision checks or judgments of the answer's meaning.
+The check runs locally on the captured text; it does not add JSON mode, tool
+calls or provider-specific response-format settings to the model request.
+
 The separate **run report** contains the captured definition, per-case request
-identities, accepted trial observations, exact check outcomes and unattempted
+identities, accepted trial observations, selected check outcomes and unattempted
 cases. It is limited to 1 MiB UTF-8 and is not an executable definition format.
 Downloads use captured page memory and remain available after a later status
 failure. Draft edits and imports do not rewrite the existing report. These files
@@ -353,7 +376,8 @@ contain your prompts, expectations and model replies; choose their destination
 accordingly. There is no automatic browser storage or backend suite archive.
 Reloading, navigation or closing the page loses its in-memory suite observation.
 
-Exact reply checks are simple literal comparisons. They do not judge semantic
+Exact reply checks are simple literal comparisons; JSON checks test object
+format only. Neither judges semantic
 correctness, model quality, statistical significance, speed on your GPU or
 whether the model server honored every requested setting. Each trial retains
 its observed configured model name and provider-reported usage separately; those
@@ -362,9 +386,10 @@ configured for local inference, as described above.
 
 Local verification exercises the actual Flask API, Vite proxy, shared gateway,
 Axios client and compiled Vue route with synthetic loopback replies. It checks
-sequential call counts, exact matches and mismatches, empty replies, truncation,
-lost responses, explicit reconciliation, Stop, navigation and captured exports.
-Pure contract tests also cover strict imports and bounded polling. No real model
+sequential call counts, exact and JSON-format matches/mismatches, empty replies,
+truncation, lost responses, explicit reconciliation, Stop, navigation and captured
+exports. Pure contract tests also cover strict imports, JSON byte/depth/Unicode
+boundaries, mixed-version compatibility and bounded polling. No real model
 weights, GPU quality/performance, native browser rendering/headers or Windows
 behavior is established by these tests.
 
@@ -379,13 +404,13 @@ archive. It can be used after changing a local model and repeating a saved suite
    then explicitly use it in its slot. Selecting a file alone does not replace
    an accepted report or run a comparison
 2. Choose **Compare reports** to capture the selected pair. Inspect recorded
-   outcomes, exact-check transitions, replies, model settings and request timings
+   outcomes, check transitions, replies, model settings and request timings
 3. Download the captured JSON/TXT comparison. Clear or replace a slot, or swap
    the direction, before making another explicit comparison
 
 Cases match only by their stable case ID. Added/removed cases and changed
 prompts, settings or expectations remain visible. A paired finding requires
-identical system/user prompts, temperature, output-token request and expectation,
+identical system/user prompts, temperature, output-token request, check kind and expectation,
 two recorded successful outcomes, and request IDs absent from the opposite
 report. Names and labels do
 not substitute for identity; label changes are displayed separately. Different
@@ -394,8 +419,12 @@ request IDs appears anywhere in the opposite report, including under a different
 case ID, and is excluded from paired findings.
 The order flag considers only shared cases; it does not call an insertion a move.
 
-An exact check can be gained, lost or retained only when that pair has the same
-enabled expectation. A disabled check differs from expecting an empty reply.
+A check can be gained, lost or retained only when that pair has the same enabled
+check and expectation. A disabled check differs from expecting an empty reply.
+Two valid JSON objects can both pass their format check while their literal
+replies differ. A change between exact text and JSON object is a changed input,
+so it does not produce a paired check finding. V1 none/exact checks are normalized
+internally for comparison with equivalent v2 cases.
 Unknown, running, rejected, not-attempted, truncated, refused and failed outcomes
 are preserved, with unavailable findings shown as unavailable rather than zero.
 The page does not infer coverage from the report's overall status: a halted run
@@ -410,7 +439,7 @@ labels, not authenticated weights or proof the server followed them. Hardware,
 warm-up and other workload conditions are unknown. No pass rate, overall winner,
 accuracy, throughput or statistically significant speed claim is produced.
 
-Imports are limited to 1 MiB each and require valid UTF-8, supported v1 report
+Imports are limited to 1 MiB each and require valid UTF-8, supported v1 or v2 report
 structure and identities. Duplicate keys, excessive nesting and malformed
 captures are rejected before fixed-field projection. A failed or canceled
 replacement retains the accepted historical slot and comparison. An accepted
@@ -423,6 +452,10 @@ uses fixed labels and quoted literal values, escaping control/format characters.
 An export failure keeps the valid screen result. Downloading uses its captured
 bytes and time; comparison bundles are reports, not supported import files.
 The files contain prompts and replies, so choose their destination accordingly.
+Comparing two v1 reports preserves the v1 comparison export. If either report is
+v2, the comparison is v2: rows use `check_transition` instead of
+`exact_transition`, and `input_changes` includes `check_kind`. These versioned
+exports retain the original accepted run reports.
 
 Local tests import actual suite exports generated through Flask, the shared
 gateway, a synthetic loopback model, Axios and the compiled suite editor. The

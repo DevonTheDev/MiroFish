@@ -13,19 +13,37 @@ const text = (value, cap, plain = false, required = false) => typeof value === '
   (!required || value.trim().length > 0) && !(plain ? /\p{C}/u : /[\p{Cc}\p{Cs}]/u).test(plain ? value : value.replace(/[\r\n\t]/g, ''))
 const definitionKeys = ['schema_version', 'kind', 'name', 'cases']
 const caseKeys = ['case_id', 'label', 'system_prompt', 'user_prompt', 'temperature', 'max_output_tokens', 'expected_text']
+const checkKinds = ['none', 'exact_text', 'json_object']
+
+// Callers pass admitted cases. Legacy expectations retain their exact semantics
+// without adding fields to v1 definitions or their exported historical reports.
+export function getPromptSuiteCheck(item) {
+  return { kind: item.check_kind ?? (item.expected_text === null ? 'none' : 'exact_text'), expected_text: item.expected_text }
+}
+
+export function evaluatePromptSuiteCheck(item, status, content) {
+  if (status !== 'succeeded') return 'not_evaluated'
+  const check = getPromptSuiteCheck(item)
+  if (check.kind === 'none') return 'not_requested'
+  const matched = check.kind === 'json_object' ? isPromptSuiteJsonObjectReply(content) : content === check.expected_text
+  return matched ? 'matched' : 'mismatched'
+}
 
 export function acceptPromptSuiteDefinition(source) {
   try {
-    if (!exact(source, definitionKeys) || source.schema_version !== 1 || source.kind !== 'mirofish_local_prompt_suite' ||
+    if (!exact(source, definitionKeys) || ![1, 2].includes(source.schema_version) || source.kind !== 'mirofish_local_prompt_suite' ||
       !text(source.name, 80, true, true) || !Array.isArray(source.cases) || source.cases.length < 1 || source.cases.length > 5) return invalid('definition')
+    const version2 = source.schema_version === 2
     const ids = new Set()
     const cases = Array.from(source.cases, item => {
-      if (!exact(item, caseKeys) || !uuid(item.case_id) || ids.has(item.case_id) ||
-        !(item.expected_text === null || text(item.expected_text, 500))) return invalid('definition')
+      if (!exact(item, version2 ? [...caseKeys, 'check_kind'] : caseKeys) || !uuid(item.case_id) || ids.has(item.case_id) ||
+        !(item.expected_text === null || text(item.expected_text, 500)) ||
+        (version2 && (!checkKinds.includes(item.check_kind) ||
+          (item.check_kind === 'exact_text' ? typeof item.expected_text !== 'string' : item.expected_text !== null)))) return invalid('definition')
       ids.add(item.case_id)
-      return { case_id: item.case_id, ...acceptPromptTrialInputs(item), expected_text: item.expected_text }
+      return { case_id: item.case_id, ...acceptPromptTrialInputs(item), ...(version2 ? { check_kind: item.check_kind } : {}), expected_text: item.expected_text }
     })
-    const result = { schema_version: 1, kind: 'mirofish_local_prompt_suite', name: source.name, cases }
+    const result = { schema_version: source.schema_version, kind: 'mirofish_local_prompt_suite', name: source.name, cases }
     if (bytes(JSON.stringify(result)) > PROMPT_SUITE_MAX_BYTES) return invalid('definition')
     return result
   } catch { return invalid('definition') }
@@ -33,7 +51,7 @@ export function acceptPromptSuiteDefinition(source) {
 
 // JSON.parse silently overwrites duplicate keys. This bounded parser rejects them,
 // including escaped aliases, before schema admission. Depth is capped before recursion.
-function parseBoundedJson(source, maximumBytes, maximumDepth, kind) {
+function parseBoundedJson(source, maximumBytes, maximumDepth, kind, strictValues = false) {
   try {
     if (typeof source !== 'string' || bytes(source) > maximumBytes) return invalid(kind)
     let cursor = 0
@@ -43,7 +61,11 @@ function parseBoundedJson(source, maximumBytes, maximumDepth, kind) {
       while (cursor < source.length) {
         const character = source[cursor++]
         if (character === '\\') cursor++
-        else if (character === '"') return JSON.parse(source.slice(start, cursor))
+        else if (character === '"') {
+          const result = JSON.parse(source.slice(start, cursor))
+          if (strictValues && /\p{Cs}/u.test(result)) return invalid(kind)
+          return result
+        }
       }
       return invalid(kind)
     }
@@ -75,12 +97,23 @@ function parseBoundedJson(source, maximumBytes, maximumDepth, kind) {
       const token = /^(?:true|false|null|-?(?:0|[1-9]\d*)(?:\.\d+)?(?:[eE][+-]?\d+)?)/.exec(source.slice(cursor))?.[0]
       if (!token) return invalid(kind)
       cursor += token.length
-      return JSON.parse(token)
+      const result = JSON.parse(token)
+      if (strictValues && typeof result === 'number' && !Number.isFinite(result)) return invalid(kind)
+      return result
     }
     const result = value(0); whitespace()
     if (cursor !== source.length) return invalid(kind)
     return result
   } catch { return invalid(kind) }
+}
+
+// These limits apply to response format checks only. Legacy import projection
+// still accepts ignored fields under the original bounded-parser rules.
+export function isPromptSuiteJsonObjectReply(content) {
+  try {
+    const result = parseBoundedJson(content, 64 * 1024, 16, 'JSON object reply', true)
+    return result !== null && typeof result === 'object' && !Array.isArray(result)
+  } catch { return false }
 }
 
 export function parsePromptSuiteDefinition(source) {
@@ -106,11 +139,11 @@ const timestamp = value => typeof value === 'string' && /^\d{4}-\d{2}-\d{2}T\d{2
 
 export function acceptPromptSuiteReport(source) {
   try {
-    if (!exact(source, reportKeys) || source.schema_version !== 1 || source.kind !== 'mirofish_local_prompt_suite_run' || !uuid(source.run_id) ||
+    if (!exact(source, reportKeys) || ![1, 2].includes(source.schema_version) || source.kind !== 'mirofish_local_prompt_suite_run' || !uuid(source.run_id) ||
       !timestamp(source.started_at) || !(source.finished_at === null || timestamp(source.finished_at)) ||
       !['running', 'completed', 'stopped', 'halted'].includes(source.status) || typeof source.stop_requested !== 'boolean' || !code(source.halt_code)) return invalid('report')
     const definition = acceptPromptSuiteDefinition(source.definition)
-    if (!Array.isArray(source.cases) || source.cases.length !== definition.cases.length ||
+    if (source.schema_version !== definition.schema_version || !Array.isArray(source.cases) || source.cases.length !== definition.cases.length ||
       (source.status === 'running') !== (source.finished_at === null) ||
       (source.status === 'halted') !== (source.halt_code !== null) || (source.status === 'stopped' && !source.stop_requested)) return invalid('report')
     const ids = new Set(), cases = Array.from(source.cases, (row, index) => {
@@ -124,8 +157,7 @@ export function acceptPromptSuiteReport(source) {
       if ((terminal.includes(row.status) || row.status === 'running') && (!snapshot || snapshot.run.state !== row.status)) return invalid('report')
       if (['not_attempted', 'submitting', 'rejected'].includes(row.status) && snapshot !== null) return invalid('report')
       if (row.status === 'unknown' && snapshot !== null && snapshot.run.state !== 'running') return invalid('report')
-      const check = row.status !== 'succeeded' ? 'not_evaluated' : item.expected_text === null ? 'not_requested' :
-        snapshot.run.response.content === item.expected_text ? 'matched' : 'mismatched'
+      const check = evaluatePromptSuiteCheck(item, row.status, snapshot?.run.response?.content)
       if (row.check !== check) return invalid('report')
       return { case_id: row.case_id, request_id: row.request_id, status: row.status, check, snapshot, error_code: row.error_code }
     })
@@ -135,7 +167,7 @@ export function acceptPromptSuiteReport(source) {
       if (unfinished && row.status !== 'not_attempted') return invalid('report')
       if (row.status !== 'succeeded') unfinished = true
     }
-    const result = { schema_version: 1, kind: 'mirofish_local_prompt_suite_run', run_id: source.run_id, definition,
+    const result = { schema_version: source.schema_version, kind: 'mirofish_local_prompt_suite_run', run_id: source.run_id, definition,
       started_at: source.started_at, finished_at: source.finished_at, status: source.status, stop_requested: source.stop_requested, halt_code: source.halt_code, cases }
     if (bytes(JSON.stringify(result)) > PROMPT_SUITE_REPORT_MAX_BYTES) return invalid('report')
     return result

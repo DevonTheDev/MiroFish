@@ -25,7 +25,7 @@
             <h3>{{ t('promptSuiteComparison.preview') }}: {{ slot.preview.report.definition.name }}</h3>
             <p>{{ t('promptSuiteComparison.previewNote') }}</p>
             <dl><div><dt>{{ t('promptSuites.runId') }}</dt><dd>{{ slot.preview.report.run_id }}</dd></div><div><dt>{{ t('promptSuiteComparison.reportStatus') }}</dt><dd>{{ t(`promptSuites.runStates.${slot.preview.report.status}`) }}</dd></div><div><dt>{{ t('promptTrials.startedAt') }}</dt><dd>{{ slot.preview.report.started_at }}</dd></div><div><dt>{{ t('promptTrials.finishedAt') }}</dt><dd>{{ value(slot.preview.report.finished_at) }}</dd></div></dl>
-            <ol><li v-for="(item, index) in slot.preview.report.definition.cases" :key="item.case_id">{{ item.label }} · {{ t(`promptSuites.caseStates.${slot.preview.report.cases[index].status}`) }}</li></ol>
+            <ol><li v-for="(item, index) in slot.preview.report.definition.cases" :key="item.case_id">{{ item.label }} · {{ t(`promptSuites.caseStates.${slot.preview.report.cases[index].status}`) }} · {{ t(`promptSuites.checkKinds.${checkKind(item)}`) }}</li></ol>
             <button type="button" :data-testid="`comparison-${slot.side}-use`" @click="slot.use">{{ t('promptSuiteComparison.use') }}</button>
           </article>
           <div class="toolbar"><button v-if="slot.preview || slot.loading" type="button" :data-testid="`comparison-${slot.side}-cancel`" @click="slot.cancel">{{ t('promptSuiteComparison.discard') }}</button><button type="button" :data-testid="`comparison-${slot.side}-clear`" :disabled="!slot.accepted && !slot.preview && !slot.loading && !slot.error" @click="slot.clear">{{ t('promptSuiteComparison.clear') }}</button></div>
@@ -59,27 +59,27 @@
         <p class="reading-note">{{ t('promptSuiteComparison.configurationNote') }}</p>
         <p v-if="result.report.definition_changes.name" data-testid="comparison-name-changed">{{ t('promptSuiteComparison.nameChanged') }}</p>
         <p v-if="result.report.definition_changes.relative_order" class="notice warning" data-testid="comparison-order-changed">{{ t('promptSuiteComparison.orderChanged') }}</p>
-        <dl class="summary-grid" data-testid="comparison-summary"><div v-for="key in summaryFields" :key="key"><dt>{{ t(`promptSuiteComparison.summary.${key}`) }}</dt><dd>{{ result.report.summary[key] }}</dd></div></dl>
-        <p>{{ t('promptSuiteComparison.findingsNote') }}</p><p>{{ t('promptSuiteComparison.timingNote') }}</p>
+        <dl class="summary-grid" data-testid="comparison-summary"><div v-for="key in summaryFields" :key="key"><dt>{{ t(`promptSuiteComparison.${result.report.schema_version === 2 ? 'checkSummary' : 'summary'}.${key}`) }}</dt><dd>{{ result.report.summary[key] }}</dd></div></dl>
+        <p>{{ t(result.report.schema_version === 2 ? 'promptSuiteComparison.checkFindingsNote' : 'promptSuiteComparison.findingsNote') }}</p><p>{{ t('promptSuiteComparison.timingNote') }}</p>
         <article v-for="(row, index) in result.rows" :key="row.case_id" class="case-row" :data-testid="`comparison-row-${index}`" :data-case-id="row.case_id" :data-membership="row.membership" :data-paired="row.paired_succeeded">
           <h3>{{ row.comparison?.item.label ?? row.baseline.item.label }}</h3><p class="identifier">{{ t('promptSuiteComparison.caseId') }}: {{ row.case_id }}</p>
           <p>{{ t(`promptSuiteComparison.membership.${row.membership}`) }} · {{ t('promptSuiteComparison.positions', { baseline: position(row.baseline_position), comparison: position(row.comparison_position) }) }}</p>
           <p v-if="row.label_changed">{{ t('promptSuiteComparison.labelChanged') }}</p>
           <p v-if="row.same_inputs === false" class="notice warning" :data-testid="`comparison-row-${index}-changed-inputs`">{{ t('promptSuiteComparison.inputsChanged') }}: {{ changedInputs(row).join(', ') }}</p>
           <p v-if="row.request_id_overlap" class="notice warning" :data-testid="`comparison-row-${index}-request-id-overlap`">{{ t('promptSuiteComparison.requestIdOverlap') }}</p>
-          <dl class="findings-grid"><div><dt>{{ t('promptSuiteComparison.eligible') }}</dt><dd>{{ booleanValue(row.paired_succeeded) }}</dd></div><div><dt>{{ t('promptSuiteComparison.exactTransition') }}</dt><dd :data-testid="`comparison-row-${index}-transition`">{{ row.exact_transition === null ? t('promptSuiteComparison.notComparable') : t(`promptSuiteComparison.transitions.${row.exact_transition}`) }}</dd></div><div><dt>{{ t('promptSuiteComparison.replyEqual') }}</dt><dd :data-testid="`comparison-row-${index}-reply-equal`">{{ booleanValue(row.reply_equal) }}</dd></div><div><dt>{{ t('promptSuiteComparison.delta') }}</dt><dd :data-testid="`comparison-row-${index}-delta`">{{ row.request_duration_delta_ms === null ? t('promptSuiteComparison.notComparable') : signed(row.request_duration_delta_ms) }}</dd></div></dl>
+          <dl class="findings-grid"><div><dt>{{ t('promptSuiteComparison.eligible') }}</dt><dd>{{ booleanValue(row.paired_succeeded) }}</dd></div><div><dt>{{ t(result.report.schema_version === 2 ? 'promptSuiteComparison.checkTransition' : 'promptSuiteComparison.exactTransition') }}</dt><dd :data-testid="`comparison-row-${index}-transition`">{{ transitionLabel(row) }}</dd></div><div><dt>{{ t('promptSuiteComparison.replyEqual') }}</dt><dd :data-testid="`comparison-row-${index}-reply-equal`">{{ booleanValue(row.reply_equal) }}</dd></div><div><dt>{{ t('promptSuiteComparison.delta') }}</dt><dd :data-testid="`comparison-row-${index}-delta`">{{ row.request_duration_delta_ms === null ? t('promptSuiteComparison.notComparable') : signed(row.request_duration_delta_ms) }}</dd></div></dl>
           <div class="two-columns">
             <section v-for="side in sides" :key="side" class="case-side" :aria-label="t(`promptSuiteComparison.${side}`)">
               <h4>{{ t(`promptSuiteComparison.${side}`) }}</h4>
               <p v-if="!row[side]">{{ t('promptSuiteComparison.absentCase') }}</p>
               <template v-else>
-                <p>{{ row[side].item.label }}</p><p :data-testid="`comparison-row-${index}-${side}-status`">{{ t(`promptSuites.caseStates.${row[side].section.status}`) }} · {{ t(`promptSuites.checks.${row[side].section.check}`) }}</p>
+                <p>{{ row[side].item.label }}</p><p :data-testid="`comparison-row-${index}-${side}-status`">{{ t(`promptSuites.caseStates.${row[side].section.status}`) }} · {{ checkLabel(row[side].item, row[side].section.check) }}</p>
                 <p v-if="row[side].section.error_code" class="notice warning">{{ t(`promptSuites.errors.${row[side].section.error_code}`) }}</p>
                 <dl><div><dt>{{ t('promptTrials.requestId') }}</dt><dd>{{ value(row[side].section.request_id) }}</dd></div><div><dt>{{ t('promptTrials.temperature') }}</dt><dd>{{ row[side].item.temperature }}</dd></div><div><dt>{{ t('promptTrials.maxOutputTokens') }}</dt><dd>{{ row[side].item.max_output_tokens }}</dd></div><div><dt>{{ t('promptTrials.capturedModel') }}</dt><dd :data-testid="`comparison-row-${index}-${side}-model`">{{ value(row[side].section.snapshot?.run?.configuration.model) }}</dd></div><div><dt>{{ t('promptTrials.reasoningEffort') }}</dt><dd>{{ row[side].section.snapshot?.run ? row[side].section.snapshot.run.configuration.reasoning_effort ?? t('promptTrials.serverDefault') : t('promptTrials.unknown') }}</dd></div><div><dt>{{ t('promptTrials.requestDuration') }}</dt><dd :data-testid="`comparison-row-${index}-${side}-request-duration`">{{ value(row[side].section.snapshot?.run?.request_duration_ms) }}</dd></div><div><dt>{{ t('promptTrials.overallDuration') }}</dt><dd :data-testid="`comparison-row-${index}-${side}-elapsed`">{{ value(row[side].section.snapshot?.run?.elapsed_ms) }}</dd></div><div><dt>{{ t('promptTrials.finishReason') }}</dt><dd>{{ value(row[side].section.snapshot?.run?.response?.finish_reason) }}</dd></div></dl>
                 <p v-if="row[side].section.snapshot?.run?.error_code" class="notice error">{{ t(`promptTrials.errors.${row[side].section.snapshot.run.error_code}`) }}</p>
                 <h5>{{ t('promptTrials.reply') }}</h5><template v-if="typeof row[side].section.snapshot?.run?.response?.content === 'string'"><pre :data-testid="`comparison-row-${index}-${side}-reply`">{{ row[side].section.snapshot.run.response.content }}</pre><small v-if="row[side].section.snapshot.run.response.content === ''">{{ t('promptTrials.emptyContent') }}</small></template><p v-else>{{ t('promptTrials.noContent') }}</p>
                 <template v-if="typeof row[side].section.snapshot?.run?.response?.refusal === 'string'"><h5>{{ t('promptTrials.refusal') }}</h5><pre :data-testid="`comparison-row-${index}-${side}-refusal`">{{ row[side].section.snapshot.run.response.refusal }}</pre></template>
-                <details><summary>{{ t('promptSuites.capturedCase') }}</summary><h5>{{ t('promptTrials.systemPrompt') }}</h5><pre :data-testid="`comparison-row-${index}-${side}-system-prompt`">{{ row[side].item.system_prompt }}</pre><h5>{{ t('promptTrials.userPrompt') }}</h5><pre :data-testid="`comparison-row-${index}-${side}-user-prompt`">{{ row[side].item.user_prompt }}</pre><h5>{{ t('promptSuites.expected') }}</h5><p v-if="row[side].item.expected_text === null">{{ t('promptSuites.checks.not_requested') }}</p><template v-else><pre :data-testid="`comparison-row-${index}-${side}-expected`">{{ row[side].item.expected_text }}</pre><small v-if="row[side].item.expected_text === ''">{{ t('promptSuites.emptyExpected') }}</small></template></details>
+                <details><summary>{{ t('promptSuites.capturedCase') }}</summary><h5>{{ t('promptTrials.systemPrompt') }}</h5><pre :data-testid="`comparison-row-${index}-${side}-system-prompt`">{{ row[side].item.system_prompt }}</pre><h5>{{ t('promptTrials.userPrompt') }}</h5><pre :data-testid="`comparison-row-${index}-${side}-user-prompt`">{{ row[side].item.user_prompt }}</pre><h5>{{ t('promptSuites.checkKind') }}</h5><p :data-testid="`comparison-row-${index}-${side}-kind`">{{ t(`promptSuites.checkKinds.${checkKind(row[side].item)}`) }}</p><p v-if="checkKind(row[side].item) === 'json_object'" class="reading-note">{{ t('promptSuites.jsonObjectHint') }}</p><template v-if="checkKind(row[side].item) === 'exact_text'"><h5>{{ t('promptSuites.expected') }}</h5><pre :data-testid="`comparison-row-${index}-${side}-expected`">{{ row[side].item.expected_text }}</pre><small v-if="row[side].item.expected_text === ''">{{ t('promptSuites.emptyExpected') }}</small></template></details>
               </template>
             </section>
           </div>
@@ -94,7 +94,7 @@ import { computed, onBeforeUnmount, shallowRef, ref } from 'vue'
 import { RouterLink } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import LanguageSwitcher from '../components/LanguageSwitcher.vue'
-import { parsePromptSuiteReport, PROMPT_SUITE_REPORT_MAX_BYTES } from '../utils/promptSuites.js'
+import { parsePromptSuiteReport, getPromptSuiteCheck, PROMPT_SUITE_REPORT_MAX_BYTES } from '../utils/promptSuites.js'
 import { comparePromptSuiteReports, exportPromptSuiteComparison } from '../utils/promptSuiteComparison.js'
 
 const { t } = useI18n()
@@ -105,7 +105,7 @@ const generations = { baseline: 0, comparison: 0 }
 let retired = false, pairGeneration = 0
 const result = shallowRef(null), compareError = ref(false), exportError = ref(false)
 const summaryFields = ['baseline_cases', 'comparison_cases', 'added', 'removed', 'shared', 'same_inputs', 'paired_succeeded', 'evaluated_pairs', 'gained_matches', 'lost_matches', 'retained_matches', 'retained_mismatches', 'overlapping_request_pairs']
-const inputLabels = { system_prompt: 'promptTrials.systemPrompt', user_prompt: 'promptTrials.userPrompt', temperature: 'promptTrials.temperature', max_output_tokens: 'promptTrials.maxOutputTokens', expected_text: 'promptSuites.expected' }
+const inputLabels = { system_prompt: 'promptTrials.systemPrompt', user_prompt: 'promptTrials.userPrompt', temperature: 'promptTrials.temperature', max_output_tokens: 'promptTrials.maxOutputTokens', expected_text: 'promptSuites.expected', check_kind: 'promptSuites.checkKind' }
 function setSlot(side, change) { slots.value = { ...slots.value, [side]: { ...slots.value[side], ...change } } }
 function invalidateResult() { pairGeneration++; result.value = null; compareError.value = false; exportError.value = false }
 function active(side, token) { return !retired && generations[side] === token }
@@ -162,7 +162,7 @@ const compareAction = computed(() => {
     if (retired || token !== pairGeneration || !baseline || !comparison || slots.value.baseline.accepted !== baseline || slots.value.comparison.accepted !== comparison || baseline.report.run_id === comparison.report.run_id) return
     try {
       const capture = comparePromptSuiteReports(baseline.report, comparison.report), report = capture.toReport()
-      const rows = report.rows.map(row => ({ ...row, ...Object.fromEntries(sides.map(side => {
+      const rows = report.rows.map(row => ({ ...row, transition: report.schema_version === 2 ? row.check_transition : row.exact_transition, ...Object.fromEntries(sides.map(side => {
         const index = report[side].definition.cases.findIndex(item => item.case_id === row.case_id)
         return [side, index === -1 ? null : { item: report[side].definition.cases[index], section: report[side].cases[index] }]
       })) }))
@@ -186,6 +186,13 @@ function download(owned, format) {
   finally { try { anchor?.remove() } finally { if (url !== null) URL.revokeObjectURL(url) } }
 }
 const downloadActions = computed(() => { const owned = result.value; return { json: () => download(owned, 'json'), txt: () => download(owned, 'txt') } })
+function checkKind(item) { return getPromptSuiteCheck(item).kind }
+function checkLabel(item, state) { return t(`promptSuites.${checkKind(item) === 'json_object' ? 'jsonChecks' : 'checks'}.${state}`) }
+function transitionLabel(row) {
+  if (row.transition === null) return t('promptSuiteComparison.notComparable')
+  const labels = checkKind(row.comparison.item) === 'json_object' ? 'jsonTransitions' : 'transitions'
+  return t(`promptSuiteComparison.${labels}.${row.transition}`)
+}
 function value(input) { return input == null ? t('promptTrials.unknown') : String(input) }
 function position(input) { return input === null ? t('promptSuiteComparison.absent') : String(input) }
 function booleanValue(input) { return input === null ? t('promptSuiteComparison.notComparable') : t(input ? 'promptSuiteComparison.yes' : 'promptSuiteComparison.no') }
