@@ -2,7 +2,7 @@
   <div class="comparison-page">
     <header class="app-header">
       <RouterLink class="brand" to="/">MIROFISH</RouterLink>
-      <nav :aria-label="t('promptSuiteComparison.navigation')"><RouterLink to="/prompt-suites">{{ t('promptSuites.navTitle') }}</RouterLink><LanguageSwitcher /></nav>
+      <nav :aria-label="t('promptSuiteComparison.navigation')"><RouterLink to="/prompt-suites">{{ t('promptSuites.navTitle') }}</RouterLink><RouterLink to="/prompt-examples">{{ t('promptExamples.navTitle') }}</RouterLink><LanguageSwitcher /></nav>
     </header>
     <main>
       <header><p class="eyebrow">{{ t('promptSuites.eyebrow') }}</p><h1>{{ t('promptSuiteComparison.title') }}</h1><p>{{ t('promptSuiteComparison.scope') }}</p></header>

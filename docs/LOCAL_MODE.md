@@ -748,6 +748,81 @@ page still performs its existing passive readiness read, and starting a new run
 still requires an explicit action. Navigation retires pending file work. Nothing
 is saved to browser storage or a backend archive.
 
+## Prepare reviewed prompt examples
+
+Open **Reviewed examples** from Prompt suites or Compare run reports
+(`/prompt-examples`). This separate offline page helps turn a few captured
+prompts into explicitly reviewed examples for later local-model experiments.
+It reads one downloaded v1/v2/v3 suite-run report using the existing strict
+1 MiB importer. It does not query runtime status, run inference, start training,
+download weights, or write a backend archive.
+
+1. Select a saved run, inspect its preview, then explicitly use it. Import alone
+   does not replace the accepted work. A failed or canceled replacement keeps
+   that work with a visible notice
+2. Review each case's exact system/user prompts, recorded outcome, reply and
+   original check. Every assistant target starts empty and unapproved. For a
+   succeeded source, **Copy recorded reply** fills only the draft; you can also
+   write a corrected target. Other outcomes, including unattempted cases, accept
+   manually authored targets while keeping their source outcome visible
+3. Choose **Approve this target for export** for each desired case. Editing or
+   copying a target retires its approval and any built bundle. Approval means
+   inclusion of that exact target, not certification that it is correct
+4. Build one to five approved examples, inspect the captured result, and download
+   its messages JSONL and review JSON. Both downloads use the same captured
+   selection and time. Removing approval or replacing the accepted source
+   requires building again
+
+Targets must be nonblank, use at most 16,384 Unicode codepoints and 64 KiB UTF-8,
+and contain no control or surrogate characters except CR, LF and tab. Accepted
+prompts and targets remain exact: whitespace, Unicode, tags and reasoning
+wrappers are not trimmed or rewritten. A succeeded response can still be empty,
+contain unsupported controls, or be incorrect; it must become a valid reviewed
+target before inclusion.
+
+The **Recorded reply check** remains historical. The target's check is computed
+separately against the original case's exact-text/JSON requirements. A target
+that does not match those requirements can still be explicitly approved. These
+bounded checks do not judge meaning. Equality with a recorded reply is available
+only when that source succeeded; otherwise it is inapplicable. Repeated content
+under different case IDs is retained, not silently deduplicated. Inspect repeated
+prompts for duplicate or conflicting targets.
+
+Each JSONL record contains only a `messages` array with an optional system message,
+a user message and the approved assistant target. An exactly empty system prompt
+is omitted, matching the real trial request; a whitespace-only system prompt is
+preserved. Records follow source-case order, use LF separators and end with LF.
+Labels, IDs, model names, generation settings and checks are not inserted into
+the trainer messages. The companion review JSON contains selected cases only:
+their source inputs and recorded observations, target messages/checks, review
+times, original positions and JSONL line numbers. Deselected prompts and replies
+are excluded. Recorded model labels and run identities are unauthenticated
+historical claims.
+
+The JSONL layout follows the conversational messages format documented by
+[Hugging Face TRL](https://huggingface.co/docs/trl/dataset_formats). A particular
+trainer and tokenizer still need their own compatible
+[chat-template setup](https://huggingface.co/docs/trl/sft_trainer). No template
+tokens or training configuration are supplied here, and five reviewed cases do
+not establish training sufficiency, model improvement or consumer-GPU fit. Keep
+training examples separate from independent held-out evaluation cases.
+
+JSONL is limited to 1 MiB and review JSON to 4 MiB, refused rather than truncated.
+The files include selected prompts, targets and, in the review file, recorded
+replies; choose their destination accordingly. There is no automatic browser
+storage, restoration or merge. Leaving or reloading the page loses its in-memory
+review. A captured download remains byte-identical on repeated use, and retired
+controls cannot export a replacement source or target.
+
+Local verification covers all supported report versions, historical outcomes,
+selection identity, target boundaries, immutable capture, both languages and
+production-cached Vue handlers. Actual Flask/Vite/gateway/Axios suite runs are
+exported and reviewed with HTTP, fetch, sockets and runtime methods blocked during
+the review stage. Downloaded records also pass a real installed Transformers
+consumer with a synthetic local tokenizer/template. No pretrained-model template,
+actual training, weights, GPU performance, native browser dialogs or Windows
+behavior is established by these checks.
+
 ## Compare exported prompt-suite runs
 
 From **Prompt suites**, open **Compare run reports** (`/prompt-suite-comparison`).

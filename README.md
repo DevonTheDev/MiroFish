@@ -66,6 +66,16 @@ readiness again; **Stop scheduling** ends the sequence. The pause lasts only in
 the current page and does not cancel inference or suspend other local work.
 See the [prompt-suite pause workflow](docs/LOCAL_MODE.md#pause-and-resume-suite-scheduling).
 
+## Prepare reviewed local-model examples
+
+Open **Reviewed examples** from Prompt suites or Compare run reports. Load a
+saved run, inspect its prompts and recorded outcomes, write or correct assistant
+targets, and explicitly approve the examples you want to export. Download
+messages JSONL and a matching review report for external local-model experiments.
+This page works offline and does not train a model; passing a recorded check does
+not automatically approve an example. See the
+[reviewed examples guide](docs/LOCAL_MODE.md#prepare-reviewed-prompt-examples).
+
 ## Explore saved activity
 
 Open a simulation in History and choose **Saved activity** to inspect its latest
