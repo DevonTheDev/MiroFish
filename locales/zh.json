@@ -1668,7 +1668,21 @@
       "blocked": "忙碌中",
       "preparing": "正在准备",
       "ready": "就绪",
+      "cancelled": "已取消",
       "error": "需要处理"
-    }
+    },
+    "cancel": "取消准备",
+    "cancelHint": "停止排队中的人设生成和后续阶段。已经运行的工作可能仍会完成。",
+    "preparationActive": "正在准备模拟。",
+    "cancelPending": "正在请求取消…",
+    "cancelling": "已请求取消。正在等待运行中的工作和清理完成。",
+    "finalizing": "准备工作正在收尾，已无法取消。",
+    "cancelled": "准备已取消。",
+    "cancelledHint": "部分文件会保留供检查。如需重试，请返回项目并创建另一个模拟。",
+    "cancelUnavailable": "清理受阻或准备任务的控制状态不可用。此模拟无法准备、复用或启动。",
+    "cancelTooLate": "准备工作已进入收尾阶段，取消请求未能生效。正在等待结果。",
+    "cancelUnknown": "无法确认取消请求是否成功。正在检查任务状态，之后才可再次尝试。",
+    "cancelRetryAvailable": "最新任务状态仍允许取消。您可以重试取消。",
+    "cancelRetry": "重试取消"
   }
 }

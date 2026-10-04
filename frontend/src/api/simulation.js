@@ -17,6 +17,12 @@ export const prepareSimulation = (data, signal) => {
   return service.post('/api/simulation/prepare', data, { signal })
 }
 
+// An explicit mutation of this exact preparation task. Never automatically retry.
+// Aborting the HTTP request only stops observation of the cancellation response.
+export const cancelPreparation = (data, signal) => {
+  return service.post('/api/simulation/prepare/cancel', data, { signal })
+}
+
 // Passive observation never initializes graph memory or starts preparation.
 export const getPreparationPlan = (simulationId, signal) => {
   return service.get(`/api/simulation/${encodeURIComponent(simulationId)}/prepare/plan`, { signal })

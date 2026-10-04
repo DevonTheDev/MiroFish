@@ -75,7 +75,7 @@ def create_app(config_class=Config):
         logger = get_logger('mirofish.request')
         logger.debug(f"请求: {request.method} {request.path}")
         bounded_preparation = (
-            request.path == '/api/simulation/prepare/preview'
+            request.path in {'/api/simulation/prepare/preview', '/api/simulation/prepare/cancel'}
             or Config.LOCAL_MODE and request.path == '/api/simulation/prepare'
         )
         if (request.content_type and 'json' in request.content_type

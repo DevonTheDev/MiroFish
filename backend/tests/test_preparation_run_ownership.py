@@ -293,7 +293,7 @@ def test_local_start_rejects_unsafe_or_oversized_configuration_before_claim(runn
         Runner.start_simulation(SIMULATION_ID, platform="reddit")
     assert rejected.value.code == {
         "oversized": "source_too_large", "linked_file": "unsafe_path",
-        "linked_directory": "ownership_unavailable",
+        "linked_directory": "cancellation_unavailable",
     }[kind]
     assert Runner._run_states[SIMULATION_ID] is previous
     assert (runner.folder / "run_state.json").read_bytes() == run_state

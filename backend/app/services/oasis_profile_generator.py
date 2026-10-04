@@ -11,7 +11,7 @@ OASIS Agent Profile生成器
 import json
 import random
 import time
-from typing import Dict, Any, List, Optional
+from typing import Callable, Dict, Any, List, Optional
 from dataclasses import dataclass, field
 from datetime import datetime
 
@@ -21,6 +21,7 @@ from ..local_runtime import openai_client_options
 from ..utils.logger import get_logger
 from ..utils.locale import get_language_instruction, get_locale, set_locale, t
 from ..utils.openai_chat_compat import create_chat_completion, extract_chat_completion_text
+from ..utils.preparation_cancellation import PreparationCancelled
 from ..utils.zep import (
     call_zep_read_with_retry,
     get_zep_client,
@@ -899,7 +900,9 @@ class OasisProfileGenerator:
         graph_id: Optional[str] = None,
         parallel_count: int = 5,
         realtime_output_path: Optional[str] = None,
-        output_platform: str = "reddit"
+        output_platform: str = "reddit",
+        *,
+        cancellation_check: Optional[Callable[[], None]] = None,
     ) -> List[OasisAgentProfile]:
         """
         批量从实体生成Agent Profile（支持并行生成）
@@ -912,6 +915,7 @@ class OasisProfileGenerator:
             parallel_count: 并行生成数量，默认5
             realtime_output_path: 实时写入的文件路径（如果提供，每生成一个就写入一次）
             output_platform: 输出平台格式 ("reddit" 或 "twitter")
+            cancellation_check: 可选的协作取消检查；当前请求完成后停止后续工作
             
         Returns:
             Agent Profile列表
@@ -957,6 +961,9 @@ class OasisProfileGenerator:
                                 writer.writeheader()
                                 writer.writerows(profiles_data)
                 except Exception as e:
+                    if cancellation_check is not None:
+                        e.preparation_write_uncertain = True
+                        raise
                     logger.warning(f"实时保存 profiles 失败: {e}")
         
         # Capture locale before spawning thread pool workers
@@ -964,6 +971,9 @@ class OasisProfileGenerator:
 
         def generate_single_profile(idx: int, entity: EntityNode) -> tuple:
             """生成单个profile的工作函数"""
+            # Keep cancellation outside ordinary profile fallback handling.
+            if cancellation_check is not None:
+                cancellation_check()
             set_locale(current_locale)
             entity_type = entity.get_entity_type() or "Entity"
             
@@ -973,13 +983,19 @@ class OasisProfileGenerator:
                     user_id=idx,
                     use_llm=use_llm
                 )
+                if cancellation_check is not None:
+                    cancellation_check()
                 
                 # 实时输出生成的人设到控制台和日志
                 self._print_generated_profile(entity.name, entity_type, profile)
                 
                 return idx, profile, None
                 
+            except PreparationCancelled:
+                raise
             except Exception as e:
+                if cancellation_check is not None and getattr(e, "preparation_write_uncertain", False):
+                    raise
                 logger.error(f"生成实体 {entity.name} 的人设失败: {str(e)}")
                 # 创建一个基础profile
                 fallback_profile = OasisAgentProfile(
@@ -991,6 +1007,8 @@ class OasisProfileGenerator:
                     source_entity_uuid=entity.uuid,
                     source_entity_type=entity_type,
                 )
+                if cancellation_check is not None:
+                    cancellation_check()
                 return idx, fallback_profile, str(e)
         
         logger.info(f"开始并行生成 {total} 个Agent人设（并行数: {parallel_count}）...")
@@ -1006,49 +1024,71 @@ class OasisProfileGenerator:
                 for idx, entity in enumerate(entities)
             }
             
-            # 收集结果
-            for future in concurrent.futures.as_completed(future_to_entity):
-                idx, entity = future_to_entity[future]
-                entity_type = entity.get_entity_type() or "Entity"
-                
-                try:
-                    result_idx, profile, error = future.result()
-                    profiles[result_idx] = profile
-                    
-                    with lock:
-                        completed_count[0] += 1
-                        current = completed_count[0]
-                    
-                    # 实时写入文件
-                    save_profiles_realtime()
-                    
-                    if progress_callback:
-                        progress_callback(
-                            current, 
-                            total, 
-                            f"已完成 {current}/{total}: {entity.name}（{entity_type}）"
+            try:
+                # 收集结果
+                for future in concurrent.futures.as_completed(future_to_entity):
+                    if cancellation_check is not None:
+                        cancellation_check()
+                    idx, entity = future_to_entity[future]
+                    entity_type = entity.get_entity_type() or "Entity"
+
+                    try:
+                        result_idx, profile, error = future.result()
+                        profiles[result_idx] = profile
+
+                        with lock:
+                            completed_count[0] += 1
+                            current = completed_count[0]
+
+                        # 实时写入文件
+                        save_profiles_realtime()
+
+                        if progress_callback:
+                            progress_callback(
+                                current,
+                                total,
+                                f"已完成 {current}/{total}: {entity.name}（{entity_type}）"
+                            )
+
+                        if error:
+                            logger.warning(f"[{current}/{total}] {entity.name} 使用备用人设: {error}")
+                        else:
+                            logger.info(f"[{current}/{total}] 成功生成人设: {entity.name} ({entity_type})")
+
+                    except PreparationCancelled:
+                        raise
+                    except Exception as e:
+                        if cancellation_check is not None and (
+                            isinstance(e, OSError) or getattr(e, "preparation_write_uncertain", False)
+                        ):
+                            # A failed partial write is not a failed persona.
+                            # Preserve the storage error for the task owner.
+                            raise
+                        logger.error(f"处理实体 {entity.name} 时发生异常: {str(e)}")
+                        with lock:
+                            completed_count[0] += 1
+                        profiles[idx] = OasisAgentProfile(
+                            user_id=idx,
+                            user_name=self._generate_username(entity.name),
+                            name=entity.name,
+                            bio=f"{entity_type}: {entity.name}",
+                            persona=entity.summary or "A participant in social discussions.",
+                            source_entity_uuid=entity.uuid,
+                            source_entity_type=entity_type,
                         )
-                    
-                    if error:
-                        logger.warning(f"[{current}/{total}] {entity.name} 使用备用人设: {error}")
-                    else:
-                        logger.info(f"[{current}/{total}] 成功生成人设: {entity.name} ({entity_type})")
-                        
-                except Exception as e:
-                    logger.error(f"处理实体 {entity.name} 时发生异常: {str(e)}")
-                    with lock:
-                        completed_count[0] += 1
-                    profiles[idx] = OasisAgentProfile(
-                        user_id=idx,
-                        user_name=self._generate_username(entity.name),
-                        name=entity.name,
-                        bio=f"{entity_type}: {entity.name}",
-                        persona=entity.summary or "A participant in social discussions.",
-                        source_entity_uuid=entity.uuid,
-                        source_entity_type=entity_type,
-                    )
-                    # 实时写入文件（即使是备用人设）
-                    save_profiles_realtime()
+                        # 实时写入文件（即使是备用人设）
+                        save_profiles_realtime()
+            except Exception as e:
+                # Pending units must never become fallback personas. Leaving
+                # the executor context waits for all active units, including
+                # their nested retrieval pools, before the signal escapes.
+                if isinstance(e, (PreparationCancelled, OSError)) or getattr(e, "preparation_write_uncertain", False):
+                    for future in future_to_entity:
+                        future.cancel()
+                raise
+
+        if cancellation_check is not None:
+            cancellation_check()
         
         print(f"\n{'='*60}")
         print(f"人设生成完成！共生成 {len([p for p in profiles if p])} 个Agent")

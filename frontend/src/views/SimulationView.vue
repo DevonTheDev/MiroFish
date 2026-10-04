@@ -123,7 +123,7 @@ const statusClass = computed(() => {
 })
 
 const statusText = computed(() => {
-  return t('localPlan.status.' + ({ error: 'error', completed: 'ready', processing: 'preparing', idle: 'idle', blocked: 'blocked' }[currentStatus.value] || 'planning'))
+  return t('localPlan.status.' + ({ error: 'error', completed: 'ready', cancelled: 'cancelled', processing: 'preparing', idle: 'idle', blocked: 'blocked' }[currentStatus.value] || 'planning'))
 })
 
 // A new identity owns every selection, including A → B → A in a reused view.
@@ -471,4 +471,3 @@ onBeforeUnmount(() => retireView())
   border-right: 1px solid #EAEAEA;
 }
 </style>
-

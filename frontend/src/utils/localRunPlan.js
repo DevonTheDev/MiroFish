@@ -10,6 +10,15 @@ export const validLocalPlan = plan => validLocalLimits(plan?.limits)
   && typeof plan.owner?.busy === 'boolean' && typeof plan.prepared?.available === 'boolean'
   && typeof plan.can_prepare === 'boolean' && typeof plan.can_reuse === 'boolean'
 
+// Only an exact backend projection grants cancellation. Legacy task IDs alone
+// never imply that their workers implement cancellation.
+export const validPreparationTask = (task, simulationId, taskId = task?.task_id) => !!task
+  && task.simulation_id === simulationId && portableId(task.task_id) && task.task_id === taskId
+  && ['pending', 'processing', 'completed', 'failed', 'cancelled'].includes(task.status)
+  && ['preparing', 'cancelling', 'finalizing', 'cancelled', 'ready', 'failed', 'unavailable'].includes(task.preparation_phase)
+  && typeof task.can_cancel === 'boolean' && typeof task.cancellation_requested === 'boolean'
+  && task.already_prepared === false
+
 export const validLocalCatalog = (data, id) => data?.simulation_id === id && validLocalLimits(data.limits)
   && Array.isArray(data.entities) && data.entities.length <= data.limits.max_catalog_entities
   && data.eligible_count === data.entities.length

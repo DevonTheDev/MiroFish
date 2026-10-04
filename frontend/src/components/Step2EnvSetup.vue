@@ -6,6 +6,9 @@
         :error="planError" :limits-valid="localLimitsValid" :can-prepare="canPrepareLocal" :can-reuse="canReuseLocal"
         :loading-cast="loadingCast" :catalog-loaded="catalogLoaded" :entities="catalog" :selected-ids="selectedEntityIds"
         :type-filter="typeFilter" :use-llm="useLlmProfiles" :complete="phase === 4"
+        :cancellation-status="cancellationStatus" :cancellation-blocked="cancellationBlocked"
+        :show-cancel="showCancelPreparation" :can-cancel="canCancelPreparation" :cancel-retry="cancelRetry"
+        :cancel-action="cancelPreparationAction"
         @refresh="plannerActions.refresh" @load="plannerActions.load" @select="plannerActions.select"
         @filter="plannerActions.filter" @profile-mode="plannerActions.profileMode"
         @prepare="plannerActions.prepare" @reuse="plannerActions.reuse" />
@@ -536,7 +539,7 @@
             </button>
             <button 
               class="action-btn primary"
-              :disabled="phase < 4 || (runtimeMode === 'local' && !localRoundsValid)"
+              :disabled="phase < 4 || cancellationBlocked || cancelPending || (runtimeMode === 'local' && !localRoundsValid)"
               :onClick="plannerActions.start"
             >
               {{ $t('step2.startDualWorldSim') }} ➝
@@ -653,9 +656,10 @@
 import { ref, computed, watch, onMounted, onUnmounted, nextTick } from 'vue'
 import { useI18n } from 'vue-i18n'
 import LocalRunPlanner from './LocalRunPlanner.vue'
-import { validLocalPlan, validLocalCatalog, configuredRounds, validLocalMaximum, effectiveRounds, planningErrorKey } from '../utils/localRunPlan'
+import { validLocalPlan, validLocalCatalog, validPreparationTask, configuredRounds, validLocalMaximum, effectiveRounds, planningErrorKey } from '../utils/localRunPlan'
 import {
   prepareSimulation,
+  cancelPreparation,
   getPreparationPlan,
   previewPreparation,
   getPrepareStatus,
@@ -702,13 +706,38 @@ const typeFilter = ref('')
 const useLlmProfiles = ref(false)
 const localMaxRounds = ref(null)
 const plannerActions = ref({})
+const preparationTask = ref(null)
+const cancellationBlocked = ref(false)
+const cancelPending = ref(false)
+const cancelNeedsObservation = ref(false)
+const cancelRetry = ref(false)
+const cancelFeedback = ref('')
+const cancellationStatus = computed(() => {
+  if (cancelPending.value) return 'localPlan.cancelPending'
+  if (cancelFeedback.value) return cancelFeedback.value
+  const stage = preparationTask.value?.preparation_phase
+  return ({ preparing: 'localPlan.preparationActive', cancelling: 'localPlan.cancelling', finalizing: 'localPlan.finalizing',
+    cancelled: 'localPlan.cancelled', unavailable: 'localPlan.cancelUnavailable' })[stage]
+    || (cancellationBlocked.value ? 'localPlan.cancelUnavailable' : '')
+})
+const showCancelPreparation = computed(() => runtimeMode.value === 'local'
+  && validPreparationTask(preparationTask.value, props.simulationId, taskId.value)
+  && preparationTask.value.preparation_phase === 'preparing' && preparationTask.value.can_cancel
+  && !preparationTask.value.cancellation_requested && !cancellationBlocked.value)
+const canCancelPreparation = computed(() => showCancelPreparation.value && !cancelPending.value && !cancelNeedsObservation.value)
+// Pass this captured callback directly to the button. An old rendered handler
+// must not pick up a replacement task through a mutable component event handler.
+const cancelPreparationAction = computed(() => {
+  const context = preparationContext, id = taskId.value
+  return () => requestPreparationCancellation(context, id)
+})
 const localLimitsValid = computed(() => validLocalPlan(localPlan.value))
 const waitingForCleanup = computed(() => runtimeMode.value === 'local' && !props.cleanupReady)
-const plannerBusy = computed(() => planLoading.value || loadingCast.value || actionPending.value || (phase.value > 0 && phase.value < 4))
+const plannerBusy = computed(() => planLoading.value || loadingCast.value || actionPending.value || cancelPending.value || (phase.value > 0 && phase.value < 4))
 const canPrepareLocal = computed(() => runtimeMode.value === 'local' && props.cleanupReady && localLimitsValid.value
-  && !plannerBusy.value && !planError.value && !localPlan.value.owner.busy && localPlan.value.can_prepare && !localPlan.value.prepared.available)
+  && !cancellationBlocked.value && !plannerBusy.value && !planError.value && !localPlan.value.owner.busy && localPlan.value.can_prepare && !localPlan.value.prepared.available)
 const canReuseLocal = computed(() => runtimeMode.value === 'local' && props.cleanupReady && localLimitsValid.value
-  && !plannerBusy.value && !planError.value && !localPlan.value.owner.busy && localPlan.value.can_reuse && localPlan.value.prepared.available)
+  && !cancellationBlocked.value && !plannerBusy.value && !planError.value && !localPlan.value.owner.busy && localPlan.value.can_reuse && localPlan.value.prepared.available)
 const localRoundsValid = computed(() => localLimitsValid.value && validLocalMaximum(localMaxRounds.value, localPlan.value?.limits?.max_rounds))
 const effectiveLocalRounds = computed(() => effectiveRounds(simulationConfig.value, localMaxRounds.value, localPlan.value?.limits?.max_rounds))
 
@@ -724,7 +753,7 @@ const customMaxRounds = ref(40)   // 默认推荐40轮
 // Watch stage to update phase
 watch(currentStage, (newStage) => {
   const context = preparationContext
-  if (!isActive(context) || context.preparedConfirmed) return
+  if (!isActive(context) || context.preparedConfirmed || cancellationBlocked.value) return
   if (newStage === '生成Agent人设' || newStage === 'generating_profiles') {
     phase.value = 1
   } else if (newStage === '生成模拟配置' || newStage === 'generating_config') {
@@ -766,6 +795,7 @@ let mounted = false
 let preparationContext = null
 const ownsView = context => !!context && mounted && context === preparationContext && props.simulationId === context.id
 const isActive = context => ownsView(context) && !context.terminal
+const ownsTask = (context, id) => isActive(context) && taskId.value === id
 
 const singleFlight = (context, stream, operation) => {
   if (!isActive(context)) return Promise.resolve()
@@ -792,11 +822,12 @@ const finishPreparation = (context, status) => {
   if (runtimeMode.value === 'local' && status === 'error') phase.value = 0
   // This retires HTTP observation only; backend preparation is not canceled.
   context.controller.abort()
+  context.cancelController.abort()
   emit('update-status', status)
 }
 
 const replacePreparation = () => {
-  if (preparationContext) preparationContext.controller.abort()
+  if (preparationContext) { preparationContext.controller.abort(); preparationContext.cancelController.abort() }
   preparationContext = null
   stopAllPolling()
   plannerGeneration.value += 1
@@ -813,6 +844,12 @@ const replacePreparation = () => {
   useLlmProfiles.value = false
   localMaxRounds.value = null
   plannerActions.value = {}
+  preparationTask.value = null
+  cancellationBlocked.value = false
+  cancelPending.value = false
+  cancelNeedsObservation.value = false
+  cancelRetry.value = false
+  cancelFeedback.value = ''
   phase.value = 0
   taskId.value = null
   prepareProgress.value = 0
@@ -831,7 +868,7 @@ const replacePreparation = () => {
   lastLoggedConfigStage = ''
   if (!mounted || !props.simulationId) return
   preparationContext = {
-    id: props.simulationId, controller: new AbortController(), requests: {},
+    id: props.simulationId, controller: new AbortController(), cancelController: new AbortController(), requests: {}, cancelEpoch: 0,
     terminal: null, preparedConfirmed: false,
   }
   addLog(t('log.step2Init'))
@@ -901,7 +938,7 @@ const handlePrepareFailure = (message, context = preparationContext) => {
 
 // 处理开始模拟按钮点击
 const handleStartSimulation = () => {
-  if (!ownsView(preparationContext) || preparationContext.terminal !== 'completed') return
+  if (!ownsView(preparationContext) || preparationContext.terminal !== 'completed' || cancellationBlocked.value || cancelPending.value) return
   // 构建传递给父组件的参数
   const params = {}
   
@@ -931,9 +968,69 @@ const selectProfile = (profile) => {
   selectedProfile.value = profile
 }
 
+// Cancellation is authoritative before generic completed/ready handling. Keep
+// the read controller alive while the worker drains and retires its resources.
+const applyPreparationTask = (context, data) => {
+  if (!ownsTask(context, data.task_id) || !validPreparationTask(data, context.id, taskId.value)) return false
+  preparationTask.value = data
+  const stage = data.preparation_phase
+  if (data.cancellation_requested || data.status === 'cancelled' || ['cancelling', 'cancelled', 'unavailable'].includes(stage)) {
+    cancellationBlocked.value = true
+    simulationConfig.value = null
+    stopConfigPolling()
+    cancelFeedback.value = ''
+  }
+  if (stage === 'cancelled' || data.status === 'cancelled') {
+    phase.value = 0
+    cancelFeedback.value = 'localPlan.cancelled'
+    finishPreparation(context, 'cancelled')
+    return true
+  }
+  if (stage === 'cancelling' || stage === 'unavailable' || cancellationBlocked.value) {
+    phase.value = 1
+    emit('update-status', stage === 'unavailable' ? 'blocked' : 'processing')
+    return true
+  }
+  if (['ready', 'failed'].includes(stage)) cancelFeedback.value = ''
+  return false
+}
+
+const requestPreparationCancellation = async (context, id) => {
+  if (!ownsTask(context, id) || !canCancelPreparation.value) return
+  cancelPending.value = true
+  cancelNeedsObservation.value = true
+  cancelRetry.value = false
+  cancelFeedback.value = ''
+  const epoch = ++context.cancelEpoch
+  try {
+    const response = await cancelPreparation({ simulation_id: context.id, task_id: id }, context.cancelController.signal)
+    if (!ownsTask(context, id) || context.cancelEpoch !== epoch) return
+    const data = response.data
+    if (!response.success || typeof data?.accepted !== 'boolean' || !validPreparationTask(data, context.id, id)) throw new Error('Unconfirmed cancellation')
+    // Reads launched while this mutation was pending may describe its earlier
+    // preparing state. The confirmed reply supersedes those observations.
+    ++context.cancelEpoch
+    cancelNeedsObservation.value = false
+    if (applyPreparationTask(context, data)) return
+    if (!data.accepted && data.preparation_phase === 'finalizing') cancelFeedback.value = 'localPlan.cancelTooLate'
+    if (data.preparation_phase === 'ready' || data.status === 'completed') await loadPreparedData(context)
+    else if (data.preparation_phase === 'failed' || data.status === 'failed') handlePrepareFailure(null, context)
+  } catch {
+    if (!ownsTask(context, id) || context.cancelEpoch !== epoch) return
+    // The mutation may have succeeded. Only a new owned status read can enable
+    // an explicit retry; an already in-flight read cannot resolve uncertainty.
+    ++context.cancelEpoch
+    cancelNeedsObservation.value = true
+    cancelFeedback.value = 'localPlan.cancelUnknown'
+  } finally {
+    if (ownsView(context) && taskId.value === id) cancelPending.value = false
+  }
+}
+
 // 自动开始准备模拟
 const startPrepareSimulation = (context = preparationContext, payload = null) => singleFlight(context, 'prepare', async () => {
   if (!payload && runtimeMode.value !== 'cloud') return
+  let requestTaskId = taskId.value
   // 标记第一步完成，开始第二步
   phase.value = 1
   addLog(t('log.simInstanceCreated', { id: context.id }))
@@ -946,16 +1043,27 @@ const startPrepareSimulation = (context = preparationContext, payload = null) =>
       use_llm_for_profiles: true,
       parallel_profile_count: 5
     }, context.controller.signal)
-    if (!isActive(context)) return
+    if (!ownsTask(context, requestTaskId)) return
     
     if (res.success && res.data) {
-      if (res.data.already_prepared) {
+      if (res.data.preparation_task) {
+        const projection = res.data.preparation_task
+        if (!validPreparationTask(projection, context.id, res.data.task_id)) {
+          handlePrepareFailure(null, context)
+          return
+        }
+        taskId.value = res.data.task_id
+        requestTaskId = taskId.value
+        if (applyPreparationTask(context, projection) && !isActive(context)) return
+      }
+      if (res.data.already_prepared && !cancellationBlocked.value) {
         addLog(t('log.detectedExistingPrep'))
         await loadPreparedData(context)
         return
       }
       
       taskId.value = res.data.task_id
+      requestTaskId = taskId.value
       addLog(t('log.prepareTaskStarted'))
       addLog(t('log.prepareTaskId', { taskId: res.data.task_id }))
       
@@ -979,7 +1087,7 @@ const startPrepareSimulation = (context = preparationContext, payload = null) =>
       finishPreparation(context, 'error')
     }
   } catch (err) {
-    if (!isActive(context)) return
+    if (!ownsTask(context, requestTaskId)) return
     addLog(runtimeMode.value === 'local' ? t(planningErrorKey(err)) : t('log.prepareException', { error: err.message }))
     if (runtimeMode.value === 'local') planError.value = planningErrorKey(err)
     finishPreparation(context, 'error')
@@ -1009,6 +1117,30 @@ const resolvePreparationPlan = context => singleFlight(context, 'plan', async ()
     context.waitingCleanup = false
     if (!validLocalPlan(plan)) { planError.value = 'localPlan.invalidLimits'; emit('update-status', 'error'); return }
     if (!validLocalMaximum(localMaxRounds.value, plan.limits.max_rounds)) localMaxRounds.value = plan.limits.max_rounds
+    if (plan.cancellation?.blocked === true) {
+      cancellationBlocked.value = true
+      simulationConfig.value = null
+    }
+    const projectedTask = plan.preparation_task
+    const expectedTaskId = plan.owner?.task_id || plan.cancellation?.task_id
+    if (validPreparationTask(projectedTask, context.id, expectedTaskId)) {
+      taskId.value = projectedTask.task_id
+      phase.value = 1
+      const handled = applyPreparationTask(context, projectedTask)
+      if (!isActive(context)) return
+      if (!handled && projectedTask.preparation_phase === 'ready') { await loadPreparedData(context); return }
+      if (!handled && projectedTask.preparation_phase === 'failed') { handlePrepareFailure(null, context); return }
+      emit('update-status', projectedTask.preparation_phase === 'unavailable' ? 'blocked' : 'processing')
+      startPolling(context)
+      startProfilesPolling(context)
+      return
+    }
+    if (projectedTask != null) {
+      planError.value = 'localPlan.requestError'
+      emit('update-status', 'error')
+      return
+    }
+    if (cancellationBlocked.value) { emit('update-status', 'blocked'); return }
     if (plan.owner.busy && plan.owner.reason_code === 'preparation_busy' && typeof plan.owner.task_id === 'string' && plan.owner.task_id) {
       taskId.value = plan.owner.task_id
       phase.value = 1
@@ -1019,7 +1151,7 @@ const resolvePreparationPlan = context => singleFlight(context, 'plan', async ()
   } catch (error) {
     if (isActive(context)) { planError.value = planningErrorKey(error); emit('update-status', 'error') }
   } finally {
-    if (isActive(context)) planLoading.value = false
+    if (ownsView(context)) planLoading.value = false
   }
 }).then(() => {
   if (isActive(context) && context.waitingCleanup && props.cleanupReady) return resolvePreparationPlan(context)
@@ -1086,20 +1218,37 @@ const stopProfilesPolling = () => {
 }
 
 const pollPrepareStatus = (context = preparationContext) => singleFlight(context, 'status', async () => {
-  
+  const observedTaskId = taskId.value, epoch = context.cancelEpoch
   try {
     const res = await getPrepareStatus({
-      task_id: taskId.value,
+      task_id: observedTaskId,
       simulation_id: context.id
     }, context.controller.signal)
-    if (!isActive(context) || context.preparedConfirmed) return
+    if (!ownsTask(context, observedTaskId) || context.preparedConfirmed || context.cancelEpoch !== epoch) return
     
     if (res.success && res.data) {
       const data = res.data
+      if (runtimeMode.value === 'local' && (preparationTask.value || data.preparation_phase)) {
+        if (!validPreparationTask(data, context.id, observedTaskId)) return
+        // A new owned observation can settle a lost/hung mutation response.
+        // A still-preparing read cannot reopen the button during that request.
+        if (cancelPending.value) {
+          if (data.preparation_phase === 'preparing' && !data.cancellation_requested && !['completed', 'failed', 'cancelled'].includes(data.status)) return
+          ++context.cancelEpoch
+          context.cancelController.abort()
+          cancelPending.value = false
+        }
+        if (cancelNeedsObservation.value) {
+          cancelNeedsObservation.value = false
+          cancelRetry.value = data.can_cancel && data.preparation_phase === 'preparing' && !data.cancellation_requested
+          cancelFeedback.value = cancelRetry.value ? 'localPlan.cancelRetryAvailable' : ''
+        }
+        if (applyPreparationTask(context, data)) return
+      }
       
       // 更新进度
       prepareProgress.value = data.progress || 0
-      progressMessage.value = data.message || ''
+      progressMessage.value = runtimeMode.value === 'local' ? '' : data.message || ''
       
       // 解析阶段信息并输出详细日志
       if (runtimeMode.value === 'local') {
@@ -1134,7 +1283,8 @@ const pollPrepareStatus = (context = preparationContext) => singleFlight(context
       }
       
       // 检查是否完成
-      if (data.status === 'completed' || data.status === 'ready' || data.already_prepared) {
+      if (data.preparation_phase === 'cancelled' || data.status === 'cancelled') return
+      if (data.status === 'completed' || data.status === 'ready' || data.already_prepared || data.preparation_phase === 'ready') {
         addLog(t('log.prepareComplete'))
         stopPolling()
         stopProfilesPolling()
@@ -1144,16 +1294,16 @@ const pollPrepareStatus = (context = preparationContext) => singleFlight(context
       }
     }
   } catch (err) {
-    if (!isActive(context) || context.preparedConfirmed) return
+    if (!ownsTask(context, observedTaskId) || context.preparedConfirmed || context.cancelEpoch !== epoch) return
     console.warn('轮询状态失败:', err)
   }
 })
 
 const fetchProfilesRealtime = (context = preparationContext, final = false) => singleFlight(context, 'profiles', async () => {
-  
+  const observedTaskId = taskId.value
   try {
     const res = await getSimulationProfilesRealtime(context.id, undefined, context.controller.signal)
-    if (!isActive(context) || (!final && context.preparedConfirmed)) return
+    if (!ownsTask(context, observedTaskId) || (!final && context.preparedConfirmed)) return
     
     if (res.success && res.data) {
       const prevCount = profiles.value.length
@@ -1189,14 +1339,14 @@ const fetchProfilesRealtime = (context = preparationContext, final = false) => s
       }
     }
   } catch (err) {
-    if (!isActive(context) || (!final && context.preparedConfirmed)) return
+    if (!ownsTask(context, observedTaskId) || (!final && context.preparedConfirmed)) return
     console.warn('获取 Profiles 失败:', err)
   }
 })
 
 // 配置轮询
 const startConfigPolling = (context = preparationContext) => {
-  if (!isActive(context) || configTimer !== null) return
+  if (!isActive(context) || cancellationBlocked.value || configTimer !== null) return
   configTimer = setInterval(() => {
     if (context.preparedConfirmed) loadPreparedData(context)
     else fetchConfigRealtime(context)
@@ -1211,15 +1361,19 @@ const stopConfigPolling = () => {
 }
 
 const fetchConfigRealtime = (context = preparationContext, final = false) => singleFlight(context, 'config', async () => {
-  
+  const observedTaskId = taskId.value
+  if (cancellationBlocked.value) return
   try {
     const res = await getSimulationConfigRealtime(context.id, context.controller.signal)
-    if (!isActive(context) || (!final && context.preparedConfirmed)) return
+    if (!ownsTask(context, observedTaskId) || cancellationBlocked.value || (!final && context.preparedConfirmed)) return
     
     if (res.success && res.data) {
       const data = res.data
 
       if (data.status === 'failed' || data.error) {
+        // Planned tasks own completion and cleanup. A partial config snapshot
+        // cannot declare failure before that task publishes its final outcome.
+        if (preparationTask.value && !final) return
         handlePrepareFailure(data.error, context)
         return
       }
@@ -1266,7 +1420,7 @@ const fetchConfigRealtime = (context = preparationContext, final = false) => sin
       }
     }
   } catch (err) {
-    if (!isActive(context) || (!final && context.preparedConfirmed)) return
+    if (!ownsTask(context, observedTaskId) || cancellationBlocked.value || (!final && context.preparedConfirmed)) return
     if (final) {
       handlePrepareFailure(t('log.loadConfigFailed', { error: err.message }), context)
       return
@@ -1276,7 +1430,8 @@ const fetchConfigRealtime = (context = preparationContext, final = false) => sin
 })
 
 const loadPreparedData = (context = preparationContext) => {
-  if (!isActive(context)) return Promise.resolve()
+  if (!isActive(context) || cancellationBlocked.value) return Promise.resolve()
+  const observedTaskId = taskId.value
   // Retire preview replies synchronously at the authoritative ready handoff.
   context.preparedConfirmed = true
   stopAllPolling()
@@ -1286,17 +1441,17 @@ const loadPreparedData = (context = preparationContext) => {
 
     // 最后获取一次 Profiles
     if (context.requests.profiles) await context.requests.profiles
-    if (!isActive(context)) return
+    if (!ownsTask(context, observedTaskId) || cancellationBlocked.value) return
     await fetchProfilesRealtime(context, true)
-    if (!isActive(context)) return
+    if (!ownsTask(context, observedTaskId) || cancellationBlocked.value) return
     addLog(t('log.loadedAgentProfiles', { count: profiles.value.length }))
 
     // 获取配置（使用实时接口）
     try {
       if (context.requests.config) await context.requests.config
-      if (!isActive(context)) return
+      if (!ownsTask(context, observedTaskId) || cancellationBlocked.value) return
       const configState = await fetchConfigRealtime(context, true)
-      if (!isActive(context)) return
+      if (!ownsTask(context, observedTaskId) || cancellationBlocked.value) return
       if (configState) {
 
         if (configState.status === 'failed' || configState.error) {
@@ -1326,7 +1481,7 @@ const loadPreparedData = (context = preparationContext) => {
         }
       }
     } catch (err) {
-      if (!isActive(context)) return
+      if (!ownsTask(context, observedTaskId) || cancellationBlocked.value) return
       handlePrepareFailure(t('log.loadConfigFailed', { error: err.message }), context)
     }
   })
@@ -1361,7 +1516,7 @@ onMounted(() => {
 
 onUnmounted(() => {
   mounted = false
-  if (preparationContext) preparationContext.controller.abort()
+  if (preparationContext) { preparationContext.controller.abort(); preparationContext.cancelController.abort() }
   preparationContext = null
   stopAllPolling()
 })

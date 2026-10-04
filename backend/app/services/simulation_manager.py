@@ -7,7 +7,7 @@ OASIS模拟管理器
 import os
 import json
 import shutil
-from typing import Dict, Any, List, Optional
+from typing import Callable, Dict, Any, List, Optional
 from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
@@ -16,6 +16,7 @@ from ..config import Config
 from ..storage import StoragePathError, storage_path, validate_record_id
 from ..utils.logger import get_logger
 from ..utils.persistence import write_json_atomic
+from ..utils.preparation_cancellation import PreparationCancelled
 from .zep_entity_reader import ZepEntityReader, FilteredEntities
 from .oasis_profile_generator import OasisProfileGenerator, OasisAgentProfile
 from .simulation_config_generator import SimulationConfigGenerator, SimulationParameters
@@ -256,6 +257,8 @@ class SimulationManager:
         selected_entity_ids: Optional[List[str]] = None,
         max_graph_nodes: Optional[int] = None,
         max_graph_edges: Optional[int] = None,
+        cancellation_check: Optional[Callable[[], None]] = None,
+        begin_finalization: Optional[Callable[[], None]] = None,
     ) -> SimulationState:
         """
         准备模拟环境（全程自动化）
@@ -275,6 +278,8 @@ class SimulationManager:
             use_llm_for_profiles: 是否使用LLM生成详细人设
             progress_callback: 进度回调函数 (stage, progress, message)
             parallel_profile_count: 并行生成人设的数量，默认3
+            cancellation_check: 可选的协作取消检查
+            begin_finalization: 写入最终配置前原子关闭取消入口
             
         Returns:
             SimulationState
@@ -290,31 +295,58 @@ class SimulationManager:
         if state.enable_twitter:
             self._get_simulation_path(simulation_id, "twitter_profiles.csv")
 
-        # A selected local cast may have changed since HTTP admission. Resolve
-        # it completely before clearing saved flags or constructing generators.
-        selected = None
-        if selected_entity_ids is not None:
-            from .preparation_plan import validate_planned_request
-            options = validate_planned_request({
-                "simulation_id": simulation_id, "preparation_mode": "prepare",
-                "selected_entity_ids": selected_entity_ids,
-                "use_llm_for_profiles": use_llm_for_profiles,
-                "parallel_profile_count": parallel_profile_count,
-            })
-            parallel_profile_count = options["parallel_profile_count"]
-            selected = ZepEntityReader().filter_defined_entities(
-                graph_id=state.graph_id, defined_entity_types=defined_entity_types,
-                enrich_with_edges=use_llm_for_profiles, selected_entity_ids=options["selected_entity_ids"],
-                max_nodes=max_graph_nodes, max_edges=max_graph_edges,
-            )
+        def checkpoint():
+            if cancellation_check is not None:
+                cancellation_check()
 
+        def persist(operation, *args, **kwargs):
+            try:
+                return operation(*args, **kwargs)
+            except Exception as error:
+                if cancellation_check is not None:
+                    # Preserve the actual failure while distinguishing writes
+                    # from ordinary generation/read failures for the owner.
+                    error.preparation_write_uncertain = True
+                raise
+
+        preparation_started = False
         try:
+            checkpoint()
+            from .preparation_cancellation import assert_not_blocked
+            try:
+                assert_not_blocked(simulation_id)
+            except Exception:
+                # A live cancel may have written its marker after the first
+                # checkpoint. Let its controller classify that accepted race.
+                checkpoint()
+                raise
+            # A selected local cast may have changed since HTTP admission.
+            # Resolve it before clearing saved flags or constructing generators.
+            selected = None
+            if selected_entity_ids is not None:
+                from .preparation_plan import validate_planned_request
+                options = validate_planned_request({
+                    "simulation_id": simulation_id, "preparation_mode": "prepare",
+                    "selected_entity_ids": selected_entity_ids,
+                    "use_llm_for_profiles": use_llm_for_profiles,
+                    "parallel_profile_count": parallel_profile_count,
+                })
+                parallel_profile_count = options["parallel_profile_count"]
+                checkpoint()
+                selected = ZepEntityReader().filter_defined_entities(
+                    graph_id=state.graph_id, defined_entity_types=defined_entity_types,
+                    enrich_with_edges=use_llm_for_profiles, selected_entity_ids=options["selected_entity_ids"],
+                    max_nodes=max_graph_nodes, max_edges=max_graph_edges,
+                )
+                checkpoint()
+
+            preparation_started = True
             state.status = SimulationStatus.PREPARING
             state.error = None
             state.profiles_generated = False
             state.config_generated = False
             state.config_reasoning = ""
-            self._save_simulation_state(state)
+            persist(self._save_simulation_state, state)
             
             # ========== 阶段1: 读取并过滤实体 ==========
             if progress_callback:
@@ -325,11 +357,13 @@ class SimulationManager:
 
             filtered = selected
             if filtered is None:
+                checkpoint()
                 filtered = ZepEntityReader().filter_defined_entities(
                     graph_id=state.graph_id,
                     defined_entity_types=defined_entity_types,
                     enrich_with_edges=True,
                 )
+                checkpoint()
             
             from ..local_runtime.oasis import validate_agent_count
             validate_agent_count(filtered.filtered_count)
@@ -349,7 +383,7 @@ class SimulationManager:
             if filtered.filtered_count == 0:
                 state.status = SimulationStatus.FAILED
                 state.error = "没有找到符合条件的实体，请检查图谱是否正确构建"
-                self._save_simulation_state(state)
+                persist(self._save_simulation_state, state)
                 raise ValueError(state.error)
             
             # ========== 阶段2: 生成Agent Profile ==========
@@ -364,9 +398,13 @@ class SimulationManager:
                 )
             
             # 传入graph_id以启用Zep检索功能，获取更丰富的上下文
+            checkpoint()
             generator = OasisProfileGenerator(graph_id=state.graph_id)
             
             def profile_progress(current, total, msg):
+                if cancellation_check is not None:
+                    # A collected, saved profile remains inspectable on cancel.
+                    state.profiles_count = current
                 if progress_callback:
                     progress_callback(
                         "generating_profiles", 
@@ -387,6 +425,10 @@ class SimulationManager:
                 realtime_output_path = self._get_simulation_path(simulation_id, "twitter_profiles.csv")
                 realtime_platform = "twitter"
             
+            checkpoint()
+            profile_options = {}
+            if cancellation_check is not None:
+                profile_options["cancellation_check"] = cancellation_check
             profiles = generator.generate_profiles_from_entities(
                 entities=filtered.entities,
                 use_llm=use_llm_for_profiles,
@@ -394,12 +436,14 @@ class SimulationManager:
                 graph_id=state.graph_id,  # 传入graph_id用于Zep检索
                 parallel_count=parallel_profile_count,  # 并行生成数量
                 realtime_output_path=realtime_output_path,  # 实时保存路径
-                output_platform=realtime_platform  # 输出格式
+                output_platform=realtime_platform,  # 输出格式
+                **profile_options,
             )
             
             state.profiles_count = len(profiles)
+            checkpoint()
             state.profiles_generated = len(profiles) > 0
-            self._save_simulation_state(state)
+            persist(self._save_simulation_state, state)
             
             # 保存Profile文件（注意：Twitter使用CSV格式，Reddit使用JSON格式）
             # Reddit 已经在生成过程中实时保存了，这里再保存一次确保完整性
@@ -412,15 +456,19 @@ class SimulationManager:
                 )
             
             if state.enable_reddit:
-                generator.save_profiles(
+                checkpoint()
+                persist(
+                    generator.save_profiles,
                     profiles=profiles,
                     file_path=self._get_simulation_path(simulation_id, "reddit_profiles.json"),
                     platform="reddit"
                 )
             
             if state.enable_twitter:
+                checkpoint()
                 # Twitter使用CSV格式！这是OASIS的要求
-                generator.save_profiles(
+                persist(
+                    generator.save_profiles,
                     profiles=profiles,
                     file_path=self._get_simulation_path(simulation_id, "twitter_profiles.csv"),
                     platform="twitter"
@@ -435,6 +483,7 @@ class SimulationManager:
                 )
             
             # ========== 阶段3: LLM智能生成模拟配置 ==========
+            checkpoint()
             if progress_callback:
                 progress_callback(
                     "generating_config", 0,
@@ -443,6 +492,7 @@ class SimulationManager:
                     total=3
                 )
             
+            checkpoint()
             config_generator = SimulationConfigGenerator()
             
             if progress_callback:
@@ -453,6 +503,12 @@ class SimulationManager:
                     total=3
                 )
             
+            checkpoint()
+            config_options = {}
+            if cancellation_check is not None:
+                # Config progress is reported outside each stage's retry and
+                # fallback handling, so cancellation stops the next stage.
+                config_options["progress_callback"] = lambda *_args: checkpoint()
             sim_params = config_generator.generate_config(
                 simulation_id=simulation_id,
                 project_id=state.project_id,
@@ -461,8 +517,16 @@ class SimulationManager:
                 document_text=document_text,
                 entities=filtered.entities,
                 enable_twitter=state.enable_twitter,
-                enable_reddit=state.enable_reddit
+                enable_reddit=state.enable_reddit,
+                **config_options,
             )
+
+            # This gate owns the race with cancellation. No further cooperative
+            # checks run after it closes admission to final config publication.
+            if begin_finalization is not None:
+                begin_finalization()
+            else:
+                checkpoint()
             
             if progress_callback:
                 progress_callback(
@@ -474,8 +538,12 @@ class SimulationManager:
             
             # 保存配置文件
             config_path = self._get_simulation_path(simulation_id, "simulation_config.json")
-            with open(config_path, 'w', encoding='utf-8') as f:
-                f.write(sim_params.to_json())
+
+            def save_config():
+                with open(config_path, 'w', encoding='utf-8') as f:
+                    f.write(sim_params.to_json())
+
+            persist(save_config)
             
             state.config_generated = True
             state.config_reasoning = sim_params.generation_reasoning
@@ -493,20 +561,32 @@ class SimulationManager:
             
             # 更新状态
             state.status = SimulationStatus.READY
-            self._save_simulation_state(state)
+            persist(self._save_simulation_state, state)
             
             logger.info(f"模拟准备完成: {simulation_id}, "
                        f"entities={state.entities_count}, profiles={state.profiles_count}")
             
             return state
             
+        except PreparationCancelled:
+            state.status = SimulationStatus.CREATED
+            state.error = None
+            state.profiles_generated = False
+            state.config_generated = False
+            state.config_reasoning = ""
+            # Do not disguise a storage failure as a completed cancellation;
+            # the owner must keep its cleanup blocker until persistence succeeds.
+            persist(self._save_simulation_state, state)
+            raise
         except Exception as e:
+            if not preparation_started:
+                raise
             logger.error(f"模拟准备失败: {simulation_id}, error={str(e)}")
             import traceback
             logger.error(traceback.format_exc())
             state.status = SimulationStatus.FAILED
             state.error = str(e)
-            self._save_simulation_state(state)
+            persist(self._save_simulation_state, state)
             raise
     
     def get_simulation(self, simulation_id: str) -> Optional[SimulationState]:

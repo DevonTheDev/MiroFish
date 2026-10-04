@@ -98,6 +98,83 @@ embedding requests after graph construction. It does not use pretrained weights,
 or paid services. Native browser rendering, Windows behavior, real-model quality
 and useful simulation outcomes remain unverified.
 
+## Cancel local preparation
+
+Step 2 offers **Cancel preparation** for an exact, currently owned task started
+through **Prepare selected cast**. This is useful when you chose the wrong cast
+or want to stop spending local model time on a preparation. Cloud tasks, older
+legacy-local preparation calls and running simulations do not get this action.
+
+1. After the backend acknowledges the planned task, choose **Cancel
+   preparation**. The action refers to that task ID and simulation ID; changing
+   views does not retarget it to a replacement task.
+2. Keep observing while cancellation drains. Queued profiles and later
+   configuration stages stop. Work already running may finish, including that
+   profile's retrieval work or the current configuration stage's retries and
+   fallback. This does not terminate the model server or promise an immediate
+   stop to inference already in progress.
+3. When the task reports cancellation complete, its completed partial profile
+   files remain available for inspection. Start, reuse and regeneration of that
+   cancelled simulation are blocked. Return to the project's graph step and
+   create another simulation to prepare a new cast.
+
+Resource-dependent graph/entity/document preflight now runs inside the planned
+worker, so HTTP admission returns the task ID before those checks finish. Invalid
+or changed graph selections still fail before profile generation, but these
+errors are reported through the task. The initial expected cast count comes from
+the submitted unique IDs; authoritative entity details arrive during work.
+Static request, mode and resource-cap validation remain admission checks.
+
+There is a final publication boundary after configuration generation. If
+cancellation wins that boundary, the task cannot publish a READY preparation.
+If finalization has already won, cancellation is too late; the view keeps
+observing the normal completion or failure. A request being accepted is distinct
+from cancellation having finished. The task keeps ownership until active work,
+state/artifact writes and graph-reader cleanup have finished. A cleanup or
+durable-outcome failure remains a blocker rather than being reported as success.
+
+An accepted cancellation atomically creates the bounded
+`preparation_cancellation.json` record in that simulation's directory. It records
+only a schema version, exact task/simulation IDs, cancellation phase, timestamps
+and progress. It contains no prompts, profiles or credentials. Readiness,
+prepare/reuse, force-regeneration and execution-start paths consult this record,
+including direct manager/runner entry points. Changing backend mode does not
+make cancelled artifacts runnable. Unsafe or corrupt cancellation records fail
+closed. A still-draining cancellation whose live owner is lost
+after restart is unavailable/interrupted; it is not reconstructed as a running
+task or silently cleared. Normal uncancelled preparations create no persistent
+job record in this increment.
+
+The record remains with the cancelled simulation. This feature does not delete
+partial files, resume work or provide a marker-removal/recovery operation. Use a
+new simulation ID for another attempt. These controls coordinate one backend
+process, like existing preparation ownership; they are not distributed locks or
+a filesystem sandbox against a hostile local writer.
+
+`POST /api/simulation/prepare/cancel` accepts exactly `simulation_id` and
+`task_id`, with no query parameters and a 16 KiB strict JSON body limit. Unknown
+fields, duplicate keys, nonfinite values and mismatched task ownership are
+refused. Repeating the same accepted request is idempotent. The response
+separates acceptance from `preparing`, `cancelling`, `finalizing`, `cancelled`,
+`ready`, `failed` and `unavailable` preparation phases. Passive plan/status reads
+observe this outcome before inferring readiness from saved files and do not
+initialize graph/model resources. An old or unrelated task ID cannot affect a
+new task.
+
+The view does not retry a cancellation POST automatically. If its reply is lost,
+status observation establishes the current task outcome; an explicit retry uses
+the same owned ID only when still allowed. Navigation or HTTP abort retires the
+view's observation, without undoing a cancellation already accepted by the
+backend. Reload observes the owned task or its persistent block. Partial or late
+profile/configuration replies cannot turn a cancelled view into a ready one.
+
+Local tests use real preparation managers, profile pools and configuration-stage
+callbacks with synthetic graph/model boundaries. Linked Flask, production Axios
+and compiled Vue tests cover drain, a lost successful cancellation reply and a
+late request losing to finalization. Files and services are disposable; no model
+weights, paid inference or hosted tests are used. Native browser layout, Windows
+behavior and real-model cancellation latency remain unverified.
+
 ## Revisit saved reports
 
 Choose **Saved reports** on Home, or open `/reports`. This independent library

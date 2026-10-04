@@ -401,6 +401,10 @@ class SimulationRunner:
         # under one lock. Expensive updater/process startup happens afterward;
         # the persisted STARTING state keeps concurrent owners out.
         with admission:
+            from . import preparation_cancellation
+            preparation_cancellation.assert_not_blocked(simulation_id)
+            # A relocated runner still guards the directory it actually reads.
+            preparation_cancellation.assert_not_blocked(simulation_id, run=True)
             if Config.LOCAL_MODE:
                 preparation_plan.assert_idle_locked(simulation_id)
                 config_path = preparation_plan._path(

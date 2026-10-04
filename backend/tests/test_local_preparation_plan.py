@@ -26,6 +26,8 @@ def local(tmp_path, monkeypatch):
     monkeypatch.setattr(SimulationManager, "SIMULATION_DATA_DIR", str(root))
     monkeypatch.setattr(SimulationRunner, "RUN_STATE_DIR", str(root))
     monkeypatch.setattr(ProjectManager, "PROJECTS_DIR", str(projects))
+    from app.services import preparation_cancellation
+    monkeypatch.setattr(preparation_cancellation, "_controllers", {})
     monkeypatch.setattr(TaskManager, "_instance", None)
     monkeypatch.setattr(SimulationRunner, "_run_states", {})
     monkeypatch.setattr(SimulationRunner, "_processes", {})
@@ -383,7 +385,7 @@ def test_selected_prepare_admission_is_atomic_and_passes_exact_order(local, grap
     assert response.json["data"]["expected_entities_count"] == 2
     assert len(threads) == 1
     assert post(local, selected_entity_ids=["node_2"]).status_code == 409
-    assert get_graph_readers("graph_fixture")
+    assert not get_graph_readers("graph_fixture")
     threads[0].target()
     assert captured[0]["selected_entity_ids"] == ["node_4", "node_1"]
     assert captured[0]["use_llm_for_profiles"] is False
@@ -419,7 +421,7 @@ def test_worker_revalidates_changed_selection_before_model_work(local, graph, th
     task = TaskManager().get_task(response.json["data"]["task_id"])
     assert task.status.value == "failed"
     assert json.loads((local.root / "sim_fixture" / "state.json").read_text())["status"] == "failed"
-    assert len(calls) == 2
+    assert len(calls) == 1
 
 
 def test_worker_ownership_lasts_through_failure_save_and_lease_cleanup(local, graph, threads, monkeypatch):

@@ -1668,7 +1668,21 @@
       "blocked": "Busy",
       "preparing": "Preparing",
       "ready": "Ready",
+      "cancelled": "Cancelled",
       "error": "Needs attention"
-    }
+    },
+    "cancel": "Cancel preparation",
+    "cancelHint": "Stops queued profiles and later stages. Work already running may finish.",
+    "preparationActive": "Preparation is running.",
+    "cancelPending": "Requesting cancellation…",
+    "cancelling": "Cancellation requested. Waiting for running work and cleanup to finish.",
+    "finalizing": "Preparation is finalizing. Cancellation is no longer available.",
+    "cancelled": "Preparation cancelled.",
+    "cancelledHint": "Partial files remain for inspection. To try again, return to the project and create another simulation.",
+    "cancelUnavailable": "Cleanup is blocked or preparation ownership is unavailable. This simulation cannot be prepared, reused, or started.",
+    "cancelTooLate": "Preparation is already finalizing, so cancellation was too late. Waiting for the result.",
+    "cancelUnknown": "Could not confirm the cancellation request. Checking task status before another attempt.",
+    "cancelRetryAvailable": "The latest task status still allows cancellation. You can retry cancellation.",
+    "cancelRetry": "Retry cancellation"
   }
 }

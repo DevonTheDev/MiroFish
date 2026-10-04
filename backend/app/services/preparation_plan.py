@@ -25,6 +25,8 @@ from ..utils.logger import get_logger
 from ..utils.locale import get_locale, set_locale
 from ..utils.zep_lifecycle import graph_lifecycle_lock, register_graph_reader, unregister_graph_reader
 from . import simulation_comparison as saved
+from . import preparation_cancellation as cancellation
+from ..utils.preparation_cancellation import PreparationCancelled
 from .simulation_manager import SimulationManager, SimulationStatus
 from .simulation_runner import SimulationRunner
 from .zep_graph_memory_updater import ZepGraphMemoryManager
@@ -43,6 +45,10 @@ _ID = re.compile(r"[A-Za-z0-9_-]{1,128}\Z")
 logger = get_logger("mirofish.preparation_plan")
 
 _ERRORS = {
+    "preparation_task_mismatch": (409, "The task does not own this planned preparation."),
+    "preparation_cancelled": (409, "This preparation was cancelled or interrupted. Create another simulation to try again."),
+    "cancellation_unavailable": (409, "Preparation cancellation or cleanup could not be verified. Create another simulation to try again."),
+    "cancellation_request_too_large": (413, "The cancellation request exceeds 16 KiB."),
     "invalid_request": (400, "Use the supported JSON fields and no query parameters."),
     "invalid_simulation_id": (400, "The simulation ID is invalid."),
     "invalid_selection": (400, "Choose a nonempty, unique cast within the local agent limit."),
@@ -300,11 +306,16 @@ def inspect_artifacts(simulation_id, state, current_limits=None):
 def active_prepare_tasks(simulation_id):
     """Look at an existing task owner without creating a task manager."""
     manager = TaskManager._instance
-    if manager is None:
-        return []
-    return [task for task in manager.list_tasks("simulation_prepare")
-            if task["metadata"].get("simulation_id") == simulation_id
-            and task["status"] in {"pending", "processing"}]
+    tasks = [task for task in manager.list_tasks("simulation_prepare")
+             if task["metadata"].get("simulation_id") == simulation_id
+             and task["status"] in {"pending", "processing"}] if manager else []
+    # The exact controller retains admission if terminal publication is
+    # uncertain, even if task metadata was already updated or cleaned up.
+    controller = cancellation._live_for_simulation(simulation_id)
+    if controller and not any(task["task_id"] == controller.task_id for task in tasks):
+        tasks.append({"task_id": controller.task_id, "status": "processing",
+                      "metadata": {"simulation_id": simulation_id, "local_planned": True}})
+    return tasks
 
 
 def _peek_updaters():
@@ -357,6 +368,7 @@ def admission_lock(simulation_id):
 
 
 def assert_idle_locked(simulation_id, *, exclude_task_id=None):
+    cancellation.assert_not_blocked(simulation_id)
     owner = owner_locked(simulation_id, exclude_task_id=exclude_task_id)
     if owner["busy"]:
         raise PlanningError(owner["reason_code"])
@@ -371,10 +383,17 @@ def get_plan(simulation_id):
             owner = owner_locked(simulation_id)
     except PlanningError as error:
         owner = {"busy": True, "reason_code": error.code, "task_id": None}
-    prepared = inspect_artifacts(simulation_id, state, current)
-    allowed = Config.LOCAL_MODE and current["valid"] and not owner["busy"]
+    blocked = cancellation.cancellation_state(simulation_id)
+    try:
+        preparation_task = cancellation.observe(simulation_id)
+    except PlanningError:
+        preparation_task = None
+    prepared = ({"available": False, "reason_code": blocked["reason_code"], "info": None}
+                if blocked["blocked"] else inspect_artifacts(simulation_id, state, current))
+    allowed = Config.LOCAL_MODE and current["valid"] and not owner["busy"] and not blocked["blocked"]
     return {"simulation_id": simulation_id, "mode": "local" if Config.LOCAL_MODE else "cloud",
             "status": state.get("status", "created"), "limits": current, "owner": owner,
+            "preparation_task": preparation_task, "cancellation": blocked,
             "prepared": prepared, "can_prepare": bool(allowed and not _previously_prepared(state)
                                                       and not prepared["available"]),
             "can_reuse": bool(allowed and prepared["available"])}
@@ -412,71 +431,126 @@ def planned_prepare(data):
         task_id = task_manager.create_task("simulation_prepare", metadata={
             "simulation_id": simulation_id, "project_id": state.get("project_id"), "local_planned": True})
 
-    lease = None
-    lease_entered = False
-    try:
-        lease = _graph_lease(state, f"prepare:{simulation_id}:{task_id}")
-        project = lease.__enter__()
-        lease_entered = True
-        selected = _read_entities(state, options["selected_entity_ids"])
-        document = _read_document(state)
-        current_locale = get_locale()
+        controller = cancellation.register(simulation_id, task_id)
+    current_locale = get_locale()
 
-        def worker():
-            set_locale(current_locale)
-            failure = None
-            result = None
+    def finish(*, failure=None, result=None, cancelled=False, uncertain=False, lease=None, lease_entered=False):
+        if cancelled:
             try:
-                task_manager.update_task(task_id, status=TaskStatus.PROCESSING, message="Preparing the selected cast")
-                refreshed = read_state(simulation_id)
-                _project_for_graph(refreshed)
-                if refreshed.get("graph_id") != state.get("graph_id"):
-                    raise PlanningError("graph_changed")
-                validate_planned_request(options)
-                manager = SimulationManager()
-                result = manager.prepare_simulation(
-                    simulation_id=simulation_id, simulation_requirement=project["simulation_requirement"],
-                    document_text=document, selected_entity_ids=options["selected_entity_ids"],
-                    use_llm_for_profiles=options["use_llm_for_profiles"],
-                    parallel_profile_count=options["parallel_profile_count"],
-                    max_graph_nodes=MAX_NODES, max_graph_edges=MAX_EDGES,
-                    progress_callback=_progress_callback(task_manager, task_id))
-                if result.status == SimulationStatus.FAILED:
-                    raise PlanningError("preparation_unavailable")
-            except Exception as error:
-                failure = _safe_failure(error)
-                _save_failure(simulation_id, str(failure))
-            finally:
-                try:
-                    lease.__exit__(None, None, None)
-                except Exception:
-                    # Keep the pending owner if a graph lease could not be
-                    # released; claiming completion would permit unsafe reuse.
-                    task_manager.update_task(task_id, error=str(PlanningError("preparation_unavailable")),
-                                             message="Preparation cleanup could not finish")
-                    return
-                # The terminal task status is the ownership release. There
-                # must be no state, artifact, or lease writes after this point.
-                if failure is not None:
-                    task_manager.fail_task(task_id, str(failure))
-                else:
-                    task_manager.complete_task(task_id, result=result.to_simple_dict())
-
-        thread = Thread(target=worker, name=f"local-prepare-{simulation_id}", daemon=True)
-        thread.start()
-        return {"simulation_id": simulation_id, "task_id": task_id, "status": "preparing",
-                "already_prepared": False, "expected_entities_count": selected.filtered_count,
-                "entity_types": sorted(selected.entity_types), "selected_entity_ids": options["selected_entity_ids"]}
-    except Exception as error:
-        failure = _safe_failure(error)
+                _save_cancelled(simulation_id)
+            except Exception:
+                uncertain = True
+        elif failure is not None:
+            uncertain = not _save_failure(simulation_id, str(failure)) or uncertain
         if lease_entered:
             try:
                 lease.__exit__(None, None, None)
             except Exception:
-                task_manager.update_task(task_id, error=str(PlanningError("preparation_unavailable")))
-                raise PlanningError("preparation_unavailable") from None
-        task_manager.fail_task(task_id, str(failure))
+                uncertain = True
+        # No terminal status until every state/artifact/lease operation has
+        # succeeded. An uncertain owner stays admitted and non-runnable.
+        if uncertain or controller.phase == "unavailable":
+            controller.block()
+            task_manager.update_task(task_id, error=str(PlanningError("cancellation_unavailable")),
+                                     message="Preparation cleanup could not finish")
+            return
+        if cancelled:
+            try:
+                controller.finish_marker()
+            except Exception:
+                controller.block()
+                task_manager.update_task(task_id, message="Preparation cleanup could not finish")
+                return
+        try:
+            with SimulationRunner._finalization_lock(simulation_id):
+                if cancelled:
+                    task_manager.update_task(task_id, status=TaskStatus.COMPLETED,
+                        message="Preparation cancelled; partial files were kept",
+                        result={"simulation_id": simulation_id, "preparation_outcome": "cancelled"})
+                elif failure is not None:
+                    task_manager.update_task(task_id, status=TaskStatus.FAILED, error=str(failure),
+                        message=str(failure), result={"simulation_id": simulation_id,
+                        "preparation_outcome": "failed", "error_code": failure.code})
+                else:
+                    task_manager.complete_task(task_id, result={**result.to_simple_dict(), "preparation_outcome": "ready"})
+                cancellation.unregister(controller)
+        except Exception:
+            controller.block()
+
+    def worker():
+        set_locale(current_locale)
+        failure = None
+        result = None
+        lease = None
+        lease_entered = False
+        cancelled = False
+        uncertain = False
+        try:
+            controller.checkpoint()
+            task_manager.update_task(task_id, status=TaskStatus.PROCESSING, message="Preparing the selected cast")
+            refreshed = read_state(simulation_id)
+            controller.checkpoint()
+            if refreshed.get("graph_id") != state.get("graph_id"):
+                raise PlanningError("graph_changed")
+            validate_planned_request(options)
+            controller.checkpoint()
+            lease = _graph_lease(refreshed, f"prepare:{simulation_id}:{task_id}")
+            project = lease.__enter__()
+            lease_entered = True
+            controller.checkpoint()
+            _read_entities(refreshed, options["selected_entity_ids"])
+            controller.checkpoint()
+            document = _read_document(refreshed)
+            controller.checkpoint()
+            manager = SimulationManager()
+            result = manager.prepare_simulation(
+                simulation_id=simulation_id, simulation_requirement=project["simulation_requirement"],
+                document_text=document, selected_entity_ids=options["selected_entity_ids"],
+                use_llm_for_profiles=options["use_llm_for_profiles"],
+                parallel_profile_count=options["parallel_profile_count"],
+                max_graph_nodes=MAX_NODES, max_graph_edges=MAX_EDGES,
+                progress_callback=_progress_callback(task_manager, task_id),
+                cancellation_check=controller.checkpoint, begin_finalization=controller.begin_finalization)
+            controller.checkpoint()
+            if result.status == SimulationStatus.FAILED:
+                raise PlanningError("preparation_unavailable")
+            controller.begin_finalization()
+        except PreparationCancelled:
+            cancelled = True
+        except Exception as error:
+            failure = _safe_failure(error)
+            with controller._lock:
+                cancelled = controller.cancellation_requested
+                if not cancelled and controller.phase == "preparing":
+                    controller.phase = "finalizing"
+            uncertain = (isinstance(error, OSError)
+                         or bool(getattr(error, "preparation_write_uncertain", False)))
+        finally:
+            finish(failure=failure, result=result, cancelled=cancelled, uncertain=uncertain,
+                   lease=lease, lease_entered=lease_entered)
+
+    try:
+        thread = Thread(target=worker, name=f"local-prepare-{simulation_id}", daemon=True)
+        thread.start()
+    except Exception as error:
+        failure = _safe_failure(error)
+        with controller._lock:
+            cancelled = controller.cancellation_requested
+            if not cancelled and controller.phase == "preparing":
+                controller.phase = "finalizing"
+        finish(failure=failure, cancelled=cancelled)
         raise failure from None
+    return {"simulation_id": simulation_id, "task_id": task_id, "status": "preparing",
+            "already_prepared": False, "expected_entities_count": len(options["selected_entity_ids"]),
+            "entity_types": [], "selected_entity_ids": options["selected_entity_ids"],
+            "preparation_task": cancellation.observe(simulation_id, task_id)}
+
+
+def _save_cancelled(simulation_id):
+    state = read_state(simulation_id)
+    state.update(status="created", profiles_generated=False, config_generated=False,
+                 config_reasoning="", error=None, updated_at=datetime.now().isoformat())
+    write_json_atomic(_path(simulation_id, "state.json"), state, logger=logger)
 
 
 def _previously_prepared(state):
@@ -623,8 +697,11 @@ def _save_failure(simulation_id, message):
             state.status = SimulationStatus.FAILED
             state.error = message
             manager._save_simulation_state(state)
+            return True
+        return False
     except Exception:
         logger.warning("Could not persist preparation failure for %s", simulation_id)
+        return False
 
 
 def _progress_callback(task_manager, task_id):

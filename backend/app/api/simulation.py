@@ -324,6 +324,8 @@ def _check_simulation_prepared(simulation_id: str, *, _lock_held=False) -> tuple
     import json
 
     try:
+        from ..services import preparation_cancellation
+        preparation_cancellation.assert_not_blocked(simulation_id)
         if Config.LOCAL_MODE:
             from ..services import preparation_plan
             if not _lock_held:
@@ -480,6 +482,12 @@ def prepare_simulation():
                 "error": t('api.requireSimulationId')
             }), 400
         
+        try:
+            from ..services import preparation_cancellation
+            preparation_cancellation.assert_not_blocked(simulation_id)
+        except Exception as error:
+            return _planning_response(error=error)
+
         manager = SimulationManager()
         state = manager.get_simulation(simulation_id)
         
@@ -744,6 +752,16 @@ def prepare_simulation():
             TaskManager().fail_task(local_claimed_task, "Preparation could not start")
 
 
+@simulation_bp.route('/prepare/cancel', methods=['POST'])
+def cancel_prepare():
+    from ..services import preparation_cancellation
+    try:
+        data = preparation_cancellation.read_request(request)
+        return _planning_response(preparation_cancellation.cancel(data))
+    except Exception as error:
+        return _planning_response(error=error)
+
+
 @simulation_bp.route('/prepare/status', methods=['POST'])
 def get_prepare_status():
     """
@@ -779,7 +797,23 @@ def get_prepare_status():
         
         task_id = data.get('task_id')
         simulation_id = data.get('simulation_id')
-        
+
+        from ..services import preparation_cancellation
+        try:
+            projection = preparation_cancellation.observe(simulation_id, task_id)
+            if projection is not None:
+                return _planning_response(projection)
+        except Exception as error:
+            return _planning_response(error=error)
+        if Config.LOCAL_MODE and task_id:
+            # An explicit task observation must not be replaced by unrelated
+            # artifact readiness, including an unknown or legacy task ID.
+            existing = TaskManager._instance
+            exact = existing.get_task(task_id) if existing else None
+            if exact is None:
+                return jsonify({"success": False, "error": t('api.taskNotFound', id=task_id)}), 404
+            return _planning_response({**exact.to_dict(), "already_prepared": False})
+
         # 如果提供了simulation_id，先检查是否已准备完成
         if simulation_id:
             is_prepared, prepare_info = _check_simulation_prepared(simulation_id)
@@ -1718,6 +1752,12 @@ def start_simulation():
                 "success": False,
                 "error": t('api.requireSimulationId')
             }), 400
+
+        try:
+            from ..services import preparation_cancellation
+            preparation_cancellation.assert_not_blocked(simulation_id)
+        except Exception as error:
+            return _planning_response(error=error)
 
         platform = data.get('platform', 'parallel')
         max_rounds = data.get('max_rounds')  # 可选：最大模拟轮数

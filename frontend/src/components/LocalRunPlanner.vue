@@ -10,13 +10,22 @@
     <template v-if="plan?.mode === 'local'">
       <p v-if="limitsValid" class="limits">{{ $t('localPlan.limits', { agents: plan.limits.max_agents, selectable: plan.limits.max_selectable_agents, rounds: plan.limits.max_rounds, concurrency: plan.limits.max_concurrency }) }}</p>
       <p v-else class="planner-error">{{ $t('localPlan.invalidLimits') }}</p>
+      <div v-if="cancellationStatus" data-testid="preparation-cancellation-status" role="status" aria-live="polite" aria-atomic="true">
+        <p>{{ $t(cancellationStatus) }}</p>
+        <p v-if="cancellationBlocked" class="hint">{{ $t('localPlan.cancelledHint') }}</p>
+      </div>
+      <template v-if="showCancel">
+        <p id="preparation-cancel-hint" class="hint">{{ $t('localPlan.cancelHint') }}</p>
+        <button data-testid="cancel-preparation" type="button" :disabled="!canCancel" aria-describedby="preparation-cancel-hint"
+          :onClick="cancelAction">{{ $t(cancelRetry ? 'localPlan.cancelRetry' : 'localPlan.cancel') }}</button>
+      </template>
       <p v-if="plan.owner?.busy" role="status">{{ $t(plan.owner.reason_code === 'preparation_busy' && plan.owner.task_id ? 'localPlan.observing' : 'localPlan.busyError') }}</p>
-      <template v-if="plan.prepared?.available">
+      <template v-if="!cancellationBlocked && plan.prepared?.available">
         <p>{{ $t('localPlan.saved', { count: plan.prepared.info?.profiles_count ?? '—' }) }}</p>
         <p class="hint">{{ $t('localPlan.savedHint') }}</p>
         <button v-if="!complete" data-testid="reuse-preparation" type="button" :disabled="!canReuse" @click="$emit('reuse')">{{ $t('localPlan.reuse') }}</button>
       </template>
-      <template v-else-if="!complete">
+      <template v-else-if="!complete && !cancellationBlocked">
         <p class="hint">{{ $t('localPlan.loadHint') }}</p>
         <button data-testid="load-cast" type="button" :disabled="!canPrepare" @click="$emit('load')">{{ $t(loadingCast ? 'localPlan.loading' : 'localPlan.load') }}</button>
         <p v-if="limitsValid && !plan.can_prepare && !plan.owner?.busy" class="hint">{{ $t('localPlan.savedError') }}</p>
@@ -63,7 +72,8 @@ import { computed } from 'vue'
 const props = defineProps({ plan: Object, checking: Boolean, waiting: Boolean, busy: Boolean, error: String,
   limitsValid: Boolean, canPrepare: Boolean, canReuse: Boolean, loadingCast: Boolean, catalogLoaded: Boolean,
   entities: { type: Array, default: () => [] }, selectedIds: { type: Array, default: () => [] },
-  typeFilter: String, useLlm: Boolean, complete: Boolean })
+  typeFilter: String, useLlm: Boolean, complete: Boolean, cancellationStatus: String,
+  cancellationBlocked: Boolean, showCancel: Boolean, canCancel: Boolean, cancelRetry: Boolean, cancelAction: Function })
 defineEmits(['refresh', 'load', 'select', 'filter', 'profile-mode', 'prepare', 'reuse'])
 const types = computed(() => [...new Set(props.entities.map(entity => entity.entity_type))].sort())
 const filteredEntities = computed(() => props.entities.filter(entity => !props.typeFilter || entity.entity_type === props.typeFilter))
