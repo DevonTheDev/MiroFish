@@ -1393,8 +1393,14 @@
     "validation": "Complete a suite name and 1–5 valid cases. Each case needs a label and user prompt; temperature must be 0–1 and the output limit an integer from 1–512. JSON fields needs 1–10 distinct valid names with a type chosen for every field. Prompt, name and expected-reply bounds are shown above.",
     "capExceeded": "At least one case exceeds the currently loaded output limit of {cap} tokens. Reduce it before running; the definition can still be downloaded.",
     "run": "Run suite once",
+    "pause": "Pause scheduling",
+    "resume": "Resume scheduling",
     "stop": "Stop scheduling",
     "runNote": "Run captures the current definition, checks readiness, and submits each case at most once. A new explicit run replaces the previous report only after readiness is confirmed.",
+    "pauseNote": "Pause holds later model requests while any already accepted case is still observed. Resume scheduling rechecks readiness and continues the captured cases with their original limits; current draft edits and imports do not change them.",
+    "pausePending": "Pause requested. Waiting for the current request to settle; any accepted case is still observed, and later model requests are held. Resume becomes available once scheduling is paused.",
+    "pausedNote": "Scheduling paused. Resume scheduling continues the remaining captured cases after a fresh readiness check. Stop scheduling ends this run.",
+    "pauseSessionNote": "Pause applies only to this open page and is not a saved restart checkpoint. A downloaded paused report remains an unfinished Running capture. Leaving or reloading this page ends its scheduling; accepted backend work may continue.",
     "stopNote": "Stop scheduling prevents further cases from starting. An already accepted case may keep running; observation continues where possible. It does not cancel backend computation.",
     "resultsTitle": "Captured run",
     "exportRun": "Download captured run",
@@ -1414,6 +1420,7 @@
       "submitting": "Submitting one case…",
       "observing": "Observing the accepted case…",
       "waiting": "Waiting before the next observation or case…",
+      "paused": "Paused",
       "reconciling": "Reconciling the unresolved case…",
       "disposed": "Observation ended"
     },
@@ -1464,6 +1471,13 @@
       "observation_limit": "The bounded observation window ended. Reconcile the unresolved case explicitly.",
       "invalid_identity": "A valid unique request identity could not be prepared. No additional cases will start.",
       "runtime_failed": "This case did not complete successfully. Remaining cases were not attempted."
+    },
+    "resumeErrors": {
+      "read_failed": "Readiness could not be read. Scheduling stays paused. Choose Resume scheduling to retry the check.",
+      "invalid_observation": "The readiness response was not valid. Scheduling stays paused. Choose Resume scheduling to retry the check.",
+      "backend_unavailable": "The local trial runner is unavailable. Scheduling stays paused. Check its configuration, then choose Resume scheduling to recheck readiness.",
+      "backend_running": "Another trial is running. Scheduling stays paused. When it finishes, choose Resume scheduling to recheck readiness.",
+      "loaded_cap": "A captured case exceeds the loaded output limit. Scheduling stays paused. Restore a sufficient limit and choose Resume scheduling, or stop and start a new run with edited limits. Draft edits cannot change this run."
     },
     "checkKind": "Check kind",
     "checkKinds": {

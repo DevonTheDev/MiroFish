@@ -625,6 +625,41 @@ No real model
 weights, GPU quality/performance, native browser rendering/headers or Windows
 behavior is established by these tests.
 
+### Pause and resume suite scheduling
+
+During a captured run, choose **Pause scheduling** to hold future cases. If a
+case is already accepted or its Start response is uncertain, the page continues
+its existing exact-request observation until the outcome is known. The display
+distinguishes a pending pause from **Paused**. A failed, refused, truncated or
+unknown case still halts the suite; a successful final case completes normally.
+
+Once paused, this controller has no polling or scheduling timer and issues no
+trial requests. **Resume scheduling** waits the normal between-case interval,
+then checks current backend availability and all captured output-token limits
+before submitting the next unattempted case. A failed readiness check leaves the
+suite paused with an error so you can retry Resume explicitly. A changed cap may
+require **Stop scheduling** and a new suite with smaller requests.
+
+Resume retains the same run, case order, prompts, checks and preallocated request
+identities. Editing or importing another draft while paused does not change those
+captured cases. New Run and Refresh remain disabled while the suite is paused;
+Stop stays available and permanently ends its remaining scheduling. Repeated or
+retired controls cannot launch another copy of a case.
+
+Pause does not cancel an accepted inference, unload the model or suspend work
+started elsewhere. Leaving or reloading the page discards its ability to resume.
+Downloaded run reports keep their existing v1/v2/v3 format: a paused capture is
+an unfinished `running` observation with no finish time and remaining cases
+marked `not_attempted`. These files contain no restart checkpoint; reopening a
+report for comparison or case reuse does not resume its execution.
+
+Local tests cover pending admission and observation, readiness races, exact-ID
+reconciliation, paused exports, retry, Stop, disposal and stale controls. Actual
+Flask, Vite, gateway, Axios and compiled Vue tests count synthetic local model
+requests through pause/resume and verify that later draft edits never change the
+captured run. No real weights, GPU performance, native browser or Windows behavior
+is established by these checks.
+
 ### Require JSON fields
 
 Choose **JSON fields** to check whether a local model's reply contains the

@@ -17,7 +17,10 @@ export function createPromptSuiteRunner(options = {}) {
   let disposed = false, generation = 0, request = null, timer = null, active = null
   const usedIds = new Set()
   const stamp = () => new Date(now()).toISOString()
-  const getState = () => copy(state)
+  const controllable = () => !disposed && active?.captured && active.automatic && !active.stop && state.report?.status === 'running'
+  const canResume = () => !!(controllable() && active.pause && state.phase === 'paused' && !active.owner && request === null && timer === null)
+  const getState = () => copy({ ...state, pause_requested: !!(controllable() && active.pause),
+    can_pause: !!(controllable() && !active.pause), can_resume: canResume() })
   const emit = () => { if (!disposed) options.onChange?.(getState()) }
   const alive = expected => !disposed && generation === expected
   const owned = expected => alive(expected) && active !== null && active.generation === expected
@@ -50,6 +53,11 @@ export function createPromptSuiteRunner(options = {}) {
     if (active) active.automatic = false
     idle(code)
   }
+  function park(code = null) {
+    if (!controllable() || active.owner || request !== null) return
+    clearTimer(); active.pause = true; active.resuming = false
+    state.phase = 'paused'; state.busy = true; state.error_code = code; emit()
+  }
   function unknown(code) {
     const row = state.report.cases[active.index]
     row.status = 'unknown'; row.check = 'not_evaluated'; row.error_code = code
@@ -79,6 +87,7 @@ export function createPromptSuiteRunner(options = {}) {
     if (!owned(expected) || request !== null) return
     clearTimer()
     if (!observeOwned && active.stop) { finish('stopped'); return }
+    if (!observeOwned && active.pause) { park(); return }
     if (observeOwned && active.polls >= MAX_POLLS) { unknown('observation_limit'); return }
     state.phase = 'waiting'; state.busy = true
     timer = later(() => {
@@ -86,6 +95,7 @@ export function createPromptSuiteRunner(options = {}) {
       if (!owned(expected) || request !== null) return
       if (observeOwned) { active.polls++; observe(expected) }
       else if (active.stop) finish('stopped')
+      else if (active.pause) park()
       else continueRun(expected)
     }, POLL_MS)
     emit()
@@ -125,14 +135,20 @@ export function createPromptSuiteRunner(options = {}) {
   }
   async function submit(expected) {
     if (!owned(expected) || active.stop) { if (owned(expected)) finish('stopped'); return }
+    if (active.pause) { park(); return }
     const index = active.index, row = state.report.cases[index]
     active.owner = { request: active.requests[index], fingerprint: null }; active.polls = 0
     row.request_id = active.owner.request.request_id; row.status = 'submitting'
     state.latest_stale = true
-    const result = await issue('startPromptTrial', [active.owner.request], 'submitting', expected, () => owned(expected) && !active.stop)
+    const result = await issue('startPromptTrial', [active.owner.request], 'submitting', expected, () => owned(expected) && !active.stop && !active.pause)
     if (!owned(expected) || result.retired) return
     if (result.cancelled) {
-      row.request_id = null; row.status = 'not_attempted'; active.owner = null; finish('stopped'); return
+      // A synchronous notification can stop scheduling before the transport ran.
+      // Keep the preallocated request privately for its sole future admission.
+      row.request_id = null; row.status = 'not_attempted'; active.owner = null
+      if (active.stop) finish('stopped')
+      else park()
+      return
     }
     if (Object.hasOwn(result, 'failure')) {
       const failure = result.failure, code = failure?.response?.data?.error_code
@@ -150,14 +166,20 @@ export function createPromptSuiteRunner(options = {}) {
   }
   async function continueRun(expected) {
     if (!owned(expected) || active.stop) return
+    if (active.pause) { park(); return }
+    const revision = active.schedulingRevision
     state.latest_stale = true
-    const result = await issue('getPromptTrials', [], 'checking', expected)
+    const result = await issue('getPromptTrials', [], 'checking', expected, () => owned(expected) && !active.stop && !active.pause)
     if (!owned(expected) || result.retired) return
-    const code = latest(result)
     if (active.stop) { finish('stopped'); return }
+    // Pause also retires a settled GET whose continuation has not run yet. A
+    // subsequent Resume must wait for its own delay and fresh readiness read.
+    if (active.pause || active.schedulingRevision !== revision) { if (active.pause) park(); return }
+    const code = latest(result)
     const blocked = code ?? readiness(active.definition)
-    if (blocked) { finish('halted', blocked); return }
-    active.index++
+    if (blocked) { if (active.resuming) park(blocked); else finish('halted', blocked); return }
+    active.resuming = false
+    active.index = state.report.cases.findIndex(row => row.status === 'not_attempted')
     await submit(expected)
   }
   async function refresh() {
@@ -183,7 +205,8 @@ export function createPromptSuiteRunner(options = {}) {
       Object.freeze(definition.cases); Object.freeze(definition)
     } catch { state.error_code = 'invalid_definition'; emit(); return false }
     const expected = ++generation
-    active = { generation: expected, definition, stop: false, automatic: true, index: 0, owner: null, polls: 0, requests: null, captured: false }
+    active = { generation: expected, definition, stop: false, pause: false, resuming: false, schedulingRevision: 0,
+      automatic: true, index: 0, owner: null, polls: 0, requests: null, captured: false }
     clearTimer(); state.latest_stale = true; state.error_code = null
     const result = await issue('getPromptTrials', [], 'checking', expected)
     if (!owned(expected) || result.retired) return false
@@ -210,6 +233,23 @@ export function createPromptSuiteRunner(options = {}) {
     if (active.captured && !active.owner && request === null) finish('stopped')
     else emit()
   }
+  function pause(expectedRunId) {
+    if (!controllable() || active.pause || expectedRunId !== state.report.run_id) return false
+    active.pause = true; active.schedulingRevision++
+    // Accepted or uncertain inference still owns its exact-ID observation loop.
+    if (!active.owner) {
+      clearTimer()
+      if (request === null) { park(); return true }
+    }
+    emit()
+    return true
+  }
+  async function resume(expectedRunId) {
+    if (!canResume() || expectedRunId !== state.report.run_id) return false
+    active.pause = false; active.resuming = true; state.error_code = null
+    schedule(active.generation, false)
+    return true
+  }
   async function reconcile() {
     if (disposed || state.busy || !state.report) return false
     const index = state.report.cases.findIndex(row => row.status === 'unknown')
@@ -226,5 +266,5 @@ export function createPromptSuiteRunner(options = {}) {
     disposed = true; generation++; clearTimer(); request?.controller.abort(); request = null; active = null
     state.phase = 'disposed'; state.busy = false
   }
-  return { refresh, start, stop, reconcile, dispose, getState }
+  return { refresh, start, stop, pause, resume, reconcile, dispose, getState }
 }

@@ -19,7 +19,7 @@
         <span v-if="state.latest">{{ t('promptTrials.observedAt') }} <time :datetime="state.latest.observed_at">{{ formatDate(state.latest.observed_at) }}</time></span>
       </section>
       <p v-if="state.latest_stale" class="notice warning" data-testid="suite-stale" role="status">{{ t('promptSuites.stale') }}</p>
-      <p v-if="state.error_code" class="notice error" data-testid="suite-error" role="alert">{{ t(`promptSuites.errors.${state.error_code}`) }}</p>
+      <p v-if="state.error_code" class="notice error" data-testid="suite-error" role="alert">{{ t(`promptSuites.${state.phase === 'paused' ? 'resumeErrors' : 'errors'}.${state.error_code}`) }}</p>
       <p v-if="state.latest && !state.latest.available" class="notice warning" data-testid="suite-unavailable">{{ t(`promptTrials.unavailable.${state.latest.unavailable_code}`) }}</p>
       <p v-if="state.latest?.run?.state === 'running' && !state.busy" class="notice warning">{{ t('promptSuites.backendBusy') }}</p>
       <p v-if="exportError" class="notice error" data-testid="suite-export-error" role="alert">{{ t('promptSuites.exportError') }}</p>
@@ -78,17 +78,18 @@
         <div class="toolbar"><button type="button" data-testid="suite-add-case" :disabled="draft.cases.length === 5" @click="addCase">{{ t('promptSuites.addCase') }}</button></div>
         <p v-if="!acceptedDraft" class="reading-note" data-testid="suite-validation">{{ t('promptSuites.validation') }}</p>
         <p v-if="capExceeded" class="notice warning" data-testid="suite-cap-warning">{{ t('promptSuites.capExceeded', { cap: state.latest.limits.max_output_tokens }) }}</p>
-        <div class="toolbar"><button class="primary" type="submit" data-testid="suite-run" :disabled="!canRun">{{ t('promptSuites.run') }}</button><button type="button" data-testid="suite-stop" :disabled="!canStop" @click="runner.stop()">{{ t('promptSuites.stop') }}</button></div>
-        <p class="reading-note">{{ t('promptSuites.runNote') }}</p><p class="reading-note">{{ t('promptSuites.stopNote') }}</p>
+        <div class="toolbar"><button class="primary" type="submit" data-testid="suite-run" :disabled="!canRun">{{ t('promptSuites.run') }}</button><template v-for="controls in schedulingControls" :key="controls.runId"><button type="button" data-testid="suite-pause" :disabled="!state.can_pause" @click="controls.pause">{{ t('promptSuites.pause') }}</button><button type="button" data-testid="suite-resume" :disabled="!state.can_resume" @click="controls.resume">{{ t('promptSuites.resume') }}</button></template><button type="button" data-testid="suite-stop" :disabled="!canStop" @click="runner.stop()">{{ t('promptSuites.stop') }}</button></div>
+        <p v-if="state.pause_requested" class="notice" data-testid="suite-scheduling-state" :data-phase="state.phase === 'paused' ? 'paused' : 'pause_pending'" role="status">{{ t(state.phase === 'paused' ? 'promptSuites.pausedNote' : 'promptSuites.pausePending') }}</p>
+        <p class="reading-note">{{ t('promptSuites.runNote') }}</p><p class="reading-note">{{ t('promptSuites.pauseNote') }}</p><p class="reading-note">{{ t('promptSuites.stopNote') }}</p>
       </form>
 
       <section class="panel" aria-labelledby="suite-results-title">
         <div class="panel-heading"><h2 id="suite-results-title">{{ t('promptSuites.resultsTitle') }}</h2><button type="button" data-testid="suite-export-run" :disabled="!state.report" @click="downloadRun">{{ t('promptSuites.exportRun') }}</button></div>
-        <p class="reading-note">{{ t('promptSuites.capturedNote') }}</p>
+        <p class="reading-note">{{ t('promptSuites.capturedNote') }}</p><p class="reading-note">{{ t('promptSuites.pauseSessionNote') }}</p>
         <p v-if="!state.report">{{ t('promptSuites.noRun') }}</p>
         <div v-else data-testid="suite-run-report" :data-status="state.report.status">
           <h3>{{ state.report.definition.name }}</h3>
-          <p><span class="badge" data-testid="suite-run-status">{{ t(`promptSuites.runStates.${state.report.status}`) }}</span> <span v-if="state.report.stop_requested">{{ t('promptSuites.stopRequested') }}</span></p>
+          <p><span class="badge" data-testid="suite-run-status">{{ t(state.phase === 'paused' ? 'promptSuites.phases.paused' : `promptSuites.runStates.${state.report.status}`) }}</span> <span v-if="state.report.stop_requested">{{ t('promptSuites.stopRequested') }}</span></p>
           <p v-if="state.report.halt_code" class="notice warning">{{ t(`promptSuites.errors.${state.report.halt_code}`) }}</p>
           <p v-if="canReconcile" class="notice warning">{{ t('promptSuites.reconcileNote') }}</p>
           <button v-if="canReconcile" type="button" data-testid="suite-reconcile" @click="runner.reconcile()">{{ t('promptSuites.reconcile') }}</button>
@@ -137,6 +138,12 @@ const capExceeded = computed(() => state.value.latest?.limits.max_output_tokens 
 const canRun = computed(() => !retired && !state.value.busy && !state.value.latest_stale && state.value.latest?.available === true && state.value.latest?.run?.state !== 'running' && acceptedDraft.value !== null && !capExceeded.value)
 const canStop = computed(() => !retired && (state.value.phase === 'checking' || (state.value.report?.status === 'running' && !state.value.report.stop_requested)))
 const canReconcile = computed(() => !retired && !state.value.busy && state.value.report?.cases.some(item => item.status === 'unknown'))
+// Render-local aliases prevent Vue's cached event wrappers from resolving the
+// latest handler when a retained callback from an older run eventually fires.
+const schedulingControls = computed(() => {
+  const runId = state.value.report?.run_id
+  return [{ runId, pause: () => runner.pause(runId), resume: () => runner.resume(runId) }]
+})
 const summaryFields = ['total', 'attempted', 'succeeded', 'evaluated', 'matched', 'mismatched', 'not_requested', 'not_evaluated']
 const summary = computed(() => state.value.report ? summarizePromptSuiteReport(state.value.report) : null)
 const fieldTypes = ['string', 'number', 'boolean', 'object', 'array', 'null']

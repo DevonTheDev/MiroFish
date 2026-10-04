@@ -20,7 +20,8 @@ from app.services.simulation_runner import SimulationRunner
 from test_prompt_trials_frontend_workflow import synthetic_trial_model
 
 
-@pytest.mark.parametrize("scenario", ["sequence", "lost", "unknown", "stop", "leave", "cloud", "truncated", "empty"])
+@pytest.mark.parametrize("scenario", ["sequence", "lost", "unknown", "stop", "leave", "cloud", "truncated", "empty",
+                                      "pause_resume", "pause_stop", "pause_lost"])
 def test_real_prompt_suite_workflow(monkeypatch, scenario, caplog):
     repo = Path(__file__).resolve().parents[2]
     node = shutil.which("node")
@@ -60,7 +61,7 @@ def test_real_prompt_suite_workflow(monkeypatch, scenario, caplog):
     }.items():
         monkeypatch.setattr(Config, name, value)
 
-    with synthetic_trial_model(delay=1 if scenario in {"stop", "leave", "unknown"} else 0,
+    with synthetic_trial_model(delay=1 if scenario in {"stop", "leave", "unknown", "pause_resume", "pause_stop", "pause_lost"} else 0,
                                truncated=scenario == "truncated", empty=scenario == "empty") as (model_url, calls):
         monkeypatch.setattr(Config, "LLM_BASE_URL", model_url)
         monkeypatch.setattr(Config, "LOCAL_EMBEDDING_BASE_URL", model_url)
@@ -92,7 +93,7 @@ def test_real_prompt_suite_workflow(monkeypatch, scenario, caplog):
                     time.sleep(0.02)
                     snapshot = prompt_trials.get_prompt_trials_snapshot()
                 assert snapshot["run"]["state"] == ("truncated" if scenario == "truncated" else "succeeded")
-                expected = 5 if scenario in {"sequence", "lost", "empty"} else 1
+                expected = 5 if scenario in {"sequence", "lost", "empty", "pause_resume", "pause_lost"} else 1
                 assert len(calls) == expected
                 assert sum(method == "POST" for method, _ in observed) == expected
                 assert all(path == "/v1/chat/completions" for path, _body, _headers in calls)

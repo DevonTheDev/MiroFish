@@ -56,7 +56,7 @@ function renderer() {
   return { host, root, body }
 }
 
-export async function mountSuites({ api, initialPath = '/prompt-suites', locale = 'en', timers = fakeTimers(), downloadError = false } = {}) {
+export async function mountSuites({ api, initialPath = '/prompt-suites', locale = 'en', timers = fakeTimers(), downloadError = false, cacheHandlers } = {}) {
   const requests = deferredTrials()
   api = { ...trialApi(), acceptPromptTrialInputs, ...requests.api, ...api }
   const warnings = [], downloads = [], revokedUrls = [], removedAnchors = []
@@ -122,7 +122,7 @@ export async function mountSuites({ api, initialPath = '/prompt-suites', locale 
     const { descriptor } = parse(readFileSync(new URL('../../src/' + path, import.meta.url), 'utf8'), { filename: path })
     const script = compileScript(descriptor, { id: path })
     const template = compileTemplate({ source: descriptor.template.content, filename: path, id: path, transformAssetUrls: false,
-      compilerOptions: { bindingMetadata: script.bindings, hoistStatic: false } })
+      compilerOptions: { bindingMetadata: script.bindings, hoistStatic: false, ...(cacheHandlers === undefined ? {} : { cacheHandlers }) } })
     assert.deepEqual(template.errors, [])
     const value = evaluate(script.content)
     value.render = evaluate(template.code, 'render')

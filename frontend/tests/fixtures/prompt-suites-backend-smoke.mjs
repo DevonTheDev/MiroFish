@@ -7,10 +7,12 @@ import { setTimeout as pause } from 'node:timers/promises'
 import { fileURLToPath } from 'node:url'
 import { createServer, loadConfigFromFile } from 'vite'
 import { mountSuites, trialApi } from '../helpers/prompt-suites-view-fixture.js'
+import { acceptPromptSuiteReport } from '../../src/utils/promptSuites.js'
 
 const [backendURL, scenario] = process.argv.slice(2)
 assert.match(backendURL, /^http:\/\/127\.0\.0\.1:[0-9]+$/)
-assert.ok(['sequence', 'lost', 'unknown', 'stop', 'leave', 'cloud', 'truncated', 'empty'].includes(scenario))
+assert.ok(['sequence', 'lost', 'unknown', 'stop', 'leave', 'cloud', 'truncated', 'empty',
+  'pause_resume', 'pause_stop', 'pause_lost'].includes(scenario))
 const root = fileURLToPath(new URL('../../', import.meta.url))
 const cacheDir = await mkdtemp(path.join(tmpdir(), 'miro-prompt-suite-vite-'))
 let proxy, view
@@ -39,7 +41,7 @@ try {
   api.service.interceptors.response.use(response => {
     replies.push(structuredClone(response.data))
     assert.equal(response.headers['cache-control'], 'no-store')
-    if (['lost', 'unknown'].includes(scenario) && response.config.method === 'post' && !lostPost) {
+    if (['lost', 'unknown', 'pause_lost'].includes(scenario) && response.config.method === 'post' && !lostPost) {
       lostPost = true
       throw new Error('Synthetic lost POST response')
     }
@@ -50,7 +52,7 @@ try {
     }
     return response
   })
-  view = await mountSuites({ api, timers: { setTimeout, clearTimeout } })
+  view = await mountSuites({ api, timers: { setTimeout, clearTimeout }, cacheHandlers: true })
   await view.waitFor(() => replies.some(reply => reply.data?.kind === 'mirofish_local_prompt_trials'), { timeout: 15000 })
   await view.flush()
   assert.ok(calls.length >= 1 && calls.every(call => call.method === 'get'), 'Mount is passive')
@@ -89,8 +91,31 @@ try {
       assert.equal(calls.length, count, 'Retired suite schedules no further requests')
       assert.equal(calls.filter(call => call.method === 'post').length, 1)
     } else {
+      let pausedReport = null
+      if (scenario.startsWith('pause_')) {
+        await view.click('suite-pause')
+        await view.waitFor(() => view.byId('suite-scheduling-state')?.props['data-phase'] === 'paused', { timeout: 15000 })
+        assert.equal(view.byId('suite-run').props.disabled, true)
+        assert.equal(view.byId('suite-refresh').props.disabled, true)
+        assert.equal(view.byId('suite-resume').props.disabled, false)
+        assert.equal(view.byId('suite-stop').props.disabled, false)
+        const count = calls.length
+        await pause(1800)
+        assert.equal(calls.length, count, 'Acknowledged pause launches no trial requests or polling')
+        assert.equal(calls.filter(call => call.method === 'post').length, 1)
+        await view.click('suite-export-run')
+        pausedReport = acceptPromptSuiteReport(JSON.parse(await view.downloads.at(-1).blob.text()))
+        assert.equal(pausedReport.status, 'running', 'Downloaded pause is an unfinished historical observation')
+        assert.equal(pausedReport.finished_at, null)
+        assert.equal(pausedReport.cases[0].status, 'succeeded')
+        assert.ok(pausedReport.cases.slice(1).every(row => row.status === 'not_attempted' && row.request_id === null))
+        await view.input('suite-name', 'A different future draft')
+        await view.input('suite-case-1-user_prompt', 'This draft must not replace a captured case')
+        assert.equal(calls.length, count, 'Editing and export during pause remain local')
+        await view.click(scenario === 'pause_stop' ? 'suite-stop' : 'suite-resume')
+      }
       if (scenario === 'stop') await view.click('suite-stop')
-      const expectedStatus = ['truncated', 'unknown'].includes(scenario) ? 'halted' : scenario === 'stop' ? 'stopped' : 'completed'
+      const expectedStatus = ['truncated', 'unknown'].includes(scenario) ? 'halted' : ['stop', 'pause_stop'].includes(scenario) ? 'stopped' : 'completed'
       await view.waitFor(() => view.byId('suite-run-report')?.props['data-status'] === expectedStatus, { timeout: 35000 })
       if (scenario === 'unknown') {
         assert.ok(lostPost && lostRead)
@@ -107,7 +132,16 @@ try {
       assert.equal(report.status, expectedStatus)
       assert.deepEqual(report.definition, definition)
       assert.equal(report.cases.length, 5)
-      const attempted = ['sequence', 'lost', 'empty'].includes(scenario) ? 5 : 1
+      if (pausedReport) {
+        assert.equal(report.run_id, pausedReport.run_id)
+        assert.equal(report.cases[0].request_id, pausedReport.cases[0].request_id)
+        assert.deepEqual(report.cases[0], pausedReport.cases[0], 'Resume retains the accepted first observation')
+        if (scenario === 'pause_stop') {
+          await pause(1800)
+          assert.equal(calls.length, beforeExport, 'Stop from pause never launches another case')
+        }
+      }
+      const attempted = ['sequence', 'lost', 'empty', 'pause_resume', 'pause_lost'].includes(scenario) ? 5 : 1
       assert.equal(calls.filter(call => call.method === 'post').length, attempted)
       for (let index = 0; index < report.cases.length; index++) {
         const result = report.cases[index]
@@ -125,7 +159,7 @@ try {
         assert.deepEqual(result.snapshot.run.response.usage, { prompt_tokens: 12, completion_tokens: 9, total_tokens: 21 })
         assert.equal(result.check, scenario === 'truncated' ? 'not_evaluated' : index === 1 ? 'mismatched' : index === 2 ? 'not_requested' : 'matched')
       }
-      if (scenario === 'lost') {
+      if (['lost', 'pause_lost'].includes(scenario)) {
         assert.ok(lostPost)
         assert.ok(calls.some(call => call.method === 'get' && call.url.endsWith('/' + report.cases[0].request_id)))
       }

@@ -56,6 +56,16 @@ requests, inspect step results, stop remaining checks, or download the result.
 See the [local setup check guide](docs/LOCAL_MODE.md#check-local-setup-in-the-app)
 and [runtime monitor guide](docs/LOCAL_MODE.md#monitor-local-runtime-activity).
 
+## Run and pause local prompt suites
+
+Open **Prompt suites** to run a small repeatable set of prompts against your
+configured local model and inspect the captured replies and checks. **Pause
+scheduling** lets the accepted case finish being observed, then holds the
+remaining cases. **Resume scheduling** keeps the same captured inputs and checks
+readiness again; **Stop scheduling** ends the sequence. The pause lasts only in
+the current page and does not cancel inference or suspend other local work.
+See the [prompt-suite pause workflow](docs/LOCAL_MODE.md#pause-and-resume-suite-scheduling).
+
 ## Explore saved activity
 
 Open a simulation in History and choose **Saved activity** to inspect its latest
