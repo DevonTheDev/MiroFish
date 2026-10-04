@@ -634,6 +634,24 @@ and shared inference gateway as the single-prompt workbench.
    and explicitly run again when ready; the new run replaces the displayed
    report only after its readiness check succeeds
 
+Use **Duplicate case** to make a prompt variant beside its source, then edit the
+copy. The label, exact system/user prompts, settings and selected checks are
+copied, including enabled empty-text expectations and JSON-field rules. The copy
+gets a fresh case ID and independent rule rows. Its label is initially unchanged;
+rename it when that helps distinguish the variant. Incomplete draft fields can
+be copied, but the existing validation still controls export and Run. A suite
+still has at most five cases; a failed ID allocation leaves the draft unchanged.
+
+Use **Move up** or **Move down** to choose the next run's case order. Moving keeps
+the case's existing ID and contents, while a duplicate is a new case for report
+comparison. Repeated definition downloads keep those IDs and the selected order.
+All three controls edit only the draft and remain useful while the backend is
+unavailable. They perform no readiness read or inference request. Editing during
+a running or paused suite does not change its captured definition or scheduled
+cases; Resume continues that original run. Export the edited definition or
+choose a later explicit Run to use the changes. As with the rest of the draft,
+navigation/reload loses unsaved edits.
+
 The full definition is validated before the first model request, including each
 case's requested output tokens against the observed local cap. Opening the page
 and Refresh only read status. A running trial in this or another tab prevents
@@ -716,6 +734,11 @@ exports. Pure contract tests also cover strict imports, JSON byte/depth/Unicode
 boundaries, mixed-version compatibility and bounded polling. Saved-run reuse is
 also exercised by reopening the actual editor, adopting an exported run's cases,
 explicitly running them with new execution IDs and comparing the two reports.
+Case-organization tests cover both languages, exact copies across all three
+schemas, independent check rules, capacity/boundary controls and retired event
+handlers. The linked workflow exports an edited definition, imports it into a
+fresh editor and runs its selected order, then confirms that draft edits during
+Pause do not change the captured run resumed afterward.
 No real model
 weights, GPU quality/performance, native browser rendering/headers or Windows
 behavior is established by these tests.

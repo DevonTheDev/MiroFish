@@ -21,7 +21,7 @@ from test_prompt_trials_frontend_workflow import synthetic_trial_model
 
 
 @pytest.mark.parametrize("scenario", ["sequence", "lost", "unknown", "stop", "leave", "cloud", "truncated", "empty",
-                                      "pause_resume", "pause_stop", "pause_lost"])
+                                      "pause_resume", "pause_stop", "pause_lost", "editing"])
 def test_real_prompt_suite_workflow(monkeypatch, scenario, caplog):
     repo = Path(__file__).resolve().parents[2]
     node = shutil.which("node")
@@ -61,7 +61,7 @@ def test_real_prompt_suite_workflow(monkeypatch, scenario, caplog):
     }.items():
         monkeypatch.setattr(Config, name, value)
 
-    with synthetic_trial_model(delay=1 if scenario in {"stop", "leave", "unknown", "pause_resume", "pause_stop", "pause_lost"} else 0,
+    with synthetic_trial_model(delay=1 if scenario in {"stop", "leave", "unknown", "pause_resume", "pause_stop", "pause_lost", "editing"} else 0,
                                truncated=scenario == "truncated", empty=scenario == "empty") as (model_url, calls):
         monkeypatch.setattr(Config, "LLM_BASE_URL", model_url)
         monkeypatch.setattr(Config, "LOCAL_EMBEDDING_BASE_URL", model_url)
@@ -78,7 +78,9 @@ def test_real_prompt_suite_workflow(monkeypatch, scenario, caplog):
         thread.start()
         try:
             run = subprocess.run([
-                node, str(repo / "frontend/tests/fixtures/prompt-suites-backend-smoke.mjs"),
+                node, str(repo / "frontend/tests/fixtures" / (
+                    "prompt-suite-editing-backend-smoke.mjs" if scenario == "editing"
+                    else "prompt-suites-backend-smoke.mjs")),
                 f"http://127.0.0.1:{server.server_port}", scenario,
             ], cwd=repo / "frontend", capture_output=True, text=True, timeout=90)
             assert run.returncode == 0, run.stdout + run.stderr
@@ -93,7 +95,8 @@ def test_real_prompt_suite_workflow(monkeypatch, scenario, caplog):
                     time.sleep(0.02)
                     snapshot = prompt_trials.get_prompt_trials_snapshot()
                 assert snapshot["run"]["state"] == ("truncated" if scenario == "truncated" else "succeeded")
-                expected = 5 if scenario in {"sequence", "lost", "empty", "pause_resume", "pause_lost"} else 1
+                expected = (3 if scenario == "editing" else
+                            5 if scenario in {"sequence", "lost", "empty", "pause_resume", "pause_lost"} else 1)
                 assert len(calls) == expected
                 assert sum(method == "POST" for method, _ in observed) == expected
                 assert all(path == "/v1/chat/completions" for path, _body, _headers in calls)

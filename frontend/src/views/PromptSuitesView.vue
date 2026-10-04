@@ -50,7 +50,8 @@
       <form class="panel" data-testid="suite-form" @submit.prevent="start">
         <div class="panel-heading"><h2>{{ t('promptSuites.editorTitle') }}</h2><span>{{ draft.cases.length }}/5</span></div>
         <div class="field"><label for="suite-name">{{ t('promptSuites.name') }}</label><input id="suite-name" data-testid="suite-name" :value="draft.name" required @input="draft.name = $event.target.value"><small>{{ t('promptSuites.nameHint') }}</small></div>
-        <fieldset v-for="(item, index) in draft.cases" :key="item.case_id" class="case-editor" :data-case-id="item.case_id">
+        <p v-if="duplicateError" class="notice error" data-testid="suite-duplicate-error" role="alert">{{ t('promptSuites.duplicateError') }}</p>
+        <fieldset v-for="({ item, duplicate, moveUp, moveDown }, index) in caseViews" :key="item.case_id" class="case-editor" :data-case-id="item.case_id">
           <legend>{{ t('promptSuites.caseNumber', { number: index + 1 }) }}</legend>
           <div class="field"><label :for="`suite-label-${item.case_id}`">{{ t('promptTrials.label') }}</label><input :id="`suite-label-${item.case_id}`" :data-testid="`suite-case-${index}-label`" :value="item.label" required @input="item.label = $event.target.value"><small>{{ t('promptTrials.labelHint') }}</small></div>
           <div class="field"><label :for="`suite-system-${item.case_id}`">{{ t('promptTrials.systemPrompt') }}</label><textarea :id="`suite-system-${item.case_id}`" :data-testid="`suite-case-${index}-system_prompt`" rows="2" :value="item.system_prompt" @input="item.system_prompt = $event.target.value" /><small>{{ t('promptTrials.systemHint') }}</small></div>
@@ -74,7 +75,12 @@
             <button type="button" :data-testid="`suite-case-${index}-add-required-field`" :disabled="fieldsView.fields.length >= 10" @click="fieldsView.add">{{ t('promptSuites.addField') }}</button>
             <p class="reading-note">{{ t('promptSuites.jsonFieldsHint') }}</p>
           </section>
-          <button type="button" :data-testid="`suite-case-${index}-remove`" :disabled="draft.cases.length === 1" @click="removeCase(item.case_id)">{{ t('promptSuites.removeCase') }}</button>
+          <div class="toolbar">
+            <button type="button" :data-testid="`suite-case-${index}-duplicate`" :disabled="draft.cases.length >= 5" @click="duplicate">{{ t('promptSuites.duplicateCase') }}</button>
+            <button type="button" :data-testid="`suite-case-${index}-move-up`" :disabled="index === 0" @click="moveUp">{{ t('promptSuites.moveUp') }}</button>
+            <button type="button" :data-testid="`suite-case-${index}-move-down`" :disabled="index === draft.cases.length - 1" @click="moveDown">{{ t('promptSuites.moveDown') }}</button>
+            <button type="button" :data-testid="`suite-case-${index}-remove`" :disabled="draft.cases.length === 1" @click="removeCase(item.case_id)">{{ t('promptSuites.removeCase') }}</button>
+          </div>
         </fieldset>
         <div class="toolbar"><button type="button" data-testid="suite-add-case" :disabled="draft.cases.length === 5" @click="addCase">{{ t('promptSuites.addCase') }}</button></div>
         <p v-if="!acceptedDraft" class="reading-note" data-testid="suite-validation">{{ t('promptSuites.validation') }}</p>
@@ -130,7 +136,7 @@ const { t, locale } = useI18n()
 let retired = false, importGeneration = 0
 const draft = ref({ schema_version: 1, kind: 'mirofish_local_prompt_suite', name: '', cases: [newCase(1)] })
 const emptyImport = token => ({ token, preview: null, loading: false, error: false })
-const importState = shallowRef(emptyImport(importGeneration)), exportError = ref(false)
+const importState = shallowRef(emptyImport(importGeneration)), exportError = ref(false), duplicateError = ref(false)
 const state = ref(null)
 const runner = createPromptSuiteRunner({ onChange: next => { if (!retired) state.value = next } })
 state.value = runner.getState()
@@ -198,6 +204,30 @@ function requiredFieldViews(item) {
 function numeric(input) { return input === '' ? '' : Number(input) }
 function addCase() { if (!retired && draft.value.cases.length < 5) draft.value.cases.push(newCase(draft.value.cases.length + 1, draft.value.schema_version)) }
 function removeCase(id) { if (!retired && draft.value.cases.length > 1) draft.value.cases = draft.value.cases.filter(item => item.case_id !== id) }
+function ownsDraftCase(owned, item) { return !retired && draft.value === owned && owned.cases.includes(item) }
+function duplicateCase(owned, item) {
+  if (!ownsDraftCase(owned, item) || owned.cases.length >= 5) return
+  try {
+    const case_id = crypto.randomUUID()
+    if (typeof case_id !== 'string' || !/^[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}$/.test(case_id) || owned.cases.some(current => current.case_id === case_id)) throw new Error('Invalid case identity')
+    const copy = { ...item, case_id, ...(Array.isArray(item.required_fields) ? { required_fields: item.required_fields.map(rule => ({ ...rule })) } : {}) }
+    owned.cases.splice(owned.cases.indexOf(item) + 1, 0, copy)
+    duplicateError.value = false
+  } catch { duplicateError.value = true }
+}
+function moveCase(owned, item, direction) {
+  if (!ownsDraftCase(owned, item)) return
+  const index = owned.cases.indexOf(item), target = index + direction
+  if (target < 0 || target >= owned.cases.length) return
+  owned.cases.splice(index, 1)
+  owned.cases.splice(target, 0, item)
+}
+// Render-local aliases retain exact draft/case ownership across imports, even
+// when replacement cases reuse IDs and Vue caches event wrappers.
+const caseViews = computed(() => {
+  const owned = draft.value
+  return owned.cases.map(item => ({ item, duplicate: () => duplicateCase(owned, item), moveUp: () => moveCase(owned, item, -1), moveDown: () => moveCase(owned, item, 1) }))
+})
 function start() { if (canRun.value) runner.start(acceptedDraft.value) }
 function ownsImport(owned) { return !retired && importGeneration === owned.token && importState.value === owned }
 async function readImportFile(event, fromRun) {
@@ -237,7 +267,7 @@ function cancelImport(owned) {
 }
 function useImport(owned) {
   if (!ownsImport(owned) || !owned.preview) return
-  try { draft.value = acceptPromptSuiteDefinition(owned.preview.definition); cancelImport(owned) }
+  try { draft.value = acceptPromptSuiteDefinition(owned.preview.definition); duplicateError.value = false; cancelImport(owned) }
   catch { if (ownsImport(owned)) importState.value = { ...owned, error: true } }
 }
 // Render-local aliases capture each read/preview, including pending-to-pending reads.
