@@ -1,4 +1,4 @@
-"""Real locally generated suite exports reopen in an offline comparison view."""
+"""Real suite exports become fresh drafts, then reopen in an offline comparison view."""
 
 from contextlib import contextmanager
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -124,14 +124,17 @@ def test_generated_suite_reports_reopen_and_compare_without_network(monkeypatch,
 
         @app.post("/api/fixture/comparison-config")
         def change_synthetic_configuration():
+            from flask import request
             # Test-only route emulates an explicit local configuration change
             # after the first suite finishes; it is never registered in product.
+            recover = (request.get_json(silent=True) or {}).get("recover") is True
             snapshot = prompt_trials.get_prompt_trials_snapshot()
-            assert snapshot["run"]["state"] == "succeeded"
+            assert snapshot["run"]["state"] == ("truncated" if recover else "succeeded")
+            assert not recover or truncated
             prompt_trials._manager.thread.join(5)
             assert not prompt_trials._manager.thread.is_alive()
             local_runtime.close_local_gateway()
-            monkeypatch.setattr(Config, "LLM_MODEL_NAME", "fixture-candidate")
+            monkeypatch.setattr(Config, "LLM_MODEL_NAME", "fixture-recovery" if recover else "fixture-candidate")
             return {"success": True}
 
         server = make_server("127.0.0.1", 0, app, threaded=True)
@@ -144,11 +147,13 @@ def test_generated_suite_reports_reopen_and_compare_without_network(monkeypatch,
             ], cwd=repo / "frontend", capture_output=True, text=True, timeout=90)
             assert result.returncode == 0, result.stdout + result.stderr
             assert "actual suite exports imported and compared offline" in result.stdout
-            expected = case_count + (1 if truncated else case_count)
+            expected = 2 * case_count + (1 if truncated else 0)
             assert len(calls) == expected
             assert sum(method == "POST" and path == "/api/runtime/trials" for method, path in observed) == expected
             assert all(path == "/v1/chat/completions" for path, _body in calls)
-            assert [body["model"] for _path, body in calls] == ["fixture-baseline"] * case_count + ["fixture-candidate"] * (expected - case_count)
+            expected_models = (["fixture-baseline"] * case_count + ["fixture-candidate"] *
+                               (1 if truncated else case_count) + (["fixture-recovery"] * case_count if truncated else []))
+            assert [body["model"] for _path, body in calls] == expected_models
             assert all("response_format" not in body and "tools" not in body and
                        "check_kind" not in body and "expected_text" not in body for _path, body in calls)
             assert "PROMPT_BODY_PRIVATE" not in caplog.text

@@ -74,10 +74,35 @@ try {
   assert.equal(baseline.report.schema_version, jsonChecks ? 2 : 1)
   assert.equal(baseline.report.cases[0].check, 'mismatched')
   assert.equal(baseline.report.cases[1].check, 'matched')
+  async function reopenAndReuse(source) {
+    suites.unmount()
+    suites = await mountSuites({ api, locale: jsonChecks ? 'zh' : 'en', timers: { setTimeout, clearTimeout } })
+    await suites.waitFor(() => suites.byId('suite-run')?.props.disabled === true && !suites.byId('suite-stale'), { timeout: 15000 })
+    assert.equal(suites.byId('suite-name').props.value, '')
+    assert.equal(suites.byId('suite-run-report'), undefined)
+    const beforeImport = calls.length
+    const blob = new Blob([source.content], { type: 'application/json' })
+    await suites.runFile({ name: 'captured-run.json', size: blob.size, arrayBuffer: () => blob.arrayBuffer() })
+    assert.ok(suites.byId('suite-import-preview'))
+    assert.ok(suites.text(suites.byId('suite-import-preview')).includes(source.report.run_id))
+    assert.equal(suites.byId('suite-name').props.value, '', 'Preview alone does not replace the draft')
+    await suites.click('suite-import-use')
+    assert.equal(suites.byId('suite-run-report'), undefined, 'Historical results are not restored into the runner')
+    assert.equal(suites.byId('suite-reconcile'), undefined, 'Historical requests are not made reconcilable')
+    await suites.click('suite-export-definition')
+    assert.deepEqual(JSON.parse(await suites.downloads.at(-1).blob.text()), source.report.definition)
+    assert.equal(calls.length, beforeImport, 'Selecting and adopting the report makes no runtime calls')
+    assert.deepEqual(suites.warnings, [])
+  }
+  await reopenAndReuse(baseline)
   await api.service.post('/api/fixture/comparison-config')
   await suites.click('suite-refresh')
   await suites.waitFor(() => !suites.byId('suite-stale') && suites.byId('suite-run').props.disabled === false, { timeout: 15000 })
   const candidate = await runAndExport(truncated ? 'halted' : 'completed', baseline.report.run_id)
+  assert.deepEqual(candidate.report.definition, baseline.report.definition)
+  const historicalIds = new Set([baseline.report.run_id, ...baseline.report.cases.map(row => row.request_id)])
+  assert.ok(!historicalIds.has(candidate.report.run_id))
+  assert.ok(candidate.report.cases.every(row => row.request_id === null || !historicalIds.has(row.request_id)))
   assert.equal(candidate.report.cases[0].snapshot.run.configuration.model, 'fixture-candidate')
   assert.equal(baseline.report.cases[0].snapshot.run.configuration.model, 'fixture-baseline')
   assert.equal(calls.filter(call => call.method === 'post' && call.url === '/api/runtime/trials').length,
@@ -92,6 +117,26 @@ try {
     }
   }
   assert.deepEqual(suites.warnings, [])
+  if (truncated) {
+    assert.equal(candidate.report.cases.filter(row => row.status === 'not_attempted').length, caseCount - 1)
+    await reopenAndReuse(candidate)
+    assert.equal(suites.all(node => /^suite-case-\d+-label$/.test(node.props['data-testid'] ?? '')).length, caseCount,
+      'Reuse includes captured cases that the historical run never attempted')
+    await api.service.post('/api/fixture/comparison-config', { recover: true })
+    await suites.click('suite-refresh')
+    await suites.waitFor(() => !suites.byId('suite-stale') && suites.byId('suite-run').props.disabled === false, { timeout: 15000 })
+    const recovery = await runAndExport('completed', candidate.report.run_id)
+    assert.deepEqual(recovery.report.definition, candidate.report.definition)
+    assert.equal(recovery.report.stop_requested, false)
+    assert.equal(recovery.report.halt_code, null)
+    const oldIds = new Set([baseline.report.run_id, candidate.report.run_id,
+      ...baseline.report.cases.map(row => row.request_id), ...candidate.report.cases.map(row => row.request_id)])
+    assert.ok(!oldIds.has(recovery.report.run_id))
+    assert.ok(recovery.report.cases.every(row => row.status === 'succeeded' && !oldIds.has(row.request_id)))
+    assert.ok(recovery.report.cases.every(row => row.snapshot.run.configuration.model === 'fixture-recovery'))
+    assert.equal(candidate.report.cases[0].status, 'truncated', 'Historical capture stays unchanged')
+    assert.equal(calls.filter(call => call.method === 'post' && call.url === '/api/runtime/trials').length, 2 * caseCount + 1)
+  }
   suites.unmount(); suites = null
   await proxy.close(); proxy = null
 

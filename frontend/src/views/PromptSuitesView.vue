@@ -27,16 +27,23 @@
       <section class="panel" aria-labelledby="suite-files-title">
         <h2 id="suite-files-title">{{ t('promptSuites.filesTitle') }}</h2>
         <p>{{ t('promptSuites.filesNote') }}</p>
-        <div class="toolbar"><label class="file-label" for="suite-import-file">{{ t('promptSuites.import') }}<input id="suite-import-file" data-testid="suite-import-file" type="file" accept="application/json,.json" @change="readImport"></label><button type="button" data-testid="suite-export-definition" :disabled="!acceptedDraft" @click="downloadDefinition">{{ t('promptSuites.exportDefinition') }}</button></div>
-        <p v-if="importLoading" role="status">{{ t('promptSuites.importLoading') }}</p>
-        <p v-if="importError" class="notice error" data-testid="suite-import-error" role="alert">{{ t('promptSuites.importError') }}</p>
-        <article v-if="importPreview" class="import-preview" data-testid="suite-import-preview">
-          <h3>{{ t('promptSuites.previewTitle') }}: {{ importPreview.name }}</h3>
-          <p>{{ t('promptSuites.previewNote', { count: importPreview.cases.length }) }}</p>
-          <ol><li v-for="item in importPreview.cases" :key="item.case_id"><strong>{{ item.label }}</strong><dl class="result-grid"><div><dt>{{ t('promptTrials.temperature') }}</dt><dd>{{ item.temperature }}</dd></div><div><dt>{{ t('promptTrials.maxOutputTokens') }}</dt><dd>{{ item.max_output_tokens }}</dd></div></dl><details><summary>{{ t('promptSuites.reviewCase') }}</summary><h4>{{ t('promptTrials.systemPrompt') }}</h4><pre>{{ item.system_prompt }}</pre><h4>{{ t('promptTrials.userPrompt') }}</h4><pre>{{ item.user_prompt }}</pre><h4>{{ t('promptSuites.checkKind') }}</h4><p>{{ t(`promptSuites.checkKinds.${checkKind(item)}`) }}</p><p v-if="checkKind(item) === 'json_object'" class="reading-note">{{ t('promptSuites.jsonObjectHint') }}</p><template v-if="checkKind(item) === 'exact_text'"><h4>{{ t('promptSuites.expected') }}</h4><pre>{{ item.expected_text }}</pre><small v-if="item.expected_text === ''">{{ t('promptSuites.emptyExpected') }}</small></template></details></li></ol>
-          <div class="toolbar"><button type="button" class="primary" data-testid="suite-import-use" @click="useImport">{{ t('promptSuites.useImport') }}</button><button type="button" data-testid="suite-import-cancel" @click="cancelImport">{{ t('promptSuites.cancelImport') }}</button></div>
-        </article>
-        <button v-else-if="importLoading" type="button" data-testid="suite-import-cancel" @click="cancelImport">{{ t('promptSuites.cancelImport') }}</button>
+        <p>{{ t('promptSuites.runImportNote') }}</p>
+        <div class="toolbar"><label class="file-label" for="suite-import-file">{{ t('promptSuites.import') }}<input id="suite-import-file" data-testid="suite-import-file" type="file" accept="application/json,.json" @change="readImport"></label><label class="file-label" for="suite-run-import-file">{{ t('promptSuites.importRun') }}<input id="suite-run-import-file" data-testid="suite-run-import-file" type="file" accept="application/json,.json" @change="readRunImport"></label><button type="button" data-testid="suite-export-definition" :disabled="!acceptedDraft" @click="downloadDefinition">{{ t('promptSuites.exportDefinition') }}</button></div>
+        <template v-for="importView in importViews" :key="importView.token">
+          <p v-if="importView.loading" role="status">{{ t('promptSuites.importLoading') }}</p>
+          <p v-if="importView.error" class="notice error" data-testid="suite-import-error" role="alert">{{ t('promptSuites.importError') }}</p>
+          <article v-if="importView.preview" class="import-preview" data-testid="suite-import-preview">
+            <h3>{{ t('promptSuites.previewTitle') }}: {{ importView.preview.definition.name }}</h3>
+            <template v-if="importView.preview.provenance">
+              <p>{{ t('promptSuites.runPreviewNote') }}</p>
+              <dl class="result-grid" data-testid="suite-import-provenance"><div><dt>{{ t('promptSuites.runId') }}</dt><dd>{{ importView.preview.provenance.run_id }}</dd></div><div><dt>{{ t('promptSuites.historicalStatus') }}</dt><dd>{{ t(`promptSuites.runStates.${importView.preview.provenance.status}`) }}</dd></div><div><dt>{{ t('promptTrials.startedAt') }}</dt><dd><time :datetime="importView.preview.provenance.started_at">{{ importView.preview.provenance.started_at }}</time></dd></div><div><dt>{{ t('promptTrials.finishedAt') }}</dt><dd><time v-if="importView.preview.provenance.finished_at" :datetime="importView.preview.provenance.finished_at">{{ importView.preview.provenance.finished_at }}</time><span v-else>{{ t('promptTrials.unknown') }}</span></dd></div><div><dt>{{ t('promptSuites.summary.attempted') }}</dt><dd>{{ importView.preview.provenance.attempted }}</dd></div><div><dt>{{ t('promptSuites.summary.total') }}</dt><dd>{{ importView.preview.provenance.total }}</dd></div></dl>
+            </template>
+            <p v-else>{{ t('promptSuites.previewNote', { count: importView.preview.definition.cases.length }) }}</p>
+            <ol><li v-for="item in importView.preview.definition.cases" :key="item.case_id"><strong>{{ item.label }}</strong><dl class="result-grid"><div><dt>{{ t('promptTrials.temperature') }}</dt><dd>{{ item.temperature }}</dd></div><div><dt>{{ t('promptTrials.maxOutputTokens') }}</dt><dd>{{ item.max_output_tokens }}</dd></div></dl><details><summary>{{ t('promptSuites.reviewCase') }}</summary><h4>{{ t('promptTrials.systemPrompt') }}</h4><pre>{{ item.system_prompt }}</pre><h4>{{ t('promptTrials.userPrompt') }}</h4><pre>{{ item.user_prompt }}</pre><h4>{{ t('promptSuites.checkKind') }}</h4><p>{{ t(`promptSuites.checkKinds.${checkKind(item)}`) }}</p><p v-if="checkKind(item) === 'json_object'" class="reading-note">{{ t('promptSuites.jsonObjectHint') }}</p><template v-if="checkKind(item) === 'exact_text'"><h4>{{ t('promptSuites.expected') }}</h4><pre>{{ item.expected_text }}</pre><small v-if="item.expected_text === ''">{{ t('promptSuites.emptyExpected') }}</small></template></details></li></ol>
+            <div class="toolbar"><button type="button" class="primary" data-testid="suite-import-use" @click="importView.use">{{ t(importView.preview.provenance ? 'promptSuites.useCapturedCases' : 'promptSuites.useImport') }}</button><button type="button" data-testid="suite-import-cancel" @click="importView.cancel">{{ t('promptSuites.cancelImport') }}</button></div>
+          </article>
+          <button v-else-if="importView.loading" type="button" data-testid="suite-import-cancel" @click="importView.cancel">{{ t('promptSuites.cancelImport') }}</button>
+        </template>
       </section>
 
       <form class="panel" data-testid="suite-form" @submit.prevent="start">
@@ -99,17 +106,18 @@
 </template>
 
 <script setup>
-import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, shallowRef } from 'vue'
 import { RouterLink } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import LanguageSwitcher from '../components/LanguageSwitcher.vue'
-import { acceptPromptSuiteDefinition, parsePromptSuiteDefinition, exportPromptSuiteDefinition, exportPromptSuiteReport, summarizePromptSuiteReport, getPromptSuiteCheck, PROMPT_SUITE_MAX_BYTES } from '../utils/promptSuites.js'
+import { acceptPromptSuiteDefinition, parsePromptSuiteDefinition, parsePromptSuiteReport, exportPromptSuiteDefinition, exportPromptSuiteReport, summarizePromptSuiteReport, getPromptSuiteCheck, PROMPT_SUITE_MAX_BYTES, PROMPT_SUITE_REPORT_MAX_BYTES } from '../utils/promptSuites.js'
 import { createPromptSuiteRunner } from '../utils/promptSuiteRunner.js'
 
 const { t, locale } = useI18n()
 let retired = false, importGeneration = 0
 const draft = ref({ schema_version: 1, kind: 'mirofish_local_prompt_suite', name: '', cases: [newCase(1)] })
-const importPreview = ref(null), importLoading = ref(false), importError = ref(false), exportError = ref(false)
+const emptyImport = token => ({ token, preview: null, loading: false, error: false })
+const importState = shallowRef(emptyImport(importGeneration)), exportError = ref(false)
 const state = ref(null)
 const runner = createPromptSuiteRunner({ onChange: next => { if (!retired) state.value = next } })
 state.value = runner.getState()
@@ -143,27 +151,52 @@ function numeric(input) { return input === '' ? '' : Number(input) }
 function addCase() { if (!retired && draft.value.cases.length < 5) draft.value.cases.push(newCase(draft.value.cases.length + 1, draft.value.schema_version)) }
 function removeCase(id) { if (!retired && draft.value.cases.length > 1) draft.value.cases = draft.value.cases.filter(item => item.case_id !== id) }
 function start() { if (canRun.value) runner.start(acceptedDraft.value) }
-async function readImport(event) {
+function ownsImport(owned) { return !retired && importGeneration === owned.token && importState.value === owned }
+async function readImportFile(event, fromRun) {
+  if (retired) return
   const file = event.target.files?.[0]
   const token = ++importGeneration
   event.target.value = ''
-  importPreview.value = null; importError.value = false; importLoading.value = false
-  if (retired || !file) return
-  importLoading.value = true
+  const owned = { ...emptyImport(token), loading: !!file }
+  importState.value = owned
+  if (!file) return
   try {
-    if (!Number.isSafeInteger(file.size) || file.size < 0 || file.size > PROMPT_SUITE_MAX_BYTES || typeof file.text !== 'function') throw new Error('Invalid suite file')
-    const content = await file.text()
-    if (retired || token !== importGeneration) return
-    if (typeof content !== 'string' || new TextEncoder().encode(content).length > PROMPT_SUITE_MAX_BYTES) throw new Error('Oversize suite file')
-    importPreview.value = parsePromptSuiteDefinition(content)
-  } catch { if (!retired && token === importGeneration) importError.value = true }
-  finally { if (!retired && token === importGeneration) importLoading.value = false }
+    let definition, provenance = null
+    if (fromRun) {
+      if (!Number.isSafeInteger(file.size) || file.size < 0 || file.size > PROMPT_SUITE_REPORT_MAX_BYTES || typeof file.arrayBuffer !== 'function') throw new Error('Invalid run file')
+      const bytes = await file.arrayBuffer()
+      if (!ownsImport(owned)) return
+      if (Object.prototype.toString.call(bytes) !== '[object ArrayBuffer]' || bytes.byteLength > PROMPT_SUITE_REPORT_MAX_BYTES) throw new Error('Invalid bytes')
+      const content = new TextDecoder('utf-8', { fatal: true, ignoreBOM: true }).decode(bytes)
+      const report = parsePromptSuiteReport(content)
+      definition = acceptPromptSuiteDefinition(report.definition)
+      provenance = { run_id: report.run_id, status: report.status, started_at: report.started_at, finished_at: report.finished_at,
+        total: report.cases.length, attempted: report.cases.filter(item => item.status !== 'not_attempted').length }
+    } else {
+      if (!Number.isSafeInteger(file.size) || file.size < 0 || file.size > PROMPT_SUITE_MAX_BYTES || typeof file.text !== 'function') throw new Error('Invalid suite file')
+      const content = await file.text()
+      if (!ownsImport(owned)) return
+      if (typeof content !== 'string' || new TextEncoder().encode(content).length > PROMPT_SUITE_MAX_BYTES) throw new Error('Oversize suite file')
+      definition = parsePromptSuiteDefinition(content)
+    }
+    if (ownsImport(owned)) importState.value = { ...owned, loading: false, preview: { definition, provenance } }
+  } catch { if (ownsImport(owned)) importState.value = { ...owned, loading: false, error: true } }
 }
-function cancelImport() { if (retired) return; importGeneration++; importPreview.value = null; importError.value = false; importLoading.value = false }
-function useImport() {
-  if (retired || !importPreview.value) return
-  try { draft.value = acceptPromptSuiteDefinition(importPreview.value); cancelImport() } catch { importError.value = true }
+function readImport(event) { return readImportFile(event, false) }
+function readRunImport(event) { return readImportFile(event, true) }
+function cancelImport(owned) {
+  if (!retired && owned.token === importGeneration) importState.value = emptyImport(++importGeneration)
 }
+function useImport(owned) {
+  if (!ownsImport(owned) || !owned.preview) return
+  try { draft.value = acceptPromptSuiteDefinition(owned.preview.definition); cancelImport(owned) }
+  catch { if (ownsImport(owned)) importState.value = { ...owned, error: true } }
+}
+// Render-local aliases capture each read/preview, including pending-to-pending reads.
+const importViews = computed(() => {
+  const owned = importState.value
+  return [{ ...owned, use: () => useImport(owned), cancel: () => cancelImport(owned) }]
+})
 function download(content, filename) {
   if (retired) return
   let url = null, anchor = null

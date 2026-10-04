@@ -343,7 +343,8 @@ apply the imported definition. Importing never runs it. Invalid, oversized or
 unsupported files leave the current draft intact. Definitions have a fixed
 versioned schema, one to five unique case IDs and a 128 KiB UTF-8 file limit;
 duplicate object keys, unknown fields, endpoints, model overrides and captured
-result files are refused. Existing trial text/settings bounds apply, suite names
+result files are refused by the definition input. Use the separate saved-run
+reuse input described below for a captured run report. Existing trial text/settings bounds apply, suite names
 use up to 80 characters, and an enabled expected reply has up to 500 characters.
 
 Definitions and reports from version 1 remain supported and retain their v1
@@ -369,7 +370,8 @@ calls or provider-specific response-format settings to the model request.
 
 The separate **run report** contains the captured definition, per-case request
 identities, accepted trial observations, selected check outcomes and unattempted
-cases. It is limited to 1 MiB UTF-8 and is not an executable definition format.
+cases. It is limited to 1 MiB UTF-8 and records historical observations. The
+separate reuse action below copies its definition without resuming its requests.
 Downloads use captured page memory and remain available after a later status
 failure. Draft edits and imports do not rewrite the existing report. These files
 contain your prompts, expectations and model replies; choose their destination
@@ -389,9 +391,49 @@ Axios client and compiled Vue route with synthetic loopback replies. It checks
 sequential call counts, exact and JSON-format matches/mismatches, empty replies,
 truncation, lost responses, explicit reconciliation, Stop, navigation and captured
 exports. Pure contract tests also cover strict imports, JSON byte/depth/Unicode
-boundaries, mixed-version compatibility and bounded polling. No real model
+boundaries, mixed-version compatibility and bounded polling. Saved-run reuse is
+also exercised by reopening the actual editor, adopting an exported run's cases,
+explicitly running them with new execution IDs and comparing the two reports.
+No real model
 weights, GPU quality/performance, native browser rendering/headers or Windows
 behavior is established by these tests.
+
+### Reuse cases from a saved run
+
+In **Prompt suites**, choose the separate **Import saved run report** file input when
+you have a captured run JSON rather than a standalone definition. Review the
+historical run ID, recorded status/times, attempted count and every captured case,
+then choose **Use captured cases as draft**. Selecting the file alone changes
+neither the draft nor the current run.
+
+The action copies the captured definition: suite name, case IDs/order, exact
+prompts, settings, check kinds and expectations. It preserves v1/v2 and includes
+cases that were never attempted in an interrupted run. You can edit or remove
+cases and download an ordinary definition. Keeping case IDs lets later report
+comparison match the same cases across experiments.
+
+Historical results, request identities, running state, reconciliation ownership
+and model configuration are never restored into the current controller. A source
+file labeled running, stopped or halted is a historical observation; importing it
+does not read those old requests or resume them. The current page's captured run,
+including an active or unresolved run, stays untouched. A later **Run suite once**
+explicitly starts the chosen draft from its first case, checks current readiness
+and token caps, uses the currently configured model and generates new run/request
+IDs. A historical report does not establish that the present server is ready.
+
+Run files are limited to 1 MiB before and after reading, require valid UTF-8, and
+use the existing strict v1/v2 report admission. Duplicate keys, excessive nesting,
+invalid identities, contradictory check outcomes, BOMs and unsupported file kinds
+are refused before any cases are copied. A valid definition embedded in an invalid
+report is not extracted. The original definition input keeps its separate 128 KiB
+limit and contract.
+
+Both file inputs share one preview. Selecting another file retires the earlier
+read and preview; Discard, failed reads and invalid files leave the draft and
+current run intact. Preview and adoption make no runtime requests. Opening the
+page still performs its existing passive readiness read, and starting a new run
+still requires an explicit action. Navigation retires pending file work. Nothing
+is saved to browser storage or a backend archive.
 
 ## Compare exported prompt-suite runs
 

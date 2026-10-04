@@ -84,7 +84,7 @@ export async function mountSuites({ api, initialPath = '/prompt-suites', locale 
   const components = { '../components/LanguageSwitcher.vue': stub }
   function evaluate(source, returnName = 'component') {
     const ast = parseJavaScript(source, { sourceType: 'module' })
-    const globals = { crypto: webcrypto, TextEncoder, AbortController, Date, Intl, console, Blob, URL: urlApi, document,
+    const globals = { crypto: webcrypto, TextEncoder, TextDecoder, AbortController, Date, Intl, console, Blob, URL: urlApi, document,
       setTimeout: timers.setTimeout, clearTimeout: timers.clearTimeout,
       IntersectionObserver: class { observe() {} disconnect() {} } }
     for (const statement of ast.program.body.filter(item => item.type === 'ImportDeclaration').reverse()) {
@@ -167,6 +167,10 @@ export async function mountSuites({ api, initialPath = '/prompt-suites', locale 
     async file(file) {
       const target = byId('suite-import-file'); assert.ok(target)
       target.props.onChange({ target: { files: file ? [file] : [], value: 'suite.json' } }); await flush()
+    },
+    async runFile(file) {
+      const target = byId('suite-run-import-file'); assert.ok(target)
+      target.props.onChange({ target: { files: file ? [file] : [], value: 'run.json' } }); await flush()
     },
     async submit(id) {
       const target = byId(id); assert.ok(target, `missing form ${id}`)
