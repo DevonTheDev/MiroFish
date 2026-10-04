@@ -17,6 +17,16 @@ export const prepareSimulation = (data, signal) => {
   return service.post('/api/simulation/prepare', data, { signal })
 }
 
+// Passive observation never initializes graph memory or starts preparation.
+export const getPreparationPlan = (simulationId, signal) => {
+  return service.get(`/api/simulation/${encodeURIComponent(simulationId)}/prepare/plan`, { signal })
+}
+
+// Explicitly connects to graph memory and loads the eligible cast.
+export const previewPreparation = (data, signal) => {
+  return service.post('/api/simulation/prepare/preview', data, { signal })
+}
+
 /**
  * 查询准备任务进度
  * @param {Object} data - { task_id?, simulation_id? }

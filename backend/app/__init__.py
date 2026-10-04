@@ -74,7 +74,12 @@ def create_app(config_class=Config):
     def log_request():
         logger = get_logger('mirofish.request')
         logger.debug(f"请求: {request.method} {request.path}")
+        bounded_preparation = (
+            request.path == '/api/simulation/prepare/preview'
+            or Config.LOCAL_MODE and request.path == '/api/simulation/prepare'
+        )
         if (request.content_type and 'json' in request.content_type
+                and not bounded_preparation
                 and not request.path.startswith(('/api/runtime/readiness', '/api/runtime/trials', '/api/run-captures'))):
             logger.debug(f"请求体: {request.get_json(silent=True)}")
     

@@ -39,7 +39,11 @@
     <main class="content-area">
       <!-- Left Panel: Graph -->
       <div class="panel-wrapper left" :style="leftPanelStyle">
-        <GraphPanel 
+        <div v-if="runtimeMode === 'local' && !graphData && !graphLoading" class="local-graph-placeholder">
+          <p>{{ $t('localPlan.graphHint') }}</p>
+          <button data-testid="refresh-local-graph" type="button" :disabled="!projectData?.graph_id" :onClick="viewActions.refreshGraph">{{ $t('graph.refreshGraph') }}</button>
+        </div>
+        <GraphPanel v-else
           :graphData="graphData"
           :loading="graphLoading"
           :currentPhase="2"
@@ -52,6 +56,7 @@
       <div class="panel-wrapper right" :style="rightPanelStyle">
         <Step2EnvSetup
           :simulationId="currentSimulationId"
+          :cleanupReady="cleanupReady"
           :projectData="projectData"
           :graphData="graphData"
           :systemLogs="systemLogs"
@@ -59,6 +64,7 @@
           @next-step="handleNextStep"
           @add-log="addLog"
           @update-status="updateStatus"
+          @runtime-mode="updateRuntimeMode"
         />
       </div>
     </main>
@@ -93,7 +99,10 @@ const projectData = ref(null)
 const graphData = ref(null)
 const graphLoading = ref(false)
 const systemLogs = ref([])
-const currentStatus = ref('processing') // processing | completed | error
+const viewActions = ref({})
+const cleanupReady = ref(false)
+const runtimeMode = ref('unknown')
+const currentStatus = ref('planning') // processing | completed | error
 
 // --- Computed Layout Styles ---
 const leftPanelStyle = computed(() => {
@@ -114,9 +123,7 @@ const statusClass = computed(() => {
 })
 
 const statusText = computed(() => {
-  if (currentStatus.value === 'error') return 'Error'
-  if (currentStatus.value === 'completed') return 'Ready'
-  return 'Preparing'
+  return t('localPlan.status.' + ({ error: 'error', completed: 'ready', processing: 'preparing', idle: 'idle', blocked: 'blocked' }[currentStatus.value] || 'planning'))
 })
 
 // A new identity owns every selection, including A → B → A in a reused view.
@@ -144,6 +151,13 @@ const addLog = (msg, context = viewContext) => {
 const updateStatus = (status) => {
   if (!ownsView(viewContext)) return
   currentStatus.value = status
+}
+
+const updateRuntimeMode = mode => {
+  const context = viewContext
+  if (!ownsView(context) || !['local', 'cloud'].includes(mode)) return
+  runtimeMode.value = mode
+  if (mode === 'cloud' && projectData.value?.graph_id && !context.graphRequest) loadGraph(projectData.value.graph_id, context)
 }
 
 // --- Layout Methods ---
@@ -195,12 +209,12 @@ const checkAndStopRunningSimulation = async (context) => {
         if (closeRes.success) {
           addLog(t('log.simEnvClosed'), context)
         } else {
-          addLog(t('log.closeSimEnvFailedWithError', { error: closeRes.error || t('common.unknownError') }), context)
+          addLog(t('log.closeSimEnvFailedWithError', { error: t('localPlan.requestError') }), context)
           await forceStopSimulation(context)
         }
       } catch (closeErr) {
         if (!ownsView(context)) return
-        addLog(t('log.closeSimEnvException', { error: closeErr.message }), context)
+        addLog(t('log.closeSimEnvException', { error: t('localPlan.requestError') }), context)
         await forceStopSimulation(context)
       }
     } else {
@@ -224,10 +238,10 @@ const forceStopSimulation = async (context) => {
     if (stopRes.success) {
       addLog(t('log.simForceStopSuccess'), context)
     } else {
-      addLog(t('log.forceStopSimFailed', { error: stopRes.error || t('common.unknownError') }), context)
+      addLog(t('log.forceStopSimFailed', { error: t('localPlan.requestError') }), context)
     }
   } catch (err) {
-    if (ownsView(context)) addLog(t('log.forceStopSimException', { error: err.message }), context)
+    if (ownsView(context)) addLog(t('log.forceStopSimException', { error: t('localPlan.requestError') }), context)
   }
 }
 
@@ -251,17 +265,17 @@ const loadSimulationData = async (context) => {
           addLog(t('log.projectLoadSuccess', { id: projRes.data.project_id }))
           
           // 获取 graph 数据
-          if (projRes.data.graph_id) {
+          if (runtimeMode.value === 'cloud' && projRes.data.graph_id) {
             await loadGraph(projRes.data.graph_id, context)
           }
         }
       }
     } else {
-      addLog(t('log.loadSimDataFailed', { error: simRes.error || t('common.unknownError') }))
+      addLog(t('log.loadSimDataFailed', { error: t('localPlan.requestError') }))
     }
   } catch (err) {
     if (!ownsView(context)) return
-    addLog(t('log.loadException', { error: err.message }))
+    addLog(t('log.loadException', { error: t('localPlan.requestError') }))
   }
 }
 
@@ -280,7 +294,7 @@ const loadGraph = async (graphId, context) => {
       addLog(t('log.graphDataLoadSuccess'), context)
     }
   } catch (err) {
-    if (ownsRequest()) addLog(t('log.graphLoadFailed', { error: err.message }), context)
+    if (ownsRequest()) addLog(t('log.graphLoadFailed', { error: t('localPlan.requestError') }), context)
   } finally {
     if (ownsRequest()) graphLoading.value = false
   }
@@ -296,17 +310,24 @@ const refreshGraph = () => {
 watch(currentSimulationId, id => {
   retireView()
   viewContext = null
+  viewActions.value = {}
   projectData.value = null
   graphData.value = null
   graphLoading.value = false
   systemLogs.value = []
-  currentStatus.value = 'processing'
+  currentStatus.value = 'planning'
+  cleanupReady.value = false
+  runtimeMode.value = 'unknown'
   if (!id) return
   const context = { id, active: true, controller: new AbortController(), graphRequest: null }
   viewContext = context
+  viewActions.value = { refreshGraph: () => { if (ownsView(context)) refreshGraph() } }
   addLog(t('log.simViewInit'), context)
   checkAndStopRunningSimulation(context).then(() => {
-    if (ownsView(context)) loadSimulationData(context)
+    if (ownsView(context)) {
+      cleanupReady.value = true
+      loadSimulationData(context)
+    }
   })
 }, { immediate: true, flush: 'sync' })
 
@@ -315,6 +336,8 @@ onBeforeUnmount(() => retireView())
 </script>
 
 <style scoped>
+.local-graph-placeholder { padding: 24px; font-size: 13px; line-height: 1.6; color: #555; }
+.local-graph-placeholder button { border: 1px solid #ccc; padding: 8px 16px; background: white; border-radius: 5px; cursor: pointer; }
 .main-view {
   height: 100vh;
   display: flex;

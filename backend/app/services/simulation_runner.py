@@ -391,58 +391,73 @@ class SimulationRunner:
         Returns:
             SimulationRunState
         """
-        # 加载模拟配置
-        sim_dir = os.path.join(cls.RUN_STATE_DIR, simulation_id)
-        config_path = os.path.join(sim_dir, "simulation_config.json")
-        
-        if not os.path.exists(config_path):
-            raise ValueError(f"模拟配置不存在，请先调用 /prepare 接口")
-        
-        with open(config_path, 'r', encoding='utf-8') as f:
-            config = json.load(f)
-        
-        from ..local_runtime.oasis import limit_rounds, validate_agent_count
-        max_rounds = limit_rounds(max_rounds)
-        validate_agent_count(len(config.get("agent_configs", [])))
+        if Config.LOCAL_MODE:
+            from . import preparation_plan
+            admission = preparation_plan.admission_lock(simulation_id)
+        else:
+            admission = cls._finalization_lock(simulation_id)
 
-        # 初始化运行状态
-        time_config = config.get("time_config", {})
-        total_hours = time_config.get("total_simulation_hours", 72)
-        minutes_per_round = time_config.get("minutes_per_round", 30)
-        total_rounds = int(total_hours * 60 / minutes_per_round)
-        
-        # 如果指定了最大轮数，则截断
-        if max_rounds is not None and max_rounds > 0:
-            original_rounds = total_rounds
-            total_rounds = min(total_rounds, max_rounds)
-            if total_rounds < original_rounds:
-                logger.info(f"轮数已截断: {original_rounds} -> {total_rounds} (max_rounds={max_rounds})")
-        
-        state = SimulationRunState(
-            simulation_id=simulation_id,
-            runner_status=RunnerStatus.STARTING,
-            total_rounds=total_rounds,
-            total_simulation_hours=total_hours,
-            started_at=datetime.now().isoformat(),
-        )
-        
-        # Atomically claim this simulation ID. The expensive updater/process
-        # startup happens after releasing the lock, while the persisted
-        # STARTING state makes every concurrent start fail closed.
-        with cls._finalization_lock(simulation_id):
-            existing = cls.get_run_state(simulation_id)
-            active_statuses = {
-                RunnerStatus.STARTING,
-                RunnerStatus.RUNNING,
-                RunnerStatus.PAUSED,
-                RunnerStatus.STOPPING,
-            }
-            if (
-                existing and existing.runner_status in active_statuses
-            ) or cls.has_active_environment(simulation_id) or (
-                ZepGraphMemoryManager.get_updater(simulation_id) is not None
-            ):
-                raise ValueError(f"模拟已在运行或结束处理中: {simulation_id}")
+        # Observe preparation, read its artifacts, and claim this simulation ID
+        # under one lock. Expensive updater/process startup happens afterward;
+        # the persisted STARTING state keeps concurrent owners out.
+        with admission:
+            if Config.LOCAL_MODE:
+                preparation_plan.assert_idle_locked(simulation_id)
+                config_path = preparation_plan._path(
+                    simulation_id, "simulation_config.json", run=True
+                )
+                sim_dir = os.path.dirname(config_path)
+                config = preparation_plan._read_json(
+                    config_path, preparation_plan.MAX_ARTIFACT_BYTES
+                )
+            else:
+                # Preserve the cloud configuration reader and path behavior.
+                sim_dir = os.path.join(cls.RUN_STATE_DIR, simulation_id)
+                config_path = os.path.join(sim_dir, "simulation_config.json")
+                if not os.path.exists(config_path):
+                    raise ValueError(f"模拟配置不存在，请先调用 /prepare 接口")
+                with open(config_path, 'r', encoding='utf-8') as f:
+                    config = json.load(f)
+
+            from ..local_runtime.oasis import limit_rounds, validate_agent_count
+            max_rounds = limit_rounds(max_rounds)
+            validate_agent_count(len(config.get("agent_configs", [])))
+
+            # 初始化运行状态
+            time_config = config.get("time_config", {})
+            total_hours = time_config.get("total_simulation_hours", 72)
+            minutes_per_round = time_config.get("minutes_per_round", 30)
+            total_rounds = int(total_hours * 60 / minutes_per_round)
+
+            # 如果指定了最大轮数，则截断
+            if max_rounds is not None and max_rounds > 0:
+                original_rounds = total_rounds
+                total_rounds = min(total_rounds, max_rounds)
+                if total_rounds < original_rounds:
+                    logger.info(f"轮数已截断: {original_rounds} -> {total_rounds} (max_rounds={max_rounds})")
+
+            state = SimulationRunState(
+                simulation_id=simulation_id,
+                runner_status=RunnerStatus.STARTING,
+                total_rounds=total_rounds,
+                total_simulation_hours=total_hours,
+                started_at=datetime.now().isoformat(),
+            )
+
+            if not Config.LOCAL_MODE:
+                existing = cls.get_run_state(simulation_id)
+                active_statuses = {
+                    RunnerStatus.STARTING,
+                    RunnerStatus.RUNNING,
+                    RunnerStatus.PAUSED,
+                    RunnerStatus.STOPPING,
+                }
+                if (
+                    existing and existing.runner_status in active_statuses
+                ) or cls.has_active_environment(simulation_id) or (
+                    ZepGraphMemoryManager.get_updater(simulation_id) is not None
+                ):
+                    raise ValueError(f"模拟已在运行或结束处理中: {simulation_id}")
             cls._save_run_state(state)
         
         # 如果启用图谱记忆更新，创建更新器
@@ -1007,6 +1022,11 @@ class SimulationRunner:
     def stop_simulation(cls, simulation_id: str) -> SimulationRunState:
         """停止模拟"""
         with cls._finalization_lock(simulation_id):
+            if Config.LOCAL_MODE:
+                from . import preparation_plan
+                if preparation_plan.active_prepare_tasks(simulation_id):
+                    raise preparation_plan.PlanningError("preparation_busy")
+
             state = cls.get_run_state(simulation_id)
             if not state:
                 raise ValueError(f"模拟不存在: {simulation_id}")
@@ -1481,6 +1501,11 @@ class SimulationRunner:
             return refused("Simulation startup/finalization is still in progress")
         try:
             try:
+                if Config.LOCAL_MODE:
+                    from .preparation_plan import active_prepare_tasks
+                    if active_prepare_tasks(simulation_id):
+                        return refused("A preparation task still owns this simulation.")
+
                 state = cls.get_run_state(simulation_id)
                 unfinished = state is not None and state.runner_status in {
                     RunnerStatus.STARTING, RunnerStatus.RUNNING,

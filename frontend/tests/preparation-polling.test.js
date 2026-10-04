@@ -4,6 +4,7 @@ import test from 'node:test'
 import { createServer } from 'node:http'
 import axios from 'axios'
 import vm from 'node:vm'
+import * as localRunPlan from '../src/utils/localRunPlan.js'
 import { parse, compileScript } from '@vue/compiler-sfc'
 import { computed, effectScope, nextTick, reactive, ref, watch } from 'vue'
 
@@ -29,7 +30,8 @@ function harness(simulationId = 'A') {
   })]))
   let nextTimer = 0 // ID zero is a valid timer handle.
   const state = scope.run(() => vm.runInNewContext(setup, {
-    ref, computed, watch, nextTick, AbortController, ...api,
+    ref, computed, watch, nextTick, AbortController, ...api, ...localRunPlan,
+    getPreparationPlan: id => Promise.resolve({ success: true, data: { simulation_id: id, mode: 'cloud' } }),
     defineProps: () => props, defineEmits: () => (...args) => emitted.push(args),
     useI18n: () => ({ t: key => key }),
     onMounted: callback => mounted.push(callback), onUnmounted: callback => unmounted.push(callback),
@@ -310,7 +312,7 @@ for (const rejection of [false, true]) test(`current prepare ${rejection ? 'reje
     if (rejection) h.requests.prepareSimulation[0].reject(new Error('current failure'))
     else h.requests.prepareSimulation[0].resolve({ success: false, error: 'current failure' })
     await settle()
-    assert.deepEqual(statuses(h), ['processing', 'error'])
+    assert.deepEqual(statuses(h), ['planning', 'processing', 'error'])
     assert.equal(h.intervals.size, 0)
     assert.equal(h.requests.prepareSimulation[0].signal?.aborted, true)
   } finally { h.close() }
@@ -423,7 +425,7 @@ for (const rejection of [false, true]) test(`authoritative readiness retires an 
     assert.equal(h.requests.getSimulationConfigRealtime.length, 2)
     h.requests.getSimulationConfigRealtime[1].resolve(configReply()); await settle()
     assert.equal(h.state.phase.value, 4)
-    assert.deepEqual(statuses(h), ['processing', 'completed'])
+    assert.deepEqual(statuses(h), ['planning', 'processing', 'completed'])
   } finally { h.close() }
 })
 
@@ -433,10 +435,10 @@ test('generated config during script preparation remains a preview until authori
     h.requests.getSimulationConfigRealtime[0].resolve(configReply({ status: 'preparing', is_generating: true })); await settle()
     assert.equal(h.state.simulationConfig.value.time_config.total_simulation_hours, 10)
     assert.notEqual(h.state.phase.value, 4)
-    assert.deepEqual(statuses(h), ['processing'])
+    assert.deepEqual(statuses(h), ['planning', 'processing'])
     assert.ok(h.intervals.size > 0)
     h.requests.getPrepareStatus[1].resolve(progress('failed', { error: 'copying scripts failed' })); await settle()
-    assert.deepEqual(statuses(h), ['processing', 'error'])
+    assert.deepEqual(statuses(h), ['planning', 'processing', 'error'])
     assert.equal(h.intervals.size, 0)
   } finally { h.close() }
 })

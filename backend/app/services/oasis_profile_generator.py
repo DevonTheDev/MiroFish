@@ -294,10 +294,9 @@ class OasisProfileGenerator:
         name = entity.name
         user_name = self._generate_username(name)
         
-        # 构建上下文信息
-        context = self._build_entity_context(entity)
-        
         if use_llm:
+            # Retrieval can embed/search the graph; templates do not need it.
+            context = self._build_entity_context(entity)
             # 使用LLM生成详细人设
             profile_data = self._generate_profile_with_llm(
                 entity_name=name,

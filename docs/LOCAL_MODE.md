@@ -10,6 +10,94 @@ PC's RAM, disk, compute and electricity. Small-model accuracy is not equivalent
 to a large hosted model. Generated simulations are exploratory, not validated
 forecasts or a basis for consequential decisions.
 
+## Plan a small local simulation
+
+After building a graph, Step 2 offers a local preparation planner. Choose a small
+cast before generating profiles and configuration, instead of preparing every
+eligible entity and discovering afterward that it exceeds your loaded agent
+cap. The ordinary cloud preparation workflow remains automatic.
+
+1. Wait for the setup view's existing environment-cleanup check and its passive
+   preparation observation. The planner shows loaded agent, round and concurrency
+   limits, saved-artifact availability and any current owner. An unknown mode,
+   failed observation or invalid limit does not start preparation.
+2. Choose **Load cast** to connect to local graph memory and read eligible
+   entities. Select exact entities, using their names and types to find them.
+   For example, a graph with twenty people can supply a selected two-person cast;
+   type filtering alone would still select twenty. Selected IDs remain exact,
+   and an empty or over-limit selection cannot start preparation.
+3. Choose template or LLM-generated profiles, then **Prepare selected cast**.
+   Template profiles avoid per-agent model generation and embedding/retrieval
+   context. Simulation configuration generation still uses the configured model,
+   and the simulation itself will use it. LLM profile generation retains its
+   existing fallback behavior; the choice is not a quality guarantee.
+4. After authoritative profile/configuration completion, choose **Maximum
+   rounds** and Start. Local values begin at one and cannot exceed the loaded
+   cap. The effective total is bounded by the configured simulation duration,
+   requested maximum and backend cap. This is simulated workload, not an estimate
+   of wall-clock time or GPU capacity.
+
+The initial plan observation does not construct graph/model clients, generate
+profiles/configuration or reconcile saved state. **Load cast** is a separate
+explicit action because cold graph access can start the shared local gateway and
+memory client, connect to Neo4j and initialize its indexes/constraints. It does
+not run profile/configuration inference. The setup view's manual graph Refresh
+is also an explicit graph read. Existing return-to-setup environment cleanup
+remains separate from preparation.
+
+An already prepared simulation offers **Reuse saved preparation**. This verifies
+the enabled platform files and their counts again, without graph access or model
+calls, before loading the existing profiles/configuration. Missing, changing,
+unsafe, inconsistent or now-over-cap files fail explicitly; reuse never falls
+through to regeneration. A previously completed preparation is not overwritten
+with a newly selected cast. Create another simulation through the existing
+project flow to prepare a different cast. The saved files do not record the
+original template/LLM choice, so the planner does not invent that provenance.
+
+Preparation and run ownership are checked again on the backend. A pending or
+processing preparation, active run, live process/monitor or retained graph updater
+prevents conflicting work. Loading an existing preparation task observes that
+task rather than submitting it again. An in-flight task retains ownership until
+its final artifact/state writes and graph-reader cleanup have finished. These
+guards coordinate one backend process; they are not distributed locks across
+multiple backend workers.
+
+The chosen IDs are revalidated against the graph before profile generation.
+Missing or no-longer-eligible entities fail rather than being replaced or
+expanding the cast. Only selected entities become agents, in the selected order;
+other entities may still supply relationship context for LLM profiles. Graph
+contents can evolve between observations: this is an exact selection of current
+entity IDs, not a frozen historical copy of every graph fact. Navigating away
+retires UI observation and queued continuations; it does not cancel an already
+accepted backend preparation.
+
+Planning has explicit limits: 5,000 scanned graph nodes, 1,000 eligible catalog
+entries, and at most the smaller of 1,000 or the loaded agent cap selected IDs.
+LLM profile enrichment admits at most 20,000 graph edges. Oversized catalogs and
+graphs are refused rather than shown as complete truncated selections. Preview
+names and summaries are bounded text previews with a truncation indicator; IDs
+and primary types are not silently changed. Preview responses are limited to
+4 MiB. These bounds do not measure available hardware or limit arbitrary
+provider-record bytes at the transport layer.
+
+New local planning requests have a 256 KiB body limit and reject duplicate JSON
+keys, nonfinite values and unsupported fields. The same body admission bound
+also applies to legacy local preparation calls; cloud request parsing retains
+its existing behavior. Planned state/run reads are limited to 1 MiB each,
+configuration and each enabled profile file to 8 MiB, project metadata to 1 MiB
+and extracted project text to 8 MiB. Regular-file/path checks and before/after
+fingerprints detect ordinary replacements; they are not a sandbox against a
+hostile local filesystem writer. Artifact readiness is a bounded structural
+check, not complete validation of every OASIS field.
+
+Local verification uses disposable files, synthetic graph entities and model
+boundaries, actual Flask/Axios/compiled Vue routes and the existing preparation
+and runner lifecycle tests. A disposable Neo4j/Graphiti test also verifies that
+previewing real stored entities and reading a selected cast add no model or
+embedding requests after graph construction. It does not use pretrained weights, private documents
+or paid services. Native browser rendering, Windows behavior, real-model quality
+and useful simulation outcomes remain unverified.
+
 ## Revisit saved reports
 
 Choose **Saved reports** on Home, or open `/reports`. This independent library

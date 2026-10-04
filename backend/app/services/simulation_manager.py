@@ -251,7 +251,11 @@ class SimulationManager:
         defined_entity_types: Optional[List[str]] = None,
         use_llm_for_profiles: bool = True,
         progress_callback: Optional[callable] = None,
-        parallel_profile_count: int = 3
+        parallel_profile_count: int = 3,
+        *,
+        selected_entity_ids: Optional[List[str]] = None,
+        max_graph_nodes: Optional[int] = None,
+        max_graph_edges: Optional[int] = None,
     ) -> SimulationState:
         """
         准备模拟环境（全程自动化）
@@ -286,6 +290,24 @@ class SimulationManager:
         if state.enable_twitter:
             self._get_simulation_path(simulation_id, "twitter_profiles.csv")
 
+        # A selected local cast may have changed since HTTP admission. Resolve
+        # it completely before clearing saved flags or constructing generators.
+        selected = None
+        if selected_entity_ids is not None:
+            from .preparation_plan import validate_planned_request
+            options = validate_planned_request({
+                "simulation_id": simulation_id, "preparation_mode": "prepare",
+                "selected_entity_ids": selected_entity_ids,
+                "use_llm_for_profiles": use_llm_for_profiles,
+                "parallel_profile_count": parallel_profile_count,
+            })
+            parallel_profile_count = options["parallel_profile_count"]
+            selected = ZepEntityReader().filter_defined_entities(
+                graph_id=state.graph_id, defined_entity_types=defined_entity_types,
+                enrich_with_edges=use_llm_for_profiles, selected_entity_ids=options["selected_entity_ids"],
+                max_nodes=max_graph_nodes, max_edges=max_graph_edges,
+            )
+
         try:
             state.status = SimulationStatus.PREPARING
             state.error = None
@@ -298,16 +320,16 @@ class SimulationManager:
             if progress_callback:
                 progress_callback("reading", 0, t('progress.connectingZepGraph'))
             
-            reader = ZepEntityReader()
-            
             if progress_callback:
                 progress_callback("reading", 30, t('progress.readingNodeData'))
-            
-            filtered = reader.filter_defined_entities(
-                graph_id=state.graph_id,
-                defined_entity_types=defined_entity_types,
-                enrich_with_edges=True
-            )
+
+            filtered = selected
+            if filtered is None:
+                filtered = ZepEntityReader().filter_defined_entities(
+                    graph_id=state.graph_id,
+                    defined_entity_types=defined_entity_types,
+                    enrich_with_edges=True,
+                )
             
             from ..local_runtime.oasis import validate_agent_count
             validate_agent_count(filtered.filtered_count)

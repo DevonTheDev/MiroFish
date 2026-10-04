@@ -1,5 +1,7 @@
 import assert from 'node:assert/strict'
-import { readFileSync } from 'node:fs'
+import { readFileSync, existsSync } from 'node:fs'
+import { createI18n } from 'vue-i18n'
+import * as I18n from 'vue-i18n'
 import vm from 'node:vm'
 import { parse as parseJavaScript } from '@babel/parser'
 import { parse, compileScript, compileTemplate } from '@vue/compiler-sfc'
@@ -49,11 +51,14 @@ function renderer() {
   })
 }
 
-export function build() {
+export function build(options = {}) {
   const requests = {}, instances = {}, intervals = new Map(), warnings = []
   let nextTimer = 0 // Timer ID zero must be retired too.
   const api = new Proxy({}, { get(_target, name) {
-    return (...args) => new Promise((resolve, reject) => {
+    return (...args) => {
+      if (options.api?.[name]) return options.api[name](...args)
+      if (name === 'getPreparationPlan' && !options.manualPlan) return Promise.resolve(ok({ simulation_id: args[0], mode: 'cloud', limits: null }))
+      return new Promise((resolve, reject) => {
       // Deliberately ignore cancellation: stale completion guards must work even
       // when a transport/server finishes after the observer has been aborted.
       const request = { args, settled: false,
@@ -62,6 +67,7 @@ export function build() {
         signal: args.at(-1) instanceof AbortSignal ? args.at(-1) : undefined }
       ;(requests[name] ??= []).push(request)
     })
+    }
   } })
   const stub = { render: () => Vue.h('fixture-boundary') }
   const graph = { name: 'GraphBoundary', props: ['graphData', 'loading', 'currentPhase', 'isSimulating'],
@@ -70,7 +76,7 @@ export function build() {
       return () => Vue.h('graph-boundary')
     } }
   const modules = { vue: Vue, 'vue-router': { ...Router, createWebHistory: Router.createMemoryHistory },
-    'vue-i18n': { useI18n: () => ({ t: (key, params) => key + (params ? JSON.stringify(params) : '') }) } }
+    'vue-i18n': options.locale ? I18n : { useI18n: () => ({ t: (key, params) => key + (params ? JSON.stringify(params) : '') }) } }
   const components = { '../components/GraphPanel.vue': graph }
   function evaluate(source, returnName = 'component') {
     const ast = parseJavaScript(source, { sourceType: 'module' })
@@ -79,7 +85,12 @@ export function build() {
       clearInterval: id => intervals.delete(id) }
     for (const statement of ast.program.body.filter(item => item.type === 'ImportDeclaration').reverse()) {
       const path = statement.source.value
-      const dependency = modules[path] ?? (path.includes('/api/') ? api : null)
+      let dependency = modules[path] ?? (path.includes('/api/') ? api : null)
+      if (path === '../utils/localRunPlan') {
+        const utility = readFileSync(new URL('../../src/utils/localRunPlan.js', import.meta.url), 'utf8')
+        const exports = [...utility.matchAll(/export (?:const|function) (\w+)/g)].map(match => match[1])
+        dependency = vm.runInNewContext(utility.replace(/export /g, '') + '\n;({' + exports.join(',') + '})')
+      }
       for (const item of statement.specifiers) {
         globals[item.local.name] = item.type === 'ImportDefaultSpecifier'
           ? components[path] ?? stub : dependency[item.imported.name]
@@ -105,6 +116,9 @@ export function build() {
     }
     return value
   }
+  if (existsSync(new URL('../../src/components/LocalRunPlanner.vue', import.meta.url))) {
+    components['./LocalRunPlanner.vue'] = component('components/LocalRunPlanner.vue')
+  }
   components['../components/Step2EnvSetup.vue'] = component(setupChild)
   components['../components/Step3Simulation.vue'] = component(runChild)
   components['../views/SimulationView.vue'] = component(setupView)
@@ -114,8 +128,13 @@ export function build() {
   assert.equal(parse(appSource).descriptor.template.content.trim(), '<router-view />')
   const app = renderer().createApp({ render: () => Vue.h(Router.RouterView) })
   app.use(router)
-  app.config.globalProperties.$t = key => key
-  app.config.globalProperties.$tm = () => []
+  if (options.locale) {
+    const messages = Object.fromEntries(['en', 'zh'].map(locale => [locale, JSON.parse(readFileSync(new URL('../../../locales/' + locale + '.json', import.meta.url), 'utf8'))]))
+    app.use(createI18n({ legacy: false, locale: options.locale, fallbackLocale: 'en', messages }))
+  } else {
+    app.config.globalProperties.$t = key => key
+    app.config.globalProperties.$tm = () => []
+  }
   const host = { type: 'root', children: [], parent: null }
   let mounted = false
   return { requests, instances, router, intervals, host, warnings,

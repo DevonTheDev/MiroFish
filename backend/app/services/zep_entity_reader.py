@@ -5,6 +5,7 @@ Zep实体读取与过滤服务
 
 from typing import Dict, Any, List, Optional, Set, Callable, TypeVar
 from dataclasses import dataclass, field
+import re
 from zep_cloud import NotFoundError
 
 from ..config import Config
@@ -16,6 +17,7 @@ logger = get_logger('mirofish.zep_entity_reader')
 
 # 用于泛型返回类型
 T = TypeVar('T')
+_PLANNED_ENTITY_ID = re.compile(r"[A-Za-z0-9_-]{1,128}\Z")
 
 
 @dataclass
@@ -110,19 +112,58 @@ class ZepEntityReader:
             initial_delay=initial_delay,
         )
     
-    def get_all_nodes(self, graph_id: str) -> List[Dict[str, Any]]:
+    @staticmethod
+    def _validate_node_records(nodes: List[Any]) -> None:
+        """Reject ambiguous or malformed provider data before planned work."""
+        seen_ids = set()
+        for node in nodes:
+            uuid = getattr(node, "uuid_", None)
+            if uuid is None:
+                uuid = getattr(node, "uuid", None)
+            labels = getattr(node, "labels", None)
+            if (
+                not isinstance(uuid, str)
+                or _PLANNED_ENTITY_ID.fullmatch(uuid) is None
+                or uuid in seen_ids
+                or not isinstance(getattr(node, "name", None), str)
+                or not isinstance(getattr(node, "summary", None), str)
+                or not isinstance(labels, list)
+                or any(not isinstance(label, str) or not label.strip() for label in labels)
+            ):
+                raise ValueError("Graph entity records are invalid")
+            custom_labels = [label for label in labels if label not in ("Entity", "Node")]
+            if custom_labels and len(custom_labels[0]) > 128:
+                raise ValueError("Graph entity records are invalid")
+            seen_ids.add(uuid)
+
+    def get_all_nodes(
+        self, graph_id: str, *, max_items: Optional[int] = None,
+        validate_records: bool = False,
+    ) -> List[Dict[str, Any]]:
         """
         获取图谱的所有节点（分页获取）
 
         Args:
             graph_id: 图谱ID
+            max_items: Optional maximum; oversized graphs fail without truncation.
+            validate_records: Validate raw provider fields for an exact planned cast.
 
         Returns:
             节点列表
         """
         logger.info(f"获取图谱 {graph_id} 的所有节点...")
 
-        nodes = fetch_all_nodes(self.client, graph_id)
+        if max_items is None:
+            nodes = fetch_all_nodes(self.client, graph_id)
+        else:
+            if type(max_items) is not int or max_items < 1:
+                raise ValueError("max_items must be a positive integer")
+            nodes = fetch_all_nodes(self.client, graph_id, max_items=max_items + 1)
+            if len(nodes) > max_items:
+                raise ValueError("Graph nodes exceed configured limit")
+
+        if validate_records or max_items is not None:
+            self._validate_node_records(nodes)
 
         nodes_data = []
         for node in nodes:
@@ -137,19 +178,29 @@ class ZepEntityReader:
         logger.info(f"共获取 {len(nodes_data)} 个节点")
         return nodes_data
 
-    def get_all_edges(self, graph_id: str) -> List[Dict[str, Any]]:
+    def get_all_edges(
+        self, graph_id: str, *, max_items: Optional[int] = None
+    ) -> List[Dict[str, Any]]:
         """
         获取图谱的所有边（分页获取）
 
         Args:
             graph_id: 图谱ID
+            max_items: Optional maximum; oversized graphs fail without truncation.
 
         Returns:
             边列表
         """
         logger.info(f"获取图谱 {graph_id} 的所有边...")
 
-        edges = fetch_all_edges(self.client, graph_id)
+        if max_items is None:
+            edges = fetch_all_edges(self.client, graph_id)
+        else:
+            if type(max_items) is not int or max_items < 1:
+                raise ValueError("max_items must be a positive integer")
+            edges = fetch_all_edges(self.client, graph_id, max_items=max_items + 1)
+            if len(edges) > max_items:
+                raise ValueError("Graph edges exceed configured limit")
 
         edges_data = []
         for edge in edges:
@@ -222,7 +273,11 @@ class ZepEntityReader:
         self, 
         graph_id: str,
         defined_entity_types: Optional[List[str]] = None,
-        enrich_with_edges: bool = True
+        enrich_with_edges: bool = True,
+        *,
+        selected_entity_ids: Optional[List[str]] = None,
+        max_nodes: Optional[int] = None,
+        max_edges: Optional[int] = None,
     ) -> FilteredEntities:
         """
         筛选出符合预定义实体类型的节点
@@ -235,25 +290,41 @@ class ZepEntityReader:
             graph_id: 图谱ID
             defined_entity_types: 预定义的实体类型列表（可选，如果提供则只保留这些类型）
             enrich_with_edges: 是否获取每个实体的相关边信息
+            selected_entity_ids: Optional exact, ordered cast; every ID must be eligible.
+            max_nodes: Optional maximum node count before context enrichment.
+            max_edges: Optional maximum edge count; context is never truncated.
             
         Returns:
             FilteredEntities: 过滤后的实体集合
         """
         logger.info(f"开始筛选图谱 {graph_id} 的实体...")
+
+        if selected_entity_ids is not None:
+            if not isinstance(selected_entity_ids, list) or not selected_entity_ids:
+                raise ValueError("selected_entity_ids must be a nonempty list of unique nonempty strings")
+            agent_limit = Config.LOCAL_MAX_AGENTS
+            if type(agent_limit) is not int or agent_limit < 1:
+                raise ValueError("LOCAL_MAX_AGENTS must be a positive integer")
+            if len(selected_entity_ids) > min(agent_limit, 1000):
+                raise ValueError("Selected entity count exceeds configured limit")
+            if any(not isinstance(uuid, str) or not uuid.strip() for uuid in selected_entity_ids):
+                raise ValueError("selected_entity_ids must be a nonempty list of unique nonempty strings")
+            if len(set(selected_entity_ids)) != len(selected_entity_ids):
+                raise ValueError("selected_entity_ids must be a nonempty list of unique nonempty strings")
         
         # 获取所有节点
-        all_nodes = self.get_all_nodes(graph_id)
+        planned_read = selected_entity_ids is not None or max_nodes is not None or max_edges is not None
+        all_nodes = (
+            self.get_all_nodes(graph_id, max_items=max_nodes, validate_records=True)
+            if planned_read else self.get_all_nodes(graph_id)
+        )
         total_count = len(all_nodes)
-        
-        # 获取所有边（用于后续关联查找）
-        all_edges = self.get_all_edges(graph_id) if enrich_with_edges else []
         
         # 构建节点UUID到节点数据的映射
         node_map = {n["uuid"]: n for n in all_nodes}
         
         # 筛选符合条件的实体
-        filtered_entities = []
-        entity_types_found = set()
+        eligible_nodes = []
         
         for node in all_nodes:
             labels = node.get("labels", [])
@@ -274,13 +345,33 @@ class ZepEntityReader:
             else:
                 entity_type = custom_labels[0]
             
+            eligible_nodes.append((node, entity_type))
+
+        if selected_entity_ids is not None:
+            eligible_map = {node["uuid"]: (node, entity_type) for node, entity_type in eligible_nodes}
+            if any(uuid not in eligible_map for uuid in selected_entity_ids):
+                raise ValueError("Selected entities are unavailable or ineligible")
+            eligible_nodes = [eligible_map[uuid] for uuid in selected_entity_ids]
+
+        # Validate the complete cast before any edge/context work, but retain
+        # the full node map so neighbors outside that cast remain available.
+        all_edges = []
+        if enrich_with_edges:
+            all_edges = (
+                self.get_all_edges(graph_id) if max_edges is None
+                else self.get_all_edges(graph_id, max_items=max_edges)
+            )
+
+        filtered_entities = []
+        entity_types_found = set()
+        for node, entity_type in eligible_nodes:
             entity_types_found.add(entity_type)
             
             # 创建实体节点对象
             entity = EntityNode(
                 uuid=node["uuid"],
                 name=node["name"],
-                labels=labels,
+                labels=node.get("labels", []),
                 summary=node["summary"],
                 attributes=node["attributes"],
             )

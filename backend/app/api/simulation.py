@@ -38,6 +38,40 @@ from ..models.project import ProjectManager
 logger = get_logger('mirofish.api.simulation')
 
 
+def _planning_response(data=None, error=None):
+    from ..services.preparation_plan import PlanningError
+    if error is not None:
+        if not isinstance(error, PlanningError):
+            error = PlanningError("preparation_unavailable")
+        response = jsonify({"success": False, "error_code": error.code, "error": str(error)})
+        response.status_code = error.status_code
+    else:
+        response = jsonify({"success": True, "data": data})
+    response.headers["Cache-Control"] = "no-store"
+    return response
+
+
+@simulation_bp.route('/<simulation_id>/prepare/plan', methods=['GET'])
+def get_preparation_plan(simulation_id):
+    from ..services import preparation_plan
+    try:
+        if request.query_string:
+            raise preparation_plan.PlanningError("invalid_request")
+        return _planning_response(preparation_plan.get_plan(simulation_id))
+    except Exception as error:
+        return _planning_response(error=error)
+
+
+@simulation_bp.route('/prepare/preview', methods=['POST'])
+def preview_preparation_cast():
+    from ..services import preparation_plan
+    try:
+        data = preparation_plan.read_request(request)
+        return _planning_response(preparation_plan.preview_cast(data))
+    except Exception as error:
+        return _planning_response(error=error)
+
+
 def _get_default_platform(simulation_id: str) -> str:
     """
     根据模拟配置返回默认平台
@@ -278,7 +312,7 @@ def create_simulation():
         }), 500
 
 
-def _check_simulation_prepared(simulation_id: str) -> tuple:
+def _check_simulation_prepared(simulation_id: str, *, _lock_held=False) -> tuple:
     """Reuse completed artifacts for the enabled platforms, without inference.
 
     Legacy states with missing platform flags retain the dual-platform default.
@@ -290,6 +324,13 @@ def _check_simulation_prepared(simulation_id: str) -> tuple:
     import json
 
     try:
+        if Config.LOCAL_MODE:
+            from ..services import preparation_plan
+            if not _lock_held:
+                with preparation_plan.admission_lock(simulation_id):
+                    return _check_simulation_prepared(simulation_id, _lock_held=True)
+            if preparation_plan.active_prepare_tasks(simulation_id):
+                return False, {"reason": "A preparation task still owns this simulation"}
         simulation_id = validate_record_id(simulation_id)
         root = SimulationManager.SIMULATION_DATA_DIR
         simulation_dir = storage_path(root, simulation_id)
@@ -418,9 +459,19 @@ def prepare_simulation():
     import os
     from ..models.task import TaskManager, TaskStatus
     from ..config import Config
+
+    local_claimed_task = None
+    local_thread_started = False
+    local_state_changed = False
     
     try:
-        data = request.get_json() or {}
+        from ..services import preparation_plan
+        try:
+            data = preparation_plan.read_request(request) if Config.LOCAL_MODE else (request.get_json() or {})
+            if isinstance(data, dict) and ({'preparation_mode', 'selected_entity_ids'} & data.keys()):
+                return _planning_response(preparation_plan.planned_prepare(data))
+        except Exception as error:
+            return _planning_response(error=error)
         
         simulation_id = data.get('simulation_id')
         if not simulation_id:
@@ -441,9 +492,31 @@ def prepare_simulation():
         # 检查是否强制重新生成
         force_regenerate = data.get('force_regenerate', False)
         logger.info(f"开始处理 /prepare 请求: simulation_id={simulation_id}, force_regenerate={force_regenerate}")
+
+        if Config.LOCAL_MODE:
+            try:
+                if type(force_regenerate) is not bool:
+                    raise preparation_plan.PlanningError("invalid_request")
+                with preparation_plan.admission_lock(simulation_id):
+                    preparation_plan.assert_idle_locked(simulation_id)
+                    # Admission is authoritative, not an earlier manager cache.
+                    manager._simulations.pop(simulation_id, None)
+                    state = manager.get_simulation(simulation_id)
+                    if not state:
+                        raise preparation_plan.PlanningError("simulation_not_found")
+                    if not force_regenerate:
+                        is_prepared, prepare_info = _check_simulation_prepared(simulation_id, _lock_held=True)
+                        if is_prepared:
+                            return _planning_response({"simulation_id": simulation_id, "status": "ready",
+                                "message": t('api.alreadyPrepared'), "already_prepared": True,
+                                "prepare_info": prepare_info})
+                    local_claimed_task = TaskManager().create_task("simulation_prepare", metadata={
+                        "simulation_id": simulation_id, "project_id": state.project_id})
+            except Exception as error:
+                return _planning_response(error=error)
         
         # 检查是否已经准备完成（避免重复生成）
-        if not force_regenerate:
+        if not force_regenerate and not Config.LOCAL_MODE:
             logger.debug(f"检查模拟 {simulation_id} 是否已准备完成...")
             is_prepared, prepare_info = _check_simulation_prepared(simulation_id)
             logger.debug(f"检查结果: is_prepared={is_prepared}, prepare_info={prepare_info}")
@@ -506,7 +579,7 @@ def prepare_simulation():
         
         # 创建异步任务
         task_manager = TaskManager()
-        task_id = task_manager.create_task(
+        task_id = local_claimed_task or task_manager.create_task(
             task_type="simulation_prepare",
             metadata={
                 "simulation_id": simulation_id,
@@ -517,6 +590,7 @@ def prepare_simulation():
         # 更新模拟状态（包含预先获取的实体数量）
         state.status = SimulationStatus.PREPARING
         manager._save_simulation_state(state)
+        local_state_changed = Config.LOCAL_MODE
         
         # Capture locale before spawning background thread
         current_locale = get_locale()
@@ -620,18 +694,22 @@ def prepare_simulation():
                 
             except Exception as e:
                 logger.error(f"准备模拟失败: {str(e)}")
-                task_manager.fail_task(task_id, str(e))
                 
                 # 更新模拟状态为失败
-                state = manager.get_simulation(simulation_id)
-                if state:
-                    state.status = SimulationStatus.FAILED
-                    state.error = str(e)
-                    manager._save_simulation_state(state)
+                try:
+                    state = manager.get_simulation(simulation_id)
+                    if state:
+                        state.status = SimulationStatus.FAILED
+                        state.error = str(e)
+                        manager._save_simulation_state(state)
+                finally:
+                    # Terminal status releases local preparation ownership.
+                    task_manager.fail_task(task_id, str(e))
         
         # 启动后台线程
         thread = threading.Thread(target=run_prepare, daemon=True)
         thread.start()
+        local_thread_started = True
         
         return jsonify({
             "success": True,
@@ -659,6 +737,11 @@ def prepare_simulation():
             "error": str(e),
             "traceback": traceback.format_exc()
         }), 500
+    finally:
+        if local_claimed_task is not None and not local_thread_started:
+            if local_state_changed:
+                preparation_plan._save_failure(simulation_id, "Preparation could not start")
+            TaskManager().fail_task(local_claimed_task, "Preparation could not start")
 
 
 @simulation_bp.route('/prepare/status', methods=['POST'])
@@ -1672,6 +1755,15 @@ def start_simulation():
         from ..local_runtime.oasis import limit_rounds
         max_rounds = limit_rounds(max_rounds)
 
+        if Config.LOCAL_MODE:
+            from ..services import preparation_plan
+            try:
+                with preparation_plan.admission_lock(simulation_id):
+                    if preparation_plan.active_prepare_tasks(simulation_id):
+                        raise preparation_plan.PlanningError("preparation_busy")
+            except Exception as error:
+                return _planning_response(error=error)
+
         if platform not in ['twitter', 'reddit', 'parallel']:
             return jsonify({
                 "success": False,
@@ -1763,7 +1855,10 @@ def start_simulation():
                 # 进程不存在或已结束，重置状态为 ready
                 logger.info(f"模拟 {simulation_id} 准备工作已完成，重置状态为 ready（原状态: {state.status.value}）")
                 state.status = SimulationStatus.READY
-                manager._save_simulation_state(state)
+                if not Config.LOCAL_MODE:
+                    # Local runner admission owns the next state transition.
+                    # An earlier route read must not overwrite a new prepare.
+                    manager._save_simulation_state(state)
             else:
                 # 准备工作未完成
                 return jsonify({
@@ -1865,6 +1960,10 @@ def start_simulation():
         })
         
     except ValueError as e:
+        if Config.LOCAL_MODE:
+            from ..services.preparation_plan import PlanningError
+            if isinstance(e, PlanningError):
+                return _planning_response(error=e)
         return jsonify({
             "success": False,
             "error": str(e)
@@ -1932,6 +2031,10 @@ def stop_simulation():
         }), 202
 
     except ValueError as e:
+        if Config.LOCAL_MODE:
+            from ..services.preparation_plan import PlanningError
+            if isinstance(e, PlanningError):
+                return _planning_response(error=e)
         return jsonify({
             "success": False,
             "error": str(e)
