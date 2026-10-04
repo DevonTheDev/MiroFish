@@ -291,6 +291,83 @@ proxy's forwarding of supplied Origin/Fetch Metadata is also checked. No real
 model weights or GPU, private documents, paid service, hosted test, native
 browser-generated headers or Windows behavior is established by these tests.
 
+## Run repeatable prompt suites
+
+Open **Prompt suites** from Home, Runtime monitor or Local prompt trials. Define
+a small set of repeatable cases for the configured local model, run them once in
+order, and inspect each exact reply. The suite uses the same bounded trial API
+and shared inference gateway as the single-prompt workbench.
+
+1. Name the suite and add one to five cases. Each case has a label, optional
+   system prompt, required user prompt, temperature and output-token request
+2. Optionally enable an **exact reply** check and enter the expected text.
+   Checking is case-sensitive and preserves whitespace, line endings, reasoning
+   wrappers and empty strings. An enabled blank expectation explicitly expects
+   an empty reply; leaving the check disabled means no automated comparison
+3. Choose **Run suite once**. The page freezes the cases and runs them
+   sequentially. A successful reply whose text differs from the expectation is
+   an ordinary mismatch, so the next case still runs
+4. Inspect the captured outcomes and download the run report. Change the draft
+   and explicitly run again when ready; the new run replaces the displayed
+   report only after its readiness check succeeds
+
+The full definition is validated before the first model request, including each
+case's requested output tokens against the observed local cap. Opening the page
+and Refresh only read status. A running trial in this or another tab prevents
+admission. Between cases the controller waits one normal polling interval and
+checks latest status again. A race with another caller, or a backend worker that
+has not finished exiting, can still reject admission; that halts the suite
+without retrying the POST.
+
+Only a confirmed successful reply receives an exact-text check. Refusal,
+truncation, timeout, runtime failure or an unknown result halts later cases,
+which remain **not attempted**. Those outcomes are not counted as mismatches or
+successful checks. A lost Start response is reconciled by its exact request ID,
+with no repeated inference request. If observation then fails, explicit
+reconciliation may fill in the last result, but does not resume remaining cases.
+Another run always requires another explicit action and a new readiness check.
+
+**Stop scheduling** prevents any further case from starting. It does not cancel
+an accepted backend request; the page may continue observing that case until its
+result is available. Leaving the page retires its requests, timers and queued
+continuations, while accepted backend computation may continue. The existing
+per-case startup, request and cleanup budgets still apply; a five-case sequence
+can take several minutes. Cases share the gateway budget with simulations and
+setup checks, and are never submitted in parallel by this controller.
+
+Download a **suite definition** to keep its exact inputs and expectations. To
+reuse one, select its JSON file, review the validated preview, then explicitly
+apply the imported definition. Importing never runs it. Invalid, oversized or
+unsupported files leave the current draft intact. Definitions have a fixed
+versioned schema, one to five unique case IDs and a 128 KiB UTF-8 file limit;
+duplicate object keys, unknown fields, endpoints, model overrides and captured
+result files are refused. Existing trial text/settings bounds apply, suite names
+use up to 80 characters, and an enabled expected reply has up to 500 characters.
+
+The separate **run report** contains the captured definition, per-case request
+identities, accepted trial observations, exact check outcomes and unattempted
+cases. It is limited to 1 MiB UTF-8 and is not an executable definition format.
+Downloads use captured page memory and remain available after a later status
+failure. Draft edits and imports do not rewrite the existing report. These files
+contain your prompts, expectations and model replies; choose their destination
+accordingly. There is no automatic browser storage or backend suite archive.
+Reloading, navigation or closing the page loses its in-memory suite observation.
+
+Exact reply checks are simple literal comparisons. They do not judge semantic
+correctness, model quality, statistical significance, speed on your GPU or
+whether the model server honored every requested setting. Each trial retains
+its observed configured model name and provider-reported usage separately; those
+labels do not authenticate particular weights. Keep the model server itself
+configured for local inference, as described above.
+
+Local verification exercises the actual Flask API, Vite proxy, shared gateway,
+Axios client and compiled Vue route with synthetic loopback replies. It checks
+sequential call counts, exact matches and mismatches, empty replies, truncation,
+lost responses, explicit reconciliation, Stop, navigation and captured exports.
+Pure contract tests also cover strict imports and bounded polling. No real model
+weights, GPU quality/performance, native browser rendering/headers or Windows
+behavior is established by these tests.
+
 ## Explore latest saved activity
 
 In History, open a saved simulation and choose **Saved activity**. The dedicated

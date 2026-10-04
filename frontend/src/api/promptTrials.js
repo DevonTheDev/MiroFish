@@ -52,6 +52,8 @@ function requestFields(source) {
     system_prompt: text(source.system_prompt, 1000), user_prompt: text(source.user_prompt, 4000, { blank: false }),
     temperature: number(source.temperature, 1, false), max_output_tokens: cap }
 }
+// Shared fixed-field input admission for local suite definitions.
+export const acceptPromptTrialInputs = requestFields
 export function acceptPromptTrialRequest(source) {
   if (!object(source) || !uuid(source.request_id)) return invalid()
   const request = { request_id: source.request_id, ...requestFields(source) }

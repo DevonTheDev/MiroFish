@@ -11,6 +11,7 @@
         <p>{{ t('runtime.scope') }}</p>
       </header>
       <p><RouterLink to="/prompt-trials" data-testid="prompt-trials-link">{{ t('promptTrials.runtimeLink') }}</RouterLink></p>
+      <p><RouterLink to="/prompt-suites" data-testid="prompt-suites-link">{{ t('promptSuites.navTitle') }}</RouterLink></p>
       <LocalReadinessPanel />
       <section class="toolbar" :aria-label="t('runtime.observationControls')">
         <button type="button" class="primary" data-testid="refresh" :disabled="loading" @click="refresh">{{ t('runtime.refresh') }}</button>

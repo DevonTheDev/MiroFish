@@ -2,7 +2,7 @@
   <div class="trials-page">
     <header class="app-header">
       <RouterLink class="brand" to="/">MIROFISH</RouterLink>
-      <nav class="header-actions" :aria-label="t('promptTrials.navigation')"><RouterLink to="/">{{ t('runtime.backHome') }}</RouterLink><RouterLink to="/runtime">{{ t('runtime.navTitle') }}</RouterLink><LanguageSwitcher /></nav>
+      <nav class="header-actions" :aria-label="t('promptTrials.navigation')"><RouterLink to="/">{{ t('runtime.backHome') }}</RouterLink><RouterLink to="/runtime">{{ t('runtime.navTitle') }}</RouterLink><RouterLink to="/prompt-suites" data-testid="prompt-suites-link">{{ t('promptSuites.navTitle') }}</RouterLink><LanguageSwitcher /></nav>
     </header>
     <main>
       <header class="page-heading"><p class="eyebrow">{{ t('promptTrials.eyebrow') }}</p><h1>{{ t('promptTrials.title') }}</h1><p>{{ t('promptTrials.scope') }}</p></header>

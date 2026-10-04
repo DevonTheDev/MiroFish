@@ -9,11 +9,17 @@ import SavedActivityView from '../views/SavedActivityView.vue'
 import SimulationComparisonView from '../views/SimulationComparisonView.vue'
 import RuntimeStatusView from '../views/RuntimeStatusView.vue'
 import PromptTrialsView from '../views/PromptTrialsView.vue'
+import PromptSuitesView from '../views/PromptSuitesView.vue'
 import SavedReportsView from '../views/SavedReportsView.vue'
 
 import RunCapturesView from '../views/RunCapturesView.vue'
 
 const routes = [
+  {
+    path: '/prompt-suites',
+    name: 'PromptSuites',
+    component: PromptSuitesView
+  },
   {
     path: '/prompt-trials',
     name: 'PromptTrials',
