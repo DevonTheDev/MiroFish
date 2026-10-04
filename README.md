@@ -56,6 +56,15 @@ requests, inspect step results, stop remaining checks, or download the result.
 See the [local setup check guide](docs/LOCAL_MODE.md#check-local-setup-in-the-app)
 and [runtime monitor guide](docs/LOCAL_MODE.md#monitor-local-runtime-activity).
 
+## Reopen local prompt experiments
+
+In **Local prompt trials**, reopen an individual trial or two-trial comparison
+JSON, inspect the historical preview and explicitly add it to pins. Compare it
+with saved or newly captured replies, download the comparison, or reuse its
+prompt before an explicit fresh run. Imports stay separate from current model
+readiness and never resume old requests or start inference. See the
+[saved trial workflow](docs/LOCAL_MODE.md#reopen-saved-trial-files).
+
 ## Run and pause local prompt suites
 
 Open **Prompt suites** to run a small repeatable set of prompts against your

@@ -10,7 +10,7 @@ import { mountTrials, trialApi } from '../helpers/prompt-trials-view-fixture.js'
 
 const [backendURL, scenario] = process.argv.slice(2)
 assert.match(backendURL, /^http:\/\/127\.0\.0\.1:[0-9]+$/)
-assert.ok(['succeeded', 'truncated', 'lost', 'leave', 'cloud', 'empty', 'controls'].includes(scenario))
+assert.ok(['succeeded', 'truncated', 'lost', 'leave', 'cloud', 'empty', 'controls', 'reopen', 'reopen_offline', 'reopen_single'].includes(scenario))
 const root = fileURLToPath(new URL('../../', import.meta.url))
 const cacheDir = await mkdtemp(path.join(tmpdir(), 'miro-prompt-trial-vite-'))
 let proxy, view
@@ -100,6 +100,7 @@ try {
       assert.doesNotMatch(JSON.stringify(replies), /SECRET_/)
       const count = calls.length
       await view.click('trial-download')
+      const singleBlob = view.downloads.at(-1).blob
       assert.equal(calls.length, count, 'Download uses the accepted observation')
       assert.deepEqual(JSON.parse(await view.downloads.at(-1).blob.text()), accepted)
       assert.equal(calls.filter(call => call.method === 'post').length, 1)
@@ -107,7 +108,7 @@ try {
         assert.equal(lost, true)
         assert.ok(calls.some(call => call.method === 'get' && call.url.endsWith('/' + accepted.run.request_id)))
       }
-      if (scenario === 'succeeded') {
+      if (['succeeded', 'reopen', 'reopen_offline', 'reopen_single'].includes(scenario)) {
         await view.click('trial-pin')
         await start('Second trial', 'PROMPT_BODY_PRIVATE: second response')
         await view.waitFor(() => view.byId('trial-download')?.props.disabled === false &&
@@ -123,6 +124,64 @@ try {
         const comparison = JSON.parse(await view.downloads.at(-1).blob.text())
         assert.deepEqual(comparison.trials, [accepted, second])
         assert.equal(calls.filter(call => call.method === 'post').length, 2)
+        if (scenario.startsWith('reopen')) {
+          const savedBlob = scenario === 'reopen_single' ? singleBlob : view.downloads.at(-1).blob
+          view.unmount()
+          let offlineReads = 0
+          if (scenario === 'reopen_offline') {
+            await proxy.close(); proxy = null
+            view = await mountTrials({ api: { ...api,
+              getPromptTrials: async () => { offlineReads++; throw new Error('Synthetic offline backend') },
+              getPromptTrial: async () => assert.fail('Import resumed a historical request'),
+              startPromptTrial: async () => assert.fail('Offline import started inference'),
+            } })
+            await view.waitFor(() => view.byId('trial-error'))
+            assert.equal(offlineReads, 1)
+          } else {
+            view = await mountTrials({ api, timers: { setTimeout, clearTimeout } })
+            await view.waitFor(() => view.byId('trial-download')?.props.disabled === false)
+          }
+          const expectedComparison = scenario === 'reopen_single'
+            ? { ...comparison, trials: [accepted, replies.at(-1).data] } : comparison
+          const beforeImport = calls.length
+          const control = view.byId('trial-import-file')
+          assert.ok(control, 'Saved trial files need an explicit import control')
+          await control.props.onChange({ target: { files: [{ name: '<saved comparison>.json',
+            size: savedBlob.size, arrayBuffer: () => savedBlob.arrayBuffer() }], value: 'selected' } })
+          await view.waitFor(() => view.byId('trial-import-preview'))
+          assert.equal(view.byId('pin-item-' + accepted.run.request_id), undefined, 'Preview does not add pins')
+          assert.equal(view.byId('trial-user_prompt').props.value, '', 'Preview does not alter the draft')
+          await view.click('trial-import-add')
+          if (scenario === 'reopen_single') {
+            assert.equal(view.byId('pin-item-' + second.run.request_id), undefined)
+            await view.click('trial-pin') // Compare the reopened file with the current live observation.
+          }
+          for (const saved of [accepted, second]) {
+            assert.ok(view.byId('pin-item-' + saved.run.request_id))
+            await view.change('pin-select-' + saved.run.request_id, true)
+          }
+          assert.equal(calls.length, beforeImport, 'Reopening and comparing use only captured bytes')
+          assert.match(view.text(), /historical/i)
+          await view.click('comparison-download')
+          assert.deepEqual(JSON.parse(await view.downloads.at(-1).blob.text()), expectedComparison)
+          await view.click('pin-reuse-' + accepted.run.request_id)
+          assert.equal(view.byId('trial-user_prompt').props.value, accepted.run.request.user_prompt)
+          assert.equal(calls.length, beforeImport, 'Reuse only populates the draft')
+          if (scenario === 'reopen_offline') {
+            assert.equal(view.byId('trial-run').props.disabled, true, 'Historical available=true cannot enable Run')
+            assert.equal(offlineReads, 1)
+          } else {
+            await view.submit('trial-form')
+            await view.waitFor(() => view.byId('trial-download')?.props.disabled === false &&
+              calls.filter(call => call.method === 'post').length === 3, { timeout: 20000 })
+            const current = replies.filter(reply => reply.data?.run?.state === 'succeeded').at(-1).data
+            assert.notEqual(current.run.request_id, accepted.run.request_id)
+            assert.notEqual(current.run.request_id, second.run.request_id)
+            assert.deepEqual(current.run.request, accepted.run.request)
+            assert.equal(current.run.configuration.model, 'fixture-local-chat')
+            assert.equal(current.run.response.content, accepted.run.response.content)
+          }
+        }
       }
     }
   }

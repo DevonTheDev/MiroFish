@@ -42,37 +42,65 @@
         <p v-else class="reading-note">{{ t('promptTrials.noResult') }}</p>
         <p class="reading-note">{{ t('promptTrials.privateExport') }}</p>
       </section>
+      <section class="panel import-panel" aria-labelledby="import-title">
+        <h2 id="import-title">{{ t('promptTrials.importTitle') }}</h2>
+        <p class="reading-note">{{ t('promptTrials.importNote') }}</p>
+        <div class="field"><label for="trial-import-file">{{ t('promptTrials.importFile') }}</label><input id="trial-import-file" data-testid="trial-import-file" type="file" accept=".json,application/json" @change="readImport"><small>{{ t('promptTrials.importFileHint') }}</small></div>
+        <template v-for="view in importViews" :key="view.token">
+          <div v-if="view.loading || view.preview || view.error" class="toolbar"><button type="button" data-testid="trial-import-clear" @click="view.clear">{{ t('promptTrials.importClear') }}</button></div>
+          <p v-if="view.loading" data-testid="trial-import-status" class="reading-note" role="status">{{ t('promptTrials.importLoading') }}</p>
+          <p v-if="view.added" data-testid="trial-import-status" class="notice" role="status">{{ t('promptTrials.importAdded') }}</p>
+          <p v-if="view.error" data-testid="trial-import-error" class="notice error" role="alert">{{ t(`promptTrials.importErrors.${view.error}`) }}</p>
+          <div v-if="view.preview" data-testid="trial-import-preview">
+            <h3>{{ t('promptTrials.importPreview') }}</h3>
+            <p class="reading-note">{{ t('promptTrials.importFilename') }} <span data-testid="trial-import-name" class="literal-filename">{{ view.filename }}</span></p>
+            <p class="notice">{{ t('promptTrials.importHistoricalNote') }}</p>
+            <p class="reading-note">{{ t('promptTrials.importProvenanceNote') }}</p>
+            <article v-for="saved in view.preview.snapshots" :key="saved.run.request_id" class="import-result" :data-testid="`trial-import-result-${saved.run.request_id}`">
+              <div class="panel-heading"><h3>{{ t('promptTrials.importedHistorical') }}</h3><span class="badge">{{ t(`promptTrials.states.${saved.run.state}`) }}</span></div>
+              <p class="reading-note">{{ t('promptTrials.historicalObservedAt') }} <time :datetime="saved.observed_at">{{ formatDate(saved.observed_at) }}</time></p>
+              <ResultDetails :run="saved.run" :prefix="`import-${saved.run.request_id}`" />
+            </article>
+            <div class="toolbar"><button type="button" data-testid="trial-import-add" @click="view.add">{{ t('promptTrials.importAdd') }}</button><button type="button" data-testid="trial-import-discard" @click="view.clear">{{ t('promptTrials.importDiscard') }}</button></div>
+          </div>
+        </template>
+      </section>
       <section class="panel" aria-labelledby="pins-title">
         <div class="panel-heading"><h2 id="pins-title">{{ t('promptTrials.pins') }} ({{ pins.length }}/10)</h2><span>{{ t('promptTrials.chooseTwo') }}</span></div>
         <p class="reading-note">{{ t('promptTrials.pinsNote') }}</p>
         <p v-if="!pins.length" class="reading-note">{{ t('promptTrials.noPins') }}</p>
         <ul class="pin-list">
           <li v-for="saved in pins" :key="saved.run.request_id" :data-testid="`pin-item-${saved.run.request_id}`">
-            <label class="pin-select"><input type="checkbox" :data-testid="`pin-select-${saved.run.request_id}`" :checked="selectedIds.includes(saved.run.request_id)" :disabled="selectedIds.length === 2 && !selectedIds.includes(saved.run.request_id)" @change="select(saved.run.request_id, $event.target.checked)"><span>{{ saved.run.request.label }}<small>{{ saved.run.configuration.model }} · {{ t(`promptTrials.states.${saved.run.state}`) }}</small></span></label>
-            <div class="pin-actions"><button type="button" :data-testid="`pin-reuse-${saved.run.request_id}`" @click="reuse(saved)">{{ t('promptTrials.reuse') }}</button><button type="button" :data-testid="`pin-download-${saved.run.request_id}`" :disabled="!canUsePins" @click="download(saved)">{{ t('promptTrials.download') }}</button><button type="button" :data-testid="`pin-remove-${saved.run.request_id}`" @click="removePin(saved.run.request_id)">{{ t('promptTrials.remove') }}</button></div>
+            <label class="pin-select"><input type="checkbox" :data-testid="`pin-select-${saved.run.request_id}`" :checked="selectedIds.includes(saved.run.request_id)" :disabled="selectedIds.length === 2 && !selectedIds.includes(saved.run.request_id)" @change="select(saved, $event.target.checked)"><span>{{ saved.run.request.label }}<small>{{ saved.run.configuration.model }} · {{ t(`promptTrials.states.${saved.run.state}`) }}</small><small v-if="importedOrigins.has(saved.run.request_id)">{{ t('promptTrials.importedHistorical') }} · {{ importedOrigins.get(saved.run.request_id).filename }}</small></span></label>
+            <div class="pin-actions"><button type="button" :data-testid="`pin-reuse-${saved.run.request_id}`" @click="reuse(saved)">{{ t('promptTrials.reuse') }}</button><button type="button" :data-testid="`pin-download-${saved.run.request_id}`" :disabled="!canUsePins" @click="download(saved)">{{ t('promptTrials.download') }}</button><button type="button" :data-testid="`pin-remove-${saved.run.request_id}`" @click="removePin(saved)">{{ t('promptTrials.remove') }}</button></div>
           </li>
         </ul>
       </section>
       <div v-if="comparison.length === 2" class="toolbar"><button type="button" data-testid="comparison-download" :disabled="!canUsePins" @click="downloadComparison">{{ t('promptTrials.downloadComparison') }}</button><span class="reading-note">{{ t('promptTrials.privateExport') }}</span></div>
       <section v-if="comparison.length === 2" class="comparison" :aria-label="t('promptTrials.comparison')">
-        <article v-for="saved in comparison" :key="saved.run.request_id" class="panel" :data-testid="`comparison-${saved.run.request_id}`"><h2>{{ saved.run.request.label }}</h2><span class="badge">{{ t(`promptTrials.states.${saved.run.state}`) }}</span><ResultDetails :run="saved.run" :prefix="`compare-${saved.run.request_id}`" /></article>
+        <article v-for="saved in comparison" :key="saved.run.request_id" class="panel" :data-testid="`comparison-${saved.run.request_id}`"><h2>{{ saved.run.request.label }}</h2><span class="badge">{{ t(`promptTrials.states.${saved.run.state}`) }}</span><div v-if="importedOrigins.has(saved.run.request_id)" class="reading-note"><p>{{ t('promptTrials.importedHistorical') }} · <span class="literal-filename">{{ importedOrigins.get(saved.run.request_id).filename }}</span></p><p>{{ t('promptTrials.historicalObservedAt') }} <time :datetime="saved.observed_at">{{ formatDate(saved.observed_at) }}</time></p><p>{{ t('promptTrials.importHistoricalNote') }}</p><p>{{ t('promptTrials.importProvenanceNote') }}</p></div><ResultDetails :run="saved.run" :prefix="`compare-${saved.run.request_id}`" /></article>
       </section>
     </main>
   </div>
 </template>
 
 <script setup>
-import { computed, defineComponent, h, onBeforeUnmount, onMounted, ref } from 'vue'
+import { computed, defineComponent, h, onBeforeUnmount, onMounted, ref, shallowRef } from 'vue'
 import { RouterLink } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import LanguageSwitcher from '../components/LanguageSwitcher.vue'
 import { acceptPromptTrialRequest, acceptPromptTrialSnapshot, getPromptTrial, getPromptTrials, isPromptTrialTerminal, samePromptTrialRequest, startPromptTrial } from '../api/promptTrials'
+import { PROMPT_TRIAL_FILE_MAX_BYTES, parsePromptTrialFile } from '../utils/promptTrialFiles.js'
 
 const { t, locale } = useI18n()
 const snapshot = ref(null), loading = ref(false), stale = ref(true), error = ref(false), exportError = ref(false), validationError = ref(false), notice = ref(null)
 const draft = ref({ label: '', system_prompt: '', user_prompt: '', temperature: 0.2, max_output_tokens: 128 })
 const pins = ref([]), selectedIds = ref([]), ownerId = ref(null)
+const importedOrigins = ref(new Map())
 let retired = false, generation = 0, request = null, timer = null, owner = null, polls = 0
+let importGeneration = 0
+const emptyImport = token => ({ token, loading: false, preview: null, filename: '', error: null, added: false })
+const importState = shallowRef(emptyImport(importGeneration))
 const canDownload = computed(() => !retired && !loading.value && !stale.value && isPromptTrialTerminal(snapshot.value?.run))
 const canPin = computed(() => canDownload.value && pins.value.length < 10 && !pins.value.some(item => item.run.request_id === snapshot.value.run.request_id))
 const canUsePins = computed(() => !retired && pins.value.length > 0)
@@ -163,16 +191,62 @@ function pin() {
   if (retired || !canPin.value) return
   try { pins.value.push(copySnapshot(snapshot.value)) } catch { stale.value = true; error.value = true }
 }
-function select(id, enabled) {
-  if (retired || !pins.value.some(item => item.run.request_id === id)) return
+function select(saved, enabled) {
+  if (retired || !pins.value.includes(saved)) return
+  const id = saved.run.request_id
   if (!enabled) selectedIds.value = selectedIds.value.filter(value => value !== id)
   else if (selectedIds.value.length < 2 && !selectedIds.value.includes(id)) selectedIds.value.push(id)
 }
-function removePin(id) {
-  if (retired) return
+function removePin(saved) {
+  if (retired || !pins.value.includes(saved)) return
+  const id = saved.run.request_id
   selectedIds.value = selectedIds.value.filter(value => value !== id)
-  pins.value = pins.value.filter(item => item.run.request_id !== id)
+  pins.value = pins.value.filter(item => item !== saved)
+  importedOrigins.value.delete(id)
 }
+function ownsImport(owned) { return !retired && importGeneration === owned.token && importState.value === owned }
+async function readImport(event) {
+  if (retired) return
+  // Clearing a native file input can mutate its existing FileList in place.
+  // Capture both values before resetting the picker for a same-file retry.
+  const fileCount = event.target.files?.length ?? 0, file = event.target.files?.[0]
+  event.target.value = ''
+  const owned = { ...emptyImport(++importGeneration), loading: !!file }
+  importState.value = owned
+  if (fileCount === 0) return
+  try {
+    if (fileCount !== 1 || !file || !Number.isSafeInteger(file.size) || file.size < 0 || file.size > PROMPT_TRIAL_FILE_MAX_BYTES || typeof file.arrayBuffer !== 'function' ||
+      typeof file.name !== 'string' || file.name.length > 1024 || Array.from(file.name).length > 512 || new TextEncoder().encode(file.name).length > 2048) throw new Error('Invalid trial file')
+    const filename = file.name
+    const bytes = await file.arrayBuffer()
+    if (!ownsImport(owned)) return
+    if (Object.prototype.toString.call(bytes) !== '[object ArrayBuffer]' || bytes.byteLength > PROMPT_TRIAL_FILE_MAX_BYTES) throw new Error('Invalid trial file bytes')
+    const text = new TextDecoder('utf-8', { fatal: true, ignoreBOM: true }).decode(bytes)
+    const preview = parsePromptTrialFile(text)
+    if (ownsImport(owned)) importState.value = { ...owned, loading: false, filename, preview }
+  } catch { if (ownsImport(owned)) importState.value = { ...owned, loading: false, error: 'invalid' } }
+}
+function clearImport(owned) {
+  if (ownsImport(owned)) importState.value = emptyImport(++importGeneration)
+}
+function addImport(owned) {
+  if (!ownsImport(owned) || !owned.preview) return
+  const snapshots = owned.preview.snapshots
+  const existingIds = new Set(pins.value.map(saved => saved.run.request_id))
+  const conflict = snapshots.some(saved => existingIds.has(saved.run.request_id)) ? 'duplicate' : pins.value.length + snapshots.length > 10 ? 'capacity' : null
+  if (conflict) { importState.value = { ...owned, error: conflict }; return }
+  // Imported snapshots are already detached and deeply frozen. Provenance stays
+  // outside them so existing individual and comparison exports remain identical.
+  pins.value = [...pins.value, ...snapshots]
+  for (const saved of snapshots) importedOrigins.value.set(saved.run.request_id, { filename: owned.filename })
+  importState.value = { ...emptyImport(++importGeneration), added: true }
+}
+// Render-local closures preserve exact preview identity, including the transition
+// from pending read to accepted preview and later duplicate/capacity corrections.
+const importViews = computed(() => {
+  const owned = importState.value
+  return [{ ...owned, add: () => addImport(owned), clear: () => clearImport(owned) }]
+})
 function reuse(saved) {
   if (retired || !saved || (!pins.value.includes(saved) && (saved !== snapshot.value || !canDownload.value))) return
   try {
@@ -242,7 +316,8 @@ const ResultDetails = defineComponent({
 onMounted(observe)
 onBeforeUnmount(() => {
   retired = true; generation++; clearTimer(); request?.controller.abort(); request = null; owner = null; ownerId.value = null
-  pins.value = []; selectedIds.value = []
+  importState.value = emptyImport(++importGeneration)
+  pins.value = []; selectedIds.value = []; importedOrigins.value.clear()
 })
 </script>
 
@@ -256,6 +331,7 @@ button { cursor: pointer; padding: 11px 16px; min-height: 44px; border: 1px soli
 .notice, :deep(.notice) { padding: 14px 16px; border-radius: 7px; background: #eaf0f6; font-size: 14px; line-height: 1.7; }.error, :deep(.error) { color: #943528; background: #fff0ec; }.warning { color: #825a17; background: #fff1cf; }.badge { display: inline-block; padding: 6px 11px; font-size: 12px; font-weight: 600; border-radius: 20px; background: #eaf0f6; color: #415067; }.reading-note, :deep(.reading-note) { color: #616d7c; font-size: 13px; line-height: 1.75; }
 :deep(.result-grid) { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 20px; margin: 24px 0; }:deep(dt) { color: #626e7d; font-size: 12px; margin-bottom: 7px; }:deep(dd) { margin: 0; font-size: 14px; line-height: 1.6; overflow-wrap: anywhere; font-variant-numeric: tabular-nums; }:deep(pre) { white-space: pre-wrap; overflow-wrap: anywhere; font-family: inherit; font-size: 14px; line-height: 1.75; background: #f8f9fb; border: 1px solid #e4e9ef; border-radius: 7px; padding: 16px; max-height: 480px; overflow-y: auto; }:deep(h3) { font-size: 14px; margin: 20px 0 10px; }:deep(summary) { cursor: pointer; min-height: 44px; display: list-item; align-content: center; font-size: 14px; }:deep(.run-label) { font-weight: 600; overflow-wrap: anywhere; }
 .pin-list { list-style: none; padding: 0; margin: 0; }.pin-list li { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 16px; border-top: 1px solid #e4e9ef; padding: 16px 0; }.pin-select { display: flex; align-items: center; gap: 12px; min-width: 0; flex: 1 1 220px; font-size: 14px; overflow-wrap: anywhere; }.pin-select input { width: 18px; height: 18px; flex: 0 0 auto; accent-color: #253245; }.pin-select small { display: block; margin-top: 5px; color: #626e7d; font-size: 12px; }.pin-actions { display: flex; flex-wrap: wrap; gap: 8px; }.pin-actions button { font-size: 12px; padding: 8px 12px; }.comparison { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }.comparison :deep(.result-grid) { grid-template-columns: 1fr 1fr; }.comparison h2 { overflow-wrap: anywhere; }
+.literal-filename { overflow-wrap: anywhere; white-space: pre-wrap; }.import-result { border-top: 1px solid #e4e9ef; margin-top: 20px; padding-top: 20px; }.import-panel h3 { font-size: 16px; }
 @media (max-width: 720px) { .app-header { padding: 12px 20px; flex-wrap: wrap; }.header-actions { gap: 16px; }main { padding: 28px 16px; }.panel { padding: 19px; }.settings-grid, .comparison { grid-template-columns: 1fr; gap: 0; }:deep(.result-grid), .comparison :deep(.result-grid) { grid-template-columns: 1fr 1fr; }.observed { width: 100%; margin: 0; }.toolbar button { flex: 1 1 auto; } }
 @media (max-width: 400px) { :deep(.result-grid), .comparison :deep(.result-grid) { grid-template-columns: 1fr; } }
 </style>

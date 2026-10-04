@@ -458,7 +458,8 @@ Pinned trials exist only in the open page's memory, with at most ten retained
 snapshots. They remain downloadable if a later request fails or the backend
 becomes unavailable. Navigation, reload or closing the page loses them. The backend holds
 only its latest trial until another replaces it or the backend restarts. This is
-not a persistent experiment library or an importable trial archive.
+not a persistent experiment library. Downloaded individual and comparison files
+can be reopened explicitly using the historical import workflow below.
 
 The captured model name and reasoning policy describe the loaded configuration;
 they do not verify particular weight files. Temperature and output tokens are
@@ -514,6 +515,54 @@ ownership, lost replies, literal results and exact snapshot downloads. The Vite
 proxy's forwarding of supplied Origin/Fetch Metadata is also checked. No real
 model weights or GPU, private documents, paid service, hosted test, native
 browser-generated headers or Windows behavior is established by these tests.
+
+### Reopen saved trial files
+
+In **Local prompt trials**, select a downloaded individual trial JSON or a
+two-trial comparison JSON. Review the filename, recorded observation and full
+captured details, then explicitly add the imported trials to pins. Selecting a
+file only previews it. You can compare imported trials with one another or with
+a newly pinned observation and download the existing comparison format again.
+
+All imported entries are labeled historical file data. Recorded model names,
+request IDs, fingerprints, timing and token usage are not authenticated by this
+check. Their captured availability and resource limits do not describe the
+current backend. Imports never restore live request ownership, poll an old ID,
+select a model, or start inference. Opening the page still performs its existing
+passive status read; file review remains available if that read fails.
+
+**Reuse prompt and settings** copies only the captured inputs/settings into the editor.
+A later explicit **Run trial** uses a fresh request ID and checks current backend
+readiness and output-token limits. Changing model weights or configuration
+remains a separate local setup action. Importing a file claiming an available
+backend cannot make Run available while the current backend is unavailable.
+
+Files are limited to **512 KiB UTF-8** before and after reading, with a JSON depth
+limit of 10. Supported files are the existing schema-v1 individual snapshot or
+an exact schema-v1 comparison wrapper containing two distinct trial IDs. Each
+trial must have a valid terminal observation: succeeded, truncated, refused,
+failed, timed out or cancelled. Historical unavailable/cleanup-failed captures
+remain reviewable. Running/empty observations, cloud records, API envelopes,
+suite reports, malformed UTF-8, BOMs, duplicate decoded keys, nonfinite numbers
+and invalid Unicode are refused. Unknown snapshot fields are discarded by the
+same fixed-field admission used for live observations; endpoints and raw errors
+are never imported.
+
+Imported and live pins share the existing ten-entry limit. Adding a file is
+atomic: if any imported ID is already pinned or the whole file would exceed the
+limit, none of its entries are added and existing pins stay intact. Remove an
+existing pin explicitly before replacing an observation with the same ID. A new
+file selection, **Discard preview** or navigation retires earlier file reads and previews.
+Invalid files leave the draft, pins and live observation unchanged. Pins still
+last only in the open page; download them before navigation or reload. No
+automatic browser storage or backend archive is introduced.
+
+Local tests cover strict file boundaries, both languages, literal replies,
+atomic pin admission and stale callbacks. Actual Flask/Vite/gateway/Axios/Vue
+tests download real synthetic trial observations, reopen their comparison in a
+fresh view, compare/export while offline, and explicitly run reused inputs with
+a fresh ID. No real model weights, inference quality, native browser file or
+download dialogs, or Windows behavior are established by these checks.
 
 ## Run repeatable prompt suites
 

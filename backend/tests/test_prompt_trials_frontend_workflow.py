@@ -67,7 +67,8 @@ def synthetic_trial_model(*, delay=0, truncated=False, empty=False, controls=Fal
         assert not thread.is_alive()
 
 
-@pytest.mark.parametrize("scenario", ["succeeded", "truncated", "lost", "leave", "cloud", "empty", "controls"])
+@pytest.mark.parametrize("scenario", ["succeeded", "truncated", "lost", "leave", "cloud", "empty", "controls",
+                                      "reopen", "reopen_offline", "reopen_single"])
 def test_real_prompt_trial_workflow(monkeypatch, scenario, caplog):
     repo = Path(__file__).resolve().parents[2]
     node = shutil.which("node")
@@ -144,7 +145,8 @@ def test_real_prompt_trial_workflow(monkeypatch, scenario, caplog):
                     time.sleep(0.02)
                     snapshot = prompt_trials.get_prompt_trials_snapshot()
                 assert snapshot["run"]["state"] == ("truncated" if scenario == "truncated" else "succeeded")
-                assert len(calls) == (2 if scenario == "succeeded" else 1)
+                expected_calls = 3 if scenario in {"reopen", "reopen_single"} else 2 if scenario in {"succeeded", "reopen_offline"} else 1
+                assert len(calls) == expected_calls
                 assert all(path == "/v1/chat/completions" for path, _body, _headers in calls)
                 assert all(body["model"] == "fixture-local-chat" and not body.get("tools")
                            and not body.get("stream", False) for _path, body, _headers in calls)
