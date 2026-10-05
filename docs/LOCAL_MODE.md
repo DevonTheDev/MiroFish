@@ -576,7 +576,7 @@ observations and explicitly imported historical pins.
 2. Choose **Build suite definition** and inspect each captured label, full system
    and user prompt, temperature and requested output-token limit
 3. Download the definition, open **Prompt suites**, import and explicitly adopt
-   it, then edit any checks you need. **Run suite once** remains a separate
+   it, then edit any checks you need. **Run selected cases once** remains a separate
    explicit action that checks current backend readiness and output-token caps
 
 The definition copies exact admitted inputs/settings. It does not include model
@@ -627,7 +627,7 @@ and shared inference gateway as the single-prompt workbench.
    reply is a directly parseable object; it needs no expected text. JSON fields
    also requires named top-level properties with their chosen JSON types. Leaving
    the check disabled means no automated comparison
-3. Choose **Run suite once**. The page freezes the cases and runs them
+3. Choose **Run selected cases once**. The page freezes the included cases and runs them
    sequentially. A successful reply that fails its selected check is an ordinary
    mismatch, so the next case still runs
 4. Inspect the captured outcomes and download the run report. Change the draft
@@ -652,7 +652,35 @@ cases; Resume continues that original run. Export the edited definition or
 choose a later explicit Run to use the changes. As with the rest of the draft,
 navigation/reload loses unsaved edits.
 
-The full definition is validated before the first model request, including each
+Use **Include in next run** to choose a smaller experiment without deleting other
+draft cases. Initial, imported, newly added and duplicated cases start included.
+Moving a case preserves its membership; removing it removes that membership.
+The selected/total count describes the next run, not an already captured run.
+At least one case must be included. The suite name and included cases must pass
+the existing definition checks, and included output requests must fit the
+current backend budget. Incomplete or over-budget excluded cases do not block a
+valid selection. The five-case limit still applies to the entire draft.
+
+**Download selected definition** saves only the included cases, in their current
+order, as `local_prompt_suite_selection.json`. It keeps their exact IDs, inputs,
+checks and schema version and uses the ordinary definition format. It makes no
+runtime request and remains available offline when the selected definition is
+valid. **Download full definition** still includes every draft case and
+requires the whole draft to be valid. A run report contains only the captured
+selection; excluded draft cases are absent, not recorded as failed or unattempted.
+Report comparison shows a case present on only one side as added/removed and
+does not produce a paired finding for it. Review which file you export: the full
+definition includes excluded prompts.
+
+Selection is kept only in the open page. Importing either definition file starts
+with every imported case included; the file has no selection flags. An invalid
+or discarded import preview leaves the current selection alone. Changing
+checkboxes does not make a model/readiness request, stop scheduling, or change a
+running or paused capture. Resume continues its original selected cases, even if
+the future draft currently has none included. Use the existing Stop scheduling
+control to prevent further cases in that captured run.
+
+The selected definition is validated before the first model request, including each
 case's requested output tokens against the observed local cap. Opening the page
 and Refresh only read status. A running trial in this or another tab prevents
 admission. Between cases the controller waits one normal polling interval and
@@ -661,7 +689,7 @@ has not finished exiting, can still reject admission; that halts the suite
 without retrying the POST.
 
 Only a confirmed successful reply receives its selected check. Refusal,
-truncation, timeout, runtime failure or an unknown result halts later cases,
+truncation, timeout, runtime failure or an unknown result halts later selected cases,
 which remain **not attempted**. Those outcomes are not counted as mismatches or
 successful checks. A lost Start response is reconciled by its exact request ID,
 with no repeated inference request. If observation then fails, explicit
@@ -676,7 +704,7 @@ per-case startup, request and cleanup budgets still apply; a five-case sequence
 can take several minutes. Cases share the gateway budget with simulations and
 setup checks, and are never submitted in parallel by this controller.
 
-Download a **suite definition** to keep its exact inputs and expectations. To
+Use **Download full definition** to keep every draft case's exact inputs and expectations. To
 reuse one, select its JSON file, review the validated preview, then explicitly
 apply the imported definition. Importing never runs it. Invalid, oversized or
 unsupported files leave the current draft intact. Definitions have a fixed
@@ -739,6 +767,11 @@ schemas, independent check rules, capacity/boundary controls and retired event
 handlers. The linked workflow exports an edited definition, imports it into a
 fresh editor and runs its selected order, then confirms that draft edits during
 Pause do not change the captured run resumed afterward.
+Selection tests cover full/subset validation and exports, numeric budget checks,
+membership through case editing/imports, and retired handlers in both languages.
+The linked API workflow excludes an incomplete over-budget draft case, runs only
+two chosen cases in their selected order, changes future membership during Pause,
+and confirms the captured run and exported subset remain unchanged.
 No real model
 weights, GPU quality/performance, native browser rendering/headers or Windows
 behavior is established by these tests.
@@ -847,7 +880,7 @@ Historical results, request identities, running state, reconciliation ownership
 and model configuration are never restored into the current controller. A source
 file labeled running, stopped or halted is a historical observation; importing it
 does not read those old requests or resume them. The current page's captured run,
-including an active or unresolved run, stays untouched. A later **Run suite once**
+including an active or unresolved run, stays untouched. A later **Run selected cases once**
 explicitly starts the chosen draft from its first case, checks current readiness
 and token caps, uses the currently configured model and generates new run/request
 IDs. A historical report does not establish that the present server is ready.

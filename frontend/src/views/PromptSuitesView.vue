@@ -29,7 +29,7 @@
         <h2 id="suite-files-title">{{ t('promptSuites.filesTitle') }}</h2>
         <p>{{ t('promptSuites.filesNote') }}</p>
         <p>{{ t('promptSuites.runImportNote') }}</p>
-        <div class="toolbar"><label class="file-label" for="suite-import-file">{{ t('promptSuites.import') }}<input id="suite-import-file" data-testid="suite-import-file" type="file" accept="application/json,.json" @change="readImport"></label><label class="file-label" for="suite-run-import-file">{{ t('promptSuites.importRun') }}<input id="suite-run-import-file" data-testid="suite-run-import-file" type="file" accept="application/json,.json" @change="readRunImport"></label><button type="button" data-testid="suite-export-definition" :disabled="!acceptedDraft" @click="downloadDefinition">{{ t('promptSuites.exportDefinition') }}</button></div>
+        <div class="toolbar"><label class="file-label" for="suite-import-file">{{ t('promptSuites.import') }}<input id="suite-import-file" data-testid="suite-import-file" type="file" accept="application/json,.json" @change="readImport"></label><label class="file-label" for="suite-run-import-file">{{ t('promptSuites.importRun') }}<input id="suite-run-import-file" data-testid="suite-run-import-file" type="file" accept="application/json,.json" @change="readRunImport"></label><button type="button" data-testid="suite-export-definition" :disabled="!acceptedDraft" @click="downloadDefinition">{{ t('promptSuites.exportDefinition') }}</button><button type="button" data-testid="suite-export-selection" :disabled="!acceptedSelection" @click="downloadSelection">{{ t('promptSuites.exportSelection') }}</button></div>
         <template v-for="importView in importViews" :key="importView.token">
           <p v-if="importView.loading" role="status">{{ t('promptSuites.importLoading') }}</p>
           <p v-if="importView.error" class="notice error" data-testid="suite-import-error" role="alert">{{ t('promptSuites.importError') }}</p>
@@ -47,12 +47,15 @@
         </template>
       </section>
 
-      <form class="panel" data-testid="suite-form" @submit.prevent="start">
+      <form class="panel" data-testid="suite-form" novalidate @submit.prevent="start">
         <div class="panel-heading"><h2>{{ t('promptSuites.editorTitle') }}</h2><span>{{ draft.cases.length }}/5</span></div>
+        <p data-testid="suite-selection-count" role="status">{{ t('promptSuites.selectionCount', { selected: selectedCases.length, total: draft.cases.length }) }}</p>
+        <p class="reading-note">{{ t('promptSuites.selectionNote') }}</p>
         <div class="field"><label for="suite-name">{{ t('promptSuites.name') }}</label><input id="suite-name" data-testid="suite-name" :value="draft.name" required @input="draft.name = $event.target.value"><small>{{ t('promptSuites.nameHint') }}</small></div>
         <p v-if="duplicateError" class="notice error" data-testid="suite-duplicate-error" role="alert">{{ t('promptSuites.duplicateError') }}</p>
-        <fieldset v-for="({ item, duplicate, moveUp, moveDown }, index) in caseViews" :key="item.case_id" class="case-editor" :data-case-id="item.case_id">
+        <fieldset v-for="({ item, included, include, remove, duplicate, moveUp, moveDown }, index) in caseViews" :key="item.case_id" class="case-editor" :data-case-id="item.case_id">
           <legend>{{ t('promptSuites.caseNumber', { number: index + 1 }) }}</legend>
+          <label class="check-control"><input type="checkbox" :data-testid="`suite-case-${index}-included`" :checked="included" @change="include">{{ t('promptSuites.includeCase') }}</label>
           <div class="field"><label :for="`suite-label-${item.case_id}`">{{ t('promptTrials.label') }}</label><input :id="`suite-label-${item.case_id}`" :data-testid="`suite-case-${index}-label`" :value="item.label" required @input="item.label = $event.target.value"><small>{{ t('promptTrials.labelHint') }}</small></div>
           <div class="field"><label :for="`suite-system-${item.case_id}`">{{ t('promptTrials.systemPrompt') }}</label><textarea :id="`suite-system-${item.case_id}`" :data-testid="`suite-case-${index}-system_prompt`" rows="2" :value="item.system_prompt" @input="item.system_prompt = $event.target.value" /><small>{{ t('promptTrials.systemHint') }}</small></div>
           <div class="field"><label :for="`suite-user-${item.case_id}`">{{ t('promptTrials.userPrompt') }}</label><textarea :id="`suite-user-${item.case_id}`" :data-testid="`suite-case-${index}-user_prompt`" rows="3" :value="item.user_prompt" required @input="item.user_prompt = $event.target.value" /><small>{{ t('promptTrials.userHint') }}</small></div>
@@ -79,11 +82,12 @@
             <button type="button" :data-testid="`suite-case-${index}-duplicate`" :disabled="draft.cases.length >= 5" @click="duplicate">{{ t('promptSuites.duplicateCase') }}</button>
             <button type="button" :data-testid="`suite-case-${index}-move-up`" :disabled="index === 0" @click="moveUp">{{ t('promptSuites.moveUp') }}</button>
             <button type="button" :data-testid="`suite-case-${index}-move-down`" :disabled="index === draft.cases.length - 1" @click="moveDown">{{ t('promptSuites.moveDown') }}</button>
-            <button type="button" :data-testid="`suite-case-${index}-remove`" :disabled="draft.cases.length === 1" @click="removeCase(item.case_id)">{{ t('promptSuites.removeCase') }}</button>
+            <button type="button" :data-testid="`suite-case-${index}-remove`" :disabled="draft.cases.length === 1" @click="remove">{{ t('promptSuites.removeCase') }}</button>
           </div>
         </fieldset>
         <div class="toolbar"><button type="button" data-testid="suite-add-case" :disabled="draft.cases.length === 5" @click="addCase">{{ t('promptSuites.addCase') }}</button></div>
         <p v-if="!acceptedDraft" class="reading-note" data-testid="suite-validation">{{ t('promptSuites.validation') }}</p>
+        <p v-if="!acceptedSelection" class="reading-note" data-testid="suite-selection-validation">{{ t(selectedCases.length === 0 ? 'promptSuites.selectionEmpty' : 'promptSuites.selectionInvalid') }}</p>
         <p v-if="capExceeded" class="notice warning" data-testid="suite-cap-warning">{{ t('promptSuites.capExceeded', { cap: state.latest.limits.max_output_tokens }) }}</p>
         <div class="toolbar"><button class="primary" type="submit" data-testid="suite-run" :disabled="!canRun">{{ t('promptSuites.run') }}</button><template v-for="controls in schedulingControls" :key="controls.runId"><button type="button" data-testid="suite-pause" :disabled="!state.can_pause" @click="controls.pause">{{ t('promptSuites.pause') }}</button><button type="button" data-testid="suite-resume" :disabled="!state.can_resume" @click="controls.resume">{{ t('promptSuites.resume') }}</button></template><button type="button" data-testid="suite-stop" :disabled="!canStop" @click="runner.stop()">{{ t('promptSuites.stop') }}</button></div>
         <p v-if="state.pause_requested" class="notice" data-testid="suite-scheduling-state" :data-phase="state.phase === 'paused' ? 'paused' : 'pause_pending'" role="status">{{ t(state.phase === 'paused' ? 'promptSuites.pausedNote' : 'promptSuites.pausePending') }}</p>
@@ -135,14 +139,19 @@ import { createPromptSuiteRunner } from '../utils/promptSuiteRunner.js'
 const { t, locale } = useI18n()
 let retired = false, importGeneration = 0
 const draft = ref({ schema_version: 1, kind: 'mirofish_local_prompt_suite', name: '', cases: [newCase(1)] })
+// Only excluded objects are retained, at most the five cases in the draft.
+// New and duplicated objects start included without adding selection metadata.
+const excludedCases = shallowRef([])
 const emptyImport = token => ({ token, preview: null, loading: false, error: false })
 const importState = shallowRef(emptyImport(importGeneration)), exportError = ref(false), duplicateError = ref(false)
 const state = ref(null)
 const runner = createPromptSuiteRunner({ onChange: next => { if (!retired) state.value = next } })
 state.value = runner.getState()
 const acceptedDraft = computed(() => { try { return acceptPromptSuiteDefinition(draft.value) } catch { return null } })
-const capExceeded = computed(() => state.value.latest?.limits.max_output_tokens != null && draft.value.cases.some(item => item.max_output_tokens > state.value.latest.limits.max_output_tokens))
-const canRun = computed(() => !retired && !state.value.busy && !state.value.latest_stale && state.value.latest?.available === true && state.value.latest?.run?.state !== 'running' && acceptedDraft.value !== null && !capExceeded.value)
+const selectedCases = computed(() => draft.value.cases.filter(item => !excludedCases.value.includes(item)))
+const acceptedSelection = computed(() => { try { return acceptPromptSuiteDefinition({ ...draft.value, cases: selectedCases.value }) } catch { return null } })
+const capExceeded = computed(() => state.value.latest?.limits.max_output_tokens != null && selectedCases.value.some(item => item.max_output_tokens > state.value.latest.limits.max_output_tokens))
+const canRun = computed(() => !retired && !state.value.busy && !state.value.latest_stale && state.value.latest?.available === true && state.value.latest?.run?.state !== 'running' && acceptedSelection.value !== null && !capExceeded.value)
 const canStop = computed(() => !retired && (state.value.phase === 'checking' || (state.value.report?.status === 'running' && !state.value.report.stop_requested)))
 const canReconcile = computed(() => !retired && !state.value.busy && state.value.report?.cases.some(item => item.status === 'unknown'))
 // Render-local aliases prevent Vue's cached event wrappers from resolving the
@@ -203,8 +212,17 @@ function requiredFieldViews(item) {
 }
 function numeric(input) { return input === '' ? '' : Number(input) }
 function addCase() { if (!retired && draft.value.cases.length < 5) draft.value.cases.push(newCase(draft.value.cases.length + 1, draft.value.schema_version)) }
-function removeCase(id) { if (!retired && draft.value.cases.length > 1) draft.value.cases = draft.value.cases.filter(item => item.case_id !== id) }
 function ownsDraftCase(owned, item) { return !retired && draft.value === owned && owned.cases.includes(item) }
+function setIncluded(owned, item, included) {
+  if (!ownsDraftCase(owned, item)) return
+  if (included) excludedCases.value = excludedCases.value.filter(current => current !== item)
+  else if (!excludedCases.value.includes(item)) excludedCases.value = [...excludedCases.value, item]
+}
+function removeCase(owned, item) {
+  if (!ownsDraftCase(owned, item) || owned.cases.length <= 1) return
+  owned.cases.splice(owned.cases.indexOf(item), 1)
+  excludedCases.value = excludedCases.value.filter(current => current !== item)
+}
 function duplicateCase(owned, item) {
   if (!ownsDraftCase(owned, item) || owned.cases.length >= 5) return
   try {
@@ -226,9 +244,11 @@ function moveCase(owned, item, direction) {
 // when replacement cases reuse IDs and Vue caches event wrappers.
 const caseViews = computed(() => {
   const owned = draft.value
-  return owned.cases.map(item => ({ item, duplicate: () => duplicateCase(owned, item), moveUp: () => moveCase(owned, item, -1), moveDown: () => moveCase(owned, item, 1) }))
+  return owned.cases.map(item => ({ item, included: !excludedCases.value.includes(item),
+    include: event => setIncluded(owned, item, event.target.checked), remove: () => removeCase(owned, item),
+    duplicate: () => duplicateCase(owned, item), moveUp: () => moveCase(owned, item, -1), moveDown: () => moveCase(owned, item, 1) }))
 })
-function start() { if (canRun.value) runner.start(acceptedDraft.value) }
+function start() { if (canRun.value) runner.start(acceptedSelection.value) }
 function ownsImport(owned) { return !retired && importGeneration === owned.token && importState.value === owned }
 async function readImportFile(event, fromRun) {
   if (retired) return
@@ -267,7 +287,7 @@ function cancelImport(owned) {
 }
 function useImport(owned) {
   if (!ownsImport(owned) || !owned.preview) return
-  try { draft.value = acceptPromptSuiteDefinition(owned.preview.definition); duplicateError.value = false; cancelImport(owned) }
+  try { draft.value = acceptPromptSuiteDefinition(owned.preview.definition); excludedCases.value = []; duplicateError.value = false; cancelImport(owned) }
   catch { if (ownsImport(owned)) importState.value = { ...owned, error: true } }
 }
 // Render-local aliases capture each read/preview, including pending-to-pending reads.
@@ -290,6 +310,10 @@ function downloadDefinition() {
   if (retired || !acceptedDraft.value) return
   try { download(exportPromptSuiteDefinition(acceptedDraft.value), 'local_prompt_suite.json') } catch { exportError.value = true }
 }
+function downloadSelection() {
+  if (retired || !acceptedSelection.value) return
+  try { download(exportPromptSuiteDefinition(acceptedSelection.value), 'local_prompt_suite_selection.json') } catch { exportError.value = true }
+}
 function downloadRun() {
   if (retired || !state.value.report) return
   try { download(exportPromptSuiteReport(state.value.report), `local_prompt_suite_run_${state.value.report.run_id}.json`) } catch { exportError.value = true }
@@ -297,7 +321,7 @@ function downloadRun() {
 function value(input) { return input == null ? t('promptTrials.unknown') : String(input) }
 function formatDate(input) { return input === null ? t('promptTrials.unknown') : new Intl.DateTimeFormat(locale.value, { dateStyle: 'medium', timeStyle: 'long', timeZone: 'UTC' }).format(new Date(input)) }
 onMounted(() => runner.refresh())
-onBeforeUnmount(() => { retired = true; importGeneration++; runner.dispose() })
+onBeforeUnmount(() => { retired = true; importGeneration++; excludedCases.value = []; runner.dispose() })
 </script>
 
 <style scoped>
