@@ -100,7 +100,7 @@ def prepare_run(tmp_path, monkeypatch, platform, *, seeds=True, active_rounds=(0
         return graph
 
     monkeypatch.setattr(script, f"generate_{platform}_agent_graph", generate_graph)
-    monkeypatch.setattr(script.oasis, "make", lambda **kwargs: env)
+    monkeypatch.setattr(script, "make_oasis_environment", lambda **kwargs: env)
     monkeypatch.setattr(script, "platform_for_mode", lambda *args, **kwargs: kwargs.get("default_platform"), raising=False)
     monkeypatch.setattr(script, "_shutdown_event", asyncio.Event())
     runner_class = getattr(script, f"{platform.title()}SimulationRunner")
@@ -260,6 +260,7 @@ def test_missing_trace_table_prevents_single_success(tmp_path, monkeypatch, plat
 def test_parallel_platform_functions_keep_using_actual_trace_reader(tmp_path, monkeypatch, platform):
     run = prepare_run(tmp_path, monkeypatch, platform, seeds=False)
     parallel = importlib.import_module("scripts.run_parallel_simulation")
+    monkeypatch.setattr(parallel, "make_oasis_environment", lambda **kwargs: run.env)
     monkeypatch.setattr(parallel, "create_model", lambda *args, **kwargs: object())
     monkeypatch.setattr(parallel, f"generate_{platform}_agent_graph",
                         getattr(run.script, f"generate_{platform}_agent_graph"))

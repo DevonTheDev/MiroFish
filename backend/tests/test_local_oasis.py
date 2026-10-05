@@ -95,6 +95,7 @@ def test_cloud_twitter_retains_native_policy(monkeypatch):
 
 
 def test_each_script_bounds_local_platform_requests():
+    constructor_count = 0
     for script in (
         Path(__file__).parents[1].joinpath("scripts").glob("run_*simulation.py")
     ):
@@ -102,15 +103,19 @@ def test_each_script_bounds_local_platform_requests():
             node
             for node in ast.walk(ast.parse(script.read_text()))
             if isinstance(node, ast.Call)
-            and isinstance(node.func, ast.Attribute)
-            and node.func.attr == "make"
+            and isinstance(node.func, ast.Name)
+            and node.func.id == "make_oasis_environment"
         ]
+        assert calls, script.name
+        constructor_count += len(calls)
         for call in calls:
             concurrency = next(k.value for k in call.keywords if k.arg == "semaphore")
             assert (
                 isinstance(concurrency, ast.Call)
                 and concurrency.func.id == "simulation_concurrency"
             )
+
+    assert constructor_count == 4
 
 
 def test_frontend_has_no_automatic_external_font_fetch():

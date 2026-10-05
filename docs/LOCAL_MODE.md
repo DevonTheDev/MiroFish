@@ -1662,6 +1662,15 @@ Hugging Face downloads, and the UI no longer fetches Google Fonts.
   surfaces errors instead of upgrading to a paid provider.
 - **429 or timeout:** reduce simultaneous work, use shorter inputs/smaller models,
   or raise the deadline after measuring latency. Do not raise concurrency first.
+- **Model action fails during a simulation:** a model exception returned by the
+  pinned OASIS agent now fails the run instead of producing normal completion.
+  Already-started actions settle before that error is surfaced; their persisted
+  partial results remain. A valid no-tool response or an empty round can still
+  complete with zero actions; valid `DO_NOTHING` actions also remain successful.
+  Use **Runtime monitor → Run local setup check** to check the loaded model
+  configuration before starting again.
+  This does not replay failed work, roll back prior actions, or guarantee that
+  the model server stops computing when its HTTP connection closes.
 - **Agent limit:** reduce the input/ontology scope or deliberately raise
   `LOCAL_MAX_AGENTS`. No entities are silently discarded.
 - **Unexpected memory usage:** keep Ollama parallelism at one, lower context,
@@ -1701,6 +1710,11 @@ local database (see their fixture); never point them at a database with valuable
 data. They test real Graphiti extraction against synthetic local model responses,
 not model quality. The OASIS integration test uses the actual pinned libraries,
 SQLite, and the weight-free local recommendation path.
+
+Simulation failure checks also run the actual Twitter, Reddit and dual-platform
+scripts against synthetic loopback model responses. They exercise the pinned
+agent/step boundary, real subprocess exits and the normal monitor's failed state,
+alongside valid no-tool and `DO_NOTHING` responses.
 
 The local architecture has been tested with these components in a Linux CPU
 environment. Windows/macOS installers, actual model quality, GPU performance and

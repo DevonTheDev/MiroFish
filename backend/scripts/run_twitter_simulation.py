@@ -116,6 +116,7 @@ def setup_oasis_logging(log_dir: str):
 
 
 from action_logger import PlatformActionLogger
+from oasis_runtime import make_oasis_environment, record_after_step, close_environment
 from simulation_trace import fetch_new_actions_from_db, get_agent_names_from_config
 
 from app.config import Config
@@ -618,7 +619,7 @@ class TwitterSimulationRunner:
         
         # 创建环境
         print("创建OASIS环境...")
-        self.env = oasis.make(
+        self.env = make_oasis_environment(
             agent_graph=self.agent_graph,
             platform=platform_for_mode('twitter', db_path, default_platform=oasis.DefaultPlatformType.TWITTER),
             database_path=db_path,
@@ -709,13 +710,13 @@ class TwitterSimulationRunner:
                 }
 
                 # 执行动作
-                await self.env.step(actions)
-                actual_actions, last_rowid = fetch_new_actions_from_db(
-                    db_path, last_rowid, agent_names, strict=True
-                )
-                for action_data in actual_actions:
-                    action_logger.log_action(round_num=round_num + 1, **action_data)
-                total_actions += len(actual_actions)
+                async with record_after_step(self.env, actions):
+                    actual_actions, last_rowid = fetch_new_actions_from_db(
+                        db_path, last_rowid, agent_names, strict=True
+                    )
+                    for action_data in actual_actions:
+                        action_logger.log_action(round_num=round_num + 1, **action_data)
+                    total_actions += len(actual_actions)
                 action_logger.log_round_end(
                     round_num + 1, len(actual_actions),
                     simulated_hours=(round_num + 1) * minutes_per_round / 60,
@@ -774,11 +775,16 @@ class TwitterSimulationRunner:
                 print("\n关闭环境...")
 
         finally:
+            failure = sys.exc_info()[1]
             try:
                 if self.ipc_handler is not None:
                     self.ipc_handler.update_status("stopped")
+            except BaseException:
+                if failure is None:
+                    raise
+                logging.getLogger(__name__).exception("Could not publish stopped status after OASIS failure")
             finally:
-                await self.env.close()
+                await close_environment(self.env, failure=failure or sys.exc_info()[1])
         
         print("环境已关闭")
         print("=" * 60)
