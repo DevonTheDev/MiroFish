@@ -978,15 +978,30 @@ Flask/Vite/gateway run → export → reuse → fresh run → offline comparison
 In **Prompt suites**, choose the separate **Import saved run report** file input when
 you have a captured run JSON rather than a standalone definition. Review the
 historical run ID, recorded status/times, attempted count and every captured case,
-then choose **Use captured cases as draft**. Selecting the file alone changes
-neither the draft nor the current run.
+including its **Recorded outcome** and **Recorded check**. All cases start
+selected. Keep them all and choose **Use captured cases as draft**, or choose a
+subset and use **Use selected cases as draft**. Selecting the file or changing
+preview checkboxes changes neither the draft nor the current run.
 
-The action copies the captured definition: suite name, case IDs/order, exact
-prompts, settings, check kinds, expectations and any required-field rules. It
-preserves v1/v2/v3 and includes
-cases that were never attempted in an interrupted run. You can edit or remove
+**Select cases needing attention** selects recorded check mismatches and any case
+without a confirmed successful outcome, including failures, refusals, truncation,
+cancellation, unknown results and cases not yet attempted. Successful unchecked
+replies are not selected by this shortcut. The actual recorded labels remain
+visible: an unconfirmed or unattempted case is not relabeled as a failed check.
+The shortcut is a convenience for retesting, not a judgment of answer quality.
+Review the selected/total count and adjust individual checkboxes as needed.
+If no cases qualify, the selection is empty and Apply is disabled; **Select all**
+restores the full selection. At least one case must be selected.
+
+The action copies only the selected original cases, in their captured order:
+suite name, case IDs, exact prompts, settings, check kinds, expectations and any
+required-field rules are preserved. It keeps the original v1/v2/v3 schema even
+when the subset no longer uses a newer check kind. Every copied case starts
+included in the editor. Unselected cases stay in the source report but are absent
+from this new draft and its definition download. You can edit or remove copied
 cases and download an ordinary definition. Keeping case IDs lets later report
-comparison match the same cases across experiments.
+comparison match the same cases across experiments; absent cases are shown as
+added or removed, rather than paired failures.
 
 Historical results, request identities, running state, reconciliation ownership
 and model configuration are never restored into the current controller. A source
@@ -1000,9 +1015,10 @@ IDs. A historical report does not establish that the present server is ready.
 Run files are limited to 1 MiB before and after reading, require valid UTF-8, and
 use the supported v1/v2/v3 report admission. Duplicate keys, excessive nesting,
 invalid identities, contradictory check outcomes, BOMs and unsupported file kinds
-are refused before any cases are copied. A valid definition embedded in an invalid
-report is not extracted. The original definition input keeps its separate 128 KiB
-limit and contract.
+are refused before any cases are copied. The whole report must pass admission,
+including cases you would leave unselected. A valid definition embedded in an
+invalid report is not extracted. The original definition input keeps its separate
+128 KiB limit and contract and has no outcome-based preview controls.
 
 Both file inputs share one preview. Selecting another file retires the earlier
 read and preview; Discard, failed reads and invalid files leave the draft and
@@ -1010,6 +1026,14 @@ current run intact. Preview and adoption make no runtime requests. Opening the
 page still performs its existing passive readiness read, and starting a new run
 still requires an explicit action. Navigation retires pending file work. Nothing
 is saved to browser storage or a backend archive.
+
+Local tests cover every admitted recorded outcome, all three schemas, both
+languages, empty selection, exact subset exports and stale preview/Apply controls.
+The linked Flask, gateway, Axios and compiled-Vue workflow checks that importing
+and selecting historical cases leaves a paused run unchanged, then explicitly
+executes only the adopted subset with new request identities. Synthetic local
+responses verify that workflow; native browser behavior and real-model quality
+remain unverified.
 
 ## Prepare reviewed prompt examples
 

@@ -91,6 +91,12 @@ readiness again; **Stop scheduling** ends the sequence. The pause lasts only in
 the current page and does not cancel inference or suspend other local work.
 See the [prompt-suite pause workflow](docs/LOCAL_MODE.md#pause-and-resume-suite-scheduling).
 
+To retest a smaller set, import a saved run report and review each case's recorded
+outcome and check. Choose cases individually or **Select cases needing attention**,
+then explicitly use the selected cases as a fresh draft. Original prompts,
+settings and checks are preserved; a later Run uses current readiness and new
+execution IDs. See [saved-run case reuse](docs/LOCAL_MODE.md#reuse-cases-from-a-saved-run).
+
 ## Prepare reviewed local-model examples
 
 Open **Reviewed examples** from Prompt suites or Compare run reports. Load a

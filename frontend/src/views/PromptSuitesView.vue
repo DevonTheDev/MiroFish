@@ -38,10 +38,21 @@
             <template v-if="importView.preview.provenance">
               <p>{{ t('promptSuites.runPreviewNote') }}</p>
               <dl class="result-grid" data-testid="suite-import-provenance"><div><dt>{{ t('promptSuites.runId') }}</dt><dd>{{ importView.preview.provenance.run_id }}</dd></div><div><dt>{{ t('promptSuites.historicalStatus') }}</dt><dd>{{ t(`promptSuites.runStates.${importView.preview.provenance.status}`) }}</dd></div><div><dt>{{ t('promptTrials.startedAt') }}</dt><dd><time :datetime="importView.preview.provenance.started_at">{{ importView.preview.provenance.started_at }}</time></dd></div><div><dt>{{ t('promptTrials.finishedAt') }}</dt><dd><time v-if="importView.preview.provenance.finished_at" :datetime="importView.preview.provenance.finished_at">{{ importView.preview.provenance.finished_at }}</time><span v-else>{{ t('promptTrials.unknown') }}</span></dd></div><div><dt>{{ t('promptSuites.summary.attempted') }}</dt><dd>{{ importView.preview.provenance.attempted }}</dd></div><div><dt>{{ t('promptSuites.summary.total') }}</dt><dd>{{ importView.preview.provenance.total }}</dd></div></dl>
+              <p data-testid="suite-import-selection-count" role="status">{{ t('promptSuites.selectionCount', { selected: importView.selectedCount, total: importView.cases.length }) }}</p>
+              <div class="toolbar"><button type="button" data-testid="suite-import-select-all" @click="importView.selectAll">{{ t('promptSuites.selectAllCaptured') }}</button><button type="button" data-testid="suite-import-select-attention" @click="importView.selectAttention">{{ t('promptSuites.selectAttention') }}</button></div>
+              <p class="reading-note">{{ t('promptSuites.attentionNote') }}</p>
+              <p v-if="importView.selectedCount === 0" class="notice warning" data-testid="suite-import-selection-empty" role="status">{{ t('promptSuites.capturedSelectionEmpty') }}</p>
             </template>
             <p v-else>{{ t('promptSuites.previewNote', { count: importView.preview.definition.cases.length }) }}</p>
-            <ol><li v-for="(item, index) in importView.preview.definition.cases" :key="item.case_id"><strong>{{ item.label }}</strong><dl class="result-grid"><div><dt>{{ t('promptTrials.temperature') }}</dt><dd>{{ item.temperature }}</dd></div><div><dt>{{ t('promptTrials.maxOutputTokens') }}</dt><dd>{{ item.max_output_tokens }}</dd></div></dl><details><summary>{{ t('promptSuites.reviewCase') }}</summary><h4>{{ t('promptTrials.systemPrompt') }}</h4><pre>{{ item.system_prompt }}</pre><h4>{{ t('promptTrials.userPrompt') }}</h4><pre>{{ item.user_prompt }}</pre><h4>{{ t('promptSuites.checkKind') }}</h4><p>{{ t(`promptSuites.checkKinds.${checkKind(item)}`) }}</p><p v-if="checkKind(item) === 'json_object'" class="reading-note">{{ t('promptSuites.jsonObjectHint') }}</p><template v-if="checkKind(item) === 'json_fields'"><h4>{{ t('promptSuites.requiredFields') }}</h4><pre :data-testid="`suite-import-case-${index}-required-fields`">{{ requiredFieldsText(item) }}</pre><p class="reading-note">{{ t('promptSuites.jsonFieldsHint') }}</p></template><template v-if="checkKind(item) === 'exact_text'"><h4>{{ t('promptSuites.expected') }}</h4><pre>{{ item.expected_text }}</pre><small v-if="item.expected_text === ''">{{ t('promptSuites.emptyExpected') }}</small></template></details></li></ol>
-            <div class="toolbar"><button type="button" class="primary" data-testid="suite-import-use" @click="importView.use">{{ t(importView.preview.provenance ? 'promptSuites.useCapturedCases' : 'promptSuites.useImport') }}</button><button type="button" data-testid="suite-import-cancel" @click="importView.cancel">{{ t('promptSuites.cancelImport') }}</button></div>
+            <ol><li v-for="(item, index) in importView.cases" :key="item.case_id">
+              <strong>{{ item.label }}</strong>
+              <template v-if="item.recorded">
+                <label class="check-control"><input type="checkbox" :data-testid="`suite-import-case-${index}-included`" :checked="item.included" @change="item.include">{{ t('promptSuites.includeCapturedCase') }}</label>
+                <dl class="result-grid"><div><dt>{{ t('promptSuites.recordedOutcome') }}</dt><dd :data-testid="`suite-import-case-${index}-status`">{{ t(`promptSuites.caseStates.${item.recorded.status}`) }}</dd></div><div><dt>{{ t('promptSuites.recordedCheck') }}</dt><dd :data-testid="`suite-import-case-${index}-check`">{{ checkLabel(item, item.recorded.check) }}</dd></div></dl>
+              </template>
+              <dl class="result-grid"><div><dt>{{ t('promptTrials.temperature') }}</dt><dd>{{ item.temperature }}</dd></div><div><dt>{{ t('promptTrials.maxOutputTokens') }}</dt><dd>{{ item.max_output_tokens }}</dd></div></dl><details><summary>{{ t('promptSuites.reviewCase') }}</summary><h4>{{ t('promptTrials.systemPrompt') }}</h4><pre>{{ item.system_prompt }}</pre><h4>{{ t('promptTrials.userPrompt') }}</h4><pre>{{ item.user_prompt }}</pre><h4>{{ t('promptSuites.checkKind') }}</h4><p>{{ t(`promptSuites.checkKinds.${checkKind(item)}`) }}</p><p v-if="checkKind(item) === 'json_object'" class="reading-note">{{ t('promptSuites.jsonObjectHint') }}</p><template v-if="checkKind(item) === 'json_fields'"><h4>{{ t('promptSuites.requiredFields') }}</h4><pre :data-testid="`suite-import-case-${index}-required-fields`">{{ requiredFieldsText(item) }}</pre><p class="reading-note">{{ t('promptSuites.jsonFieldsHint') }}</p></template><template v-if="checkKind(item) === 'exact_text'"><h4>{{ t('promptSuites.expected') }}</h4><pre>{{ item.expected_text }}</pre><small v-if="item.expected_text === ''">{{ t('promptSuites.emptyExpected') }}</small></template></details>
+            </li></ol>
+            <div class="toolbar"><button type="button" class="primary" data-testid="suite-import-use" :disabled="importView.selectedCount === 0" @click="importView.use">{{ t(importView.preview.provenance ? importView.selectedCount === importView.cases.length ? 'promptSuites.useCapturedCases' : 'promptSuites.useSelectedCapturedCases' : 'promptSuites.useImport') }}</button><button type="button" data-testid="suite-import-cancel" @click="importView.cancel">{{ t('promptSuites.cancelImport') }}</button></div>
           </article>
           <button v-else-if="importView.loading" type="button" data-testid="suite-import-cancel" @click="importView.cancel">{{ t('promptSuites.cancelImport') }}</button>
         </template>
@@ -142,6 +153,8 @@ const draft = ref({ schema_version: 1, kind: 'mirofish_local_prompt_suite', name
 // Only excluded objects are retained, at most the five cases in the draft.
 // New and duplicated objects start included without adding selection metadata.
 const excludedCases = shallowRef([])
+// Preview selection is separate from both its immutable owner and draft selection.
+const excludedImportCases = shallowRef([])
 const emptyImport = token => ({ token, preview: null, loading: false, error: false })
 const importState = shallowRef(emptyImport(importGeneration)), exportError = ref(false), duplicateError = ref(false)
 const state = ref(null)
@@ -257,9 +270,10 @@ async function readImportFile(event, fromRun) {
   event.target.value = ''
   const owned = { ...emptyImport(token), loading: !!file }
   importState.value = owned
+  excludedImportCases.value = []
   if (!file) return
   try {
-    let definition, provenance = null
+    let definition, provenance = null, recorded = null
     if (fromRun) {
       if (!Number.isSafeInteger(file.size) || file.size < 0 || file.size > PROMPT_SUITE_REPORT_MAX_BYTES || typeof file.arrayBuffer !== 'function') throw new Error('Invalid run file')
       const bytes = await file.arrayBuffer()
@@ -268,6 +282,7 @@ async function readImportFile(event, fromRun) {
       const content = new TextDecoder('utf-8', { fatal: true, ignoreBOM: true }).decode(bytes)
       const report = parsePromptSuiteReport(content)
       definition = acceptPromptSuiteDefinition(report.definition)
+      recorded = report.cases.map(({ status, check }) => ({ status, check }))
       provenance = { run_id: report.run_id, status: report.status, started_at: report.started_at, finished_at: report.finished_at,
         total: report.cases.length, attempted: report.cases.filter(item => item.status !== 'not_attempted').length }
     } else {
@@ -277,23 +292,44 @@ async function readImportFile(event, fromRun) {
       if (typeof content !== 'string' || new TextEncoder().encode(content).length > PROMPT_SUITE_MAX_BYTES) throw new Error('Oversize suite file')
       definition = parsePromptSuiteDefinition(content)
     }
-    if (ownsImport(owned)) importState.value = { ...owned, loading: false, preview: { definition, provenance } }
+    if (ownsImport(owned)) importState.value = { ...owned, loading: false, preview: { definition, provenance, recorded } }
   } catch { if (ownsImport(owned)) importState.value = { ...owned, loading: false, error: true } }
 }
 function readImport(event) { return readImportFile(event, false) }
 function readRunImport(event) { return readImportFile(event, true) }
 function cancelImport(owned) {
-  if (!retired && owned.token === importGeneration) importState.value = emptyImport(++importGeneration)
+  if (!retired && owned.token === importGeneration) { importState.value = emptyImport(++importGeneration); excludedImportCases.value = [] }
 }
-function useImport(owned) {
-  if (!ownsImport(owned) || !owned.preview) return
-  try { draft.value = acceptPromptSuiteDefinition(owned.preview.definition); excludedCases.value = []; duplicateError.value = false; cancelImport(owned) }
+function setImportIncluded(owned, item, included) {
+  if (!ownsImport(owned) || !owned.preview?.recorded || !owned.preview.definition.cases.includes(item)) return
+  if (included) excludedImportCases.value = excludedImportCases.value.filter(current => current !== item)
+  else if (!excludedImportCases.value.includes(item)) excludedImportCases.value = [...excludedImportCases.value, item]
+}
+function selectImportCases(owned, attention) {
+  if (!ownsImport(owned) || !owned.preview?.recorded) return
+  excludedImportCases.value = attention ? owned.preview.definition.cases.filter((_item, index) => {
+    const row = owned.preview.recorded[index]
+    return !(row.status !== 'succeeded' || row.check === 'mismatched')
+  }) : []
+}
+function useImport(owned, excluded) {
+  if (!ownsImport(owned) || !owned.preview || excludedImportCases.value !== excluded) return
+  const definition = owned.preview.definition, cases = definition.cases.filter(item => !excluded.includes(item))
+  if (cases.length === 0) return
+  try { draft.value = acceptPromptSuiteDefinition({ ...definition, cases }); excludedCases.value = []; duplicateError.value = false; cancelImport(owned) }
   catch { if (ownsImport(owned)) importState.value = { ...owned, error: true } }
 }
-// Render-local aliases capture each read/preview, including pending-to-pending reads.
+// Checkbox/shortcut callbacks own the exact preview, while Apply also owns its
+// rendered selection revision. Neither case IDs nor returning to an old subset
+// can reactivate a stale Apply callback.
 const importViews = computed(() => {
-  const owned = importState.value
-  return [{ ...owned, use: () => useImport(owned), cancel: () => cancelImport(owned) }]
+  const owned = importState.value, excluded = excludedImportCases.value
+  const cases = (owned.preview?.definition.cases ?? []).map((item, index) => ({ ...item,
+    recorded: owned.preview.recorded?.[index], included: !excluded.includes(item),
+    include: event => setImportIncluded(owned, item, event.target.checked) }))
+  return [{ ...owned, cases, selectedCount: cases.filter(item => item.included).length,
+    use: () => useImport(owned, excluded), cancel: () => cancelImport(owned),
+    selectAll: () => selectImportCases(owned, false), selectAttention: () => selectImportCases(owned, true) }]
 })
 function download(content, filename) {
   if (retired) return
@@ -321,7 +357,7 @@ function downloadRun() {
 function value(input) { return input == null ? t('promptTrials.unknown') : String(input) }
 function formatDate(input) { return input === null ? t('promptTrials.unknown') : new Intl.DateTimeFormat(locale.value, { dateStyle: 'medium', timeStyle: 'long', timeZone: 'UTC' }).format(new Date(input)) }
 onMounted(() => runner.refresh())
-onBeforeUnmount(() => { retired = true; importGeneration++; excludedCases.value = []; runner.dispose() })
+onBeforeUnmount(() => { retired = true; importGeneration++; excludedCases.value = []; excludedImportCases.value = []; runner.dispose() })
 </script>
 
 <style scoped>
