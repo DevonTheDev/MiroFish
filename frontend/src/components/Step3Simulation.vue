@@ -3,13 +3,14 @@
     <!-- Top Control Bar -->
     <div class="control-bar">
       <div class="status-group">
+        <span v-if="!runPlatform" class="platform-notice" role="status">{{ $t(phase === 0 ? 'step3.resolvingPlatform' : 'step3.platformUnavailable') }}</span>
         <!-- Twitter 平台进度 -->
-        <div class="platform-status twitter" :class="{ active: runStatus.twitter_running, completed: runStatus.twitter_completed }">
+        <div v-if="twitterEnabled" data-testid="platform-status-twitter" class="platform-status twitter" :class="{ active: runStatus.twitter_running, completed: runStatus.twitter_completed }">
           <div class="platform-header">
             <svg class="platform-icon" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2">
               <circle cx="12" cy="12" r="10"></circle><line x1="2" y1="12" x2="22" y2="12"></line><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"></path>
             </svg>
-            <span class="platform-name">Info Plaza</span>
+            <span class="platform-name">{{ $t('step3.infoPlaza') }}</span>
             <span v-if="runStatus.twitter_completed" class="status-badge">
               <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="3">
                 <polyline points="20 6 9 17 4 12"></polyline>
@@ -45,12 +46,12 @@
         </div>
         
         <!-- Reddit 平台进度 -->
-        <div class="platform-status reddit" :class="{ active: runStatus.reddit_running, completed: runStatus.reddit_completed }">
+        <div v-if="redditEnabled" data-testid="platform-status-reddit" class="platform-status reddit" :class="{ active: runStatus.reddit_running, completed: runStatus.reddit_completed }">
           <div class="platform-header">
             <svg class="platform-icon" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2">
               <path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z"></path>
             </svg>
-            <span class="platform-name">Topic Community</span>
+            <span class="platform-name">{{ $t('step3.topicCommunity') }}</span>
             <span v-if="runStatus.reddit_completed" class="status-badge">
               <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="3">
                 <polyline points="20 6 9 17 4 12"></polyline>
@@ -94,7 +95,8 @@
         <button 
           class="action-btn primary"
           :disabled="phase !== 2 || isGeneratingReport"
-          @click="handleNextStep"
+          data-testid="generate-report"
+          :onClick="runActions.report"
         >
           <span v-if="isGeneratingReport" class="loading-spinner-small"></span>
           {{ isGeneratingReport ? $t('step3.generatingReportBtn') : $t('step3.startGenerateReportBtn') }}
@@ -103,19 +105,19 @@
       </div>
     </div>
 
-    <!-- Main Content: Dual Timeline -->
+    <!-- Main Content: Selected Platform Timeline -->
     <div class="main-content-area" ref="scrollContainer">
       <!-- Timeline Header -->
-      <div class="timeline-header" v-if="allActions.length > 0">
+      <div class="timeline-header" v-if="chronologicalActions.length > 0">
         <div class="timeline-stats">
-          <span class="total-count">TOTAL EVENTS: <span class="mono">{{ allActions.length }}</span></span>
+          <span class="total-count">TOTAL EVENTS: <span class="mono">{{ chronologicalActions.length }}</span></span>
           <span class="platform-breakdown">
-            <span class="breakdown-item twitter">
+            <span v-if="twitterEnabled" data-testid="platform-actions-twitter" class="breakdown-item twitter">
               <svg class="mini-icon" viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"></circle><line x1="2" y1="12" x2="22" y2="12"></line><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"></path></svg>
               <span class="mono">{{ twitterActionsCount }}</span>
             </span>
-            <span class="breakdown-divider">/</span>
-            <span class="breakdown-item reddit">
+            <span v-if="twitterEnabled && redditEnabled" class="breakdown-divider">/</span>
+            <span v-if="redditEnabled" data-testid="platform-actions-reddit" class="breakdown-item reddit">
               <svg class="mini-icon" viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z"></path></svg>
               <span class="mono">{{ redditActionsCount }}</span>
             </span>
@@ -262,9 +264,9 @@
           </div>
         </TransitionGroup>
 
-        <div v-if="allActions.length === 0" class="waiting-state">
+        <div v-if="chronologicalActions.length === 0" class="waiting-state">
           <div class="pulse-ring"></div>
-          <span>Waiting for agent actions...</span>
+          <span>{{ $t(runPlatform ? 'step3.waitingForActions' : 'step3.waitingForPlatformDetails') }}</span>
         </div>
       </div>
     </div>
@@ -322,6 +324,10 @@ const isStarting = ref(false)
 const isStopping = ref(false)
 const startError = ref(null)
 const runStatus = ref({})
+const runPlatform = ref(null)
+const runActions = ref({})
+const twitterEnabled = computed(() => runPlatform.value === 'twitter' || runPlatform.value === 'parallel')
+const redditEnabled = computed(() => runPlatform.value === 'reddit' || runPlatform.value === 'parallel')
 const allActions = ref([]) // 所有动作（增量累积）
 const actionIds = ref(new Set()) // 用于去重的动作ID集合
 const scrollContainer = ref(null)
@@ -329,7 +335,9 @@ const scrollContainer = ref(null)
 // Computed
 // 按时间顺序显示动作（最新的在最后面，即底部）
 const chronologicalActions = computed(() => {
-  return allActions.value
+  return allActions.value.filter(action =>
+    (action.platform === 'twitter' && twitterEnabled.value) ||
+    (action.platform === 'reddit' && redditEnabled.value))
 })
 
 // 各平台动作计数
@@ -418,6 +426,8 @@ const addLog = (msg) => {
 const resetAllState = () => {
   phase.value = 0
   runStatus.value = {}
+  runPlatform.value = null
+  runActions.value = {}
   allActions.value = []
   actionIds.value = new Set()
   prevTwitterRound.value = 0
@@ -435,20 +445,22 @@ const doStartSimulation = () => {
   if (ownsView(runContext) && runContext.requests.start) return runContext.requests.start
   retireRun()
   const context = {
-    id: props.simulationId, requests: {}, started: false, terminal: null, detailRevision: 0,
+    id: props.simulationId, platform: null,
+    requests: {}, started: false, terminal: null, detailRevision: 0,
     actions: new AbortController(), polling: new AbortController(),
   }
   runContext = context
+  runActions.value = { report: () => { if (ownsView(context)) return handleNextStep() } }
   return singleFlight(context, 'start', async () => {
     isStarting.value = true
     startError.value = null
-    addLog(t('log.startingDualSim'))
+    addLog(t('log.startingSelectedSim'))
     emit('update-status', 'processing')
   
     try {
       const params = {
         simulation_id: context.id,
-        platform: 'parallel',
+        platform: 'auto',
         force: true,  // 强制重新开始
         enable_graph_memory_update: true  // 开启动态图谱更新
       }
@@ -470,6 +482,12 @@ const doStartSimulation = () => {
         addLog(t('log.engineStarted'))
         addLog(`  ├─ PID: ${res.data.process_pid || '-'}`)
       
+        // Only the accepted start response establishes this run's mode.
+        // Legacy/malformed metadata must not imply a selected platform, but
+        // the accepted run still needs status observation and Stop/report.
+        context.platform = ['twitter', 'reddit', 'parallel'].includes(res.data.platform) ? res.data.platform : null
+        runPlatform.value = context.platform
+        if (!context.platform) addLog(t('step3.platformUnavailable'))
         context.started = true
         phase.value = 1
         runStatus.value = res.data
@@ -563,17 +581,17 @@ const fetchRunStatus = context => singleFlight(context, 'status', async () => {
       runStatus.value = data
       
       // 分别检测各平台的轮次变化并输出日志
-      if (data.twitter_current_round > prevTwitterRound.value) {
+      if (twitterEnabled.value && data.twitter_current_round > prevTwitterRound.value) {
         addLog(`[Plaza] R${data.twitter_current_round}/${data.total_rounds} | T:${data.twitter_simulated_hours || 0}h | A:${data.twitter_actions_count}`)
         prevTwitterRound.value = data.twitter_current_round
       }
       
-      if (data.reddit_current_round > prevRedditRound.value) {
+      if (redditEnabled.value && data.reddit_current_round > prevRedditRound.value) {
         addLog(`[Community] R${data.reddit_current_round}/${data.total_rounds} | T:${data.reddit_simulated_hours || 0}h | A:${data.reddit_actions_count}`)
         prevRedditRound.value = data.reddit_current_round
       }
       
-      // 检测模拟是否已完成（通过 runner_status 或平台完成状态判断）
+      // Only the authoritative runner status can complete the view.
       const isCompleted = data.runner_status === 'completed' || data.runner_status === 'stopped'
       const isFailed = data.runner_status === 'failed'
       
@@ -592,30 +610,6 @@ const fetchRunStatus = context => singleFlight(context, 'status', async () => {
     console.warn('获取运行状态失败:', err)
   }
 })
-
-// 检查所有启用的平台是否已完成
-const checkPlatformsCompleted = (data) => {
-  // 如果没有任何平台数据，返回 false
-  if (!data) return false
-  
-  // 检查各平台的完成状态
-  const twitterCompleted = data.twitter_completed === true
-  const redditCompleted = data.reddit_completed === true
-  
-  // 如果至少有一个平台完成了，检查是否所有启用的平台都完成了
-  // 通过 actions_count 判断平台是否被启用（如果 count > 0 或 running 曾为 true）
-  const twitterEnabled = (data.twitter_actions_count > 0) || data.twitter_running || twitterCompleted
-  const redditEnabled = (data.reddit_actions_count > 0) || data.reddit_running || redditCompleted
-  
-  // 如果没有任何平台被启用，返回 false
-  if (!twitterEnabled && !redditEnabled) return false
-  
-  // 检查所有启用的平台是否都已完成
-  if (twitterEnabled && !twitterCompleted) return false
-  if (redditEnabled && !redditCompleted) return false
-  
-  return true
-}
 
 const fetchRunStatusDetail = (context, revision = null) => singleFlight(context, 'detail', async () => {
   const current = () => revision !== null
@@ -771,6 +765,13 @@ onUnmounted(() => {
 </script>
 
 <style scoped>
+.platform-notice {
+  align-self: center;
+  max-width: 38rem;
+  color: #666;
+  font-size: 12px;
+}
+
 .simulation-panel {
   height: 100%;
   display: flex;

@@ -86,7 +86,10 @@ export function build(options = {}) {
       ;(instances.graph ??= []).push(Vue.getCurrentInstance())
       return () => Vue.h('graph-boundary')
     } }
-  const modules = { vue: Vue, 'vue-router': { ...Router, createWebHistory: Router.createMemoryHistory },
+  const modules = { vue: options.disableTransitions ? { ...Vue,
+    Transition: { props: ['name', 'mode'], setup(_props, { slots }) { return () => slots.default?.() } },
+    TransitionGroup: { props: ['name', 'mode'], setup(_props, { slots }) { return () => slots.default?.() } },
+  } : Vue, 'vue-router': { ...Router, createWebHistory: Router.createMemoryHistory },
     'vue-i18n': options.locale ? I18n : { useI18n: () => ({ t: (key, params) => key + (params ? JSON.stringify(params) : '') }) } }
   const components = { '../components/GraphPanel.vue': graph }
   function evaluate(source, returnName = 'component') {

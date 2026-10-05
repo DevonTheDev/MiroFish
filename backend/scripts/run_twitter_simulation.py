@@ -115,6 +115,9 @@ def setup_oasis_logging(log_dir: str):
         logger.propagate = False
 
 
+from action_logger import PlatformActionLogger
+from simulation_trace import fetch_new_actions_from_db, get_agent_names_from_config
+
 from app.config import Config
 from app.local_runtime import configure_local_environment
 from app.local_runtime.oasis import create_local_model, platform_for_mode, simulation_concurrency, limit_rounds, validate_agent_count, configure_agent_limits
@@ -169,6 +172,8 @@ class IPCHandler:
         with open(self.status_file, 'w', encoding='utf-8') as f:
             json.dump({
                 "status": status,
+                "twitter_available": self.env is not None,
+                "reddit_available": False,
                 "timestamp": datetime.now().isoformat()
             }, f, ensure_ascii=False, indent=2)
     
@@ -216,7 +221,7 @@ class IPCHandler:
         except OSError:
             pass
     
-    async def handle_interview(self, command_id: str, agent_id: int, prompt: str) -> bool:
+    async def handle_interview(self, command_id: str, agent_id: int, prompt: str, platform: str = None) -> bool:
         """
         处理单个Agent采访命令
         
@@ -224,6 +229,8 @@ class IPCHandler:
             True 表示成功，False 表示失败
         """
         try:
+            if platform is not None and platform != "twitter":
+                raise ValueError(f"Platform {platform!r} is unavailable; this environment only supports twitter")
             # 获取Agent
             agent = self.agent_graph.get_agent(agent_id)
             
@@ -250,7 +257,7 @@ class IPCHandler:
             self.send_response(command_id, "failed", error=error_msg)
             return False
     
-    async def handle_batch_interview(self, command_id: str, interviews: List[Dict]) -> bool:
+    async def handle_batch_interview(self, command_id: str, interviews: List[Dict], platform: str = None) -> bool:
         """
         处理批量采访命令
         
@@ -258,6 +265,11 @@ class IPCHandler:
             interviews: [{"agent_id": int, "prompt": str}, ...]
         """
         try:
+            # Validate every effective target before executing any interview.
+            for interview in interviews:
+                requested_platform = interview.get("platform", platform)
+                if requested_platform is not None and requested_platform != "twitter":
+                    raise ValueError(f"Platform {requested_platform!r} is unavailable; this environment only supports twitter")
             # 构建动作字典
             actions = {}
             agent_prompts = {}  # 记录每个agent的prompt
@@ -287,10 +299,12 @@ class IPCHandler:
             results = {}
             for agent_id in agent_prompts.keys():
                 result = self._get_interview_result(agent_id)
-                results[agent_id] = result
+                results[f"twitter_{agent_id}"] = result
             
             self.send_response(command_id, "completed", result={
                 "interviews_count": len(results),
+                "platform": "twitter",
+                "platforms": ["twitter"],
                 "results": results
             })
             print(f"  批量Interview完成: {len(results)} 个Agent")
@@ -308,6 +322,7 @@ class IPCHandler:
         
         result = {
             "agent_id": agent_id,
+            "platform": "twitter",
             "response": None,
             "timestamp": None
         }
@@ -366,14 +381,16 @@ class IPCHandler:
             await self.handle_interview(
                 command_id,
                 args.get("agent_id", 0),
-                args.get("prompt", "")
+                args.get("prompt", ""),
+                args.get("platform")
             )
             return True
             
         elif command_type == CommandType.BATCH_INTERVIEW:
             await self.handle_batch_interview(
                 command_id,
-                args.get("interviews", [])
+                args.get("interviews", []),
+                args.get("platform")
             )
             return True
             
@@ -543,6 +560,7 @@ class TwitterSimulationRunner:
             max_rounds: 最大模拟轮数（可选，用于截断过长的模拟）
         """
         max_rounds = limit_rounds(max_rounds)
+        shutdown_event = _shutdown_event or asyncio.Event()
         validate_agent_count(len(self.config.get("agent_configs", [])))
         print("=" * 60)
         print("OASIS Twitter模拟")
@@ -607,109 +625,160 @@ class TwitterSimulationRunner:
             semaphore=simulation_concurrency(),  # 限制最大并发 LLM 请求数，防止 API 过载
         )
         
-        await self.env.reset()
-        print("环境初始化完成\n")
-        
-        # 初始化IPC处理器
-        self.ipc_handler = IPCHandler(self.simulation_dir, self.env, self.agent_graph)
-        self.ipc_handler.update_status("running")
-        
-        # 执行初始事件
-        event_config = self.config.get("event_config", {})
-        initial_posts = event_config.get("initial_posts", [])
-        
-        if initial_posts:
-            print(f"执行初始事件 ({len(initial_posts)}条初始帖子)...")
-            initial_actions = {}
-            for post in initial_posts:
-                agent_id = post.get("poster_agent_id", 0)
-                content = post.get("content", "")
-                try:
-                    agent = self.env.agent_graph.get_agent(agent_id)
-                    initial_actions[agent] = ManualAction(
-                        action_type=ActionType.CREATE_POST,
-                        action_args={"content": content}
-                    )
-                except Exception as e:
-                    print(f"  警告: 无法为Agent {agent_id}创建初始帖子: {e}")
-            
-            if initial_actions:
-                await self.env.step(initial_actions)
-                print(f"  已发布 {len(initial_actions)} 条初始帖子")
-        
-        # 主模拟循环
-        print("\n开始模拟循环...")
-        start_time = datetime.now()
-        
-        for round_num in range(total_rounds):
-            # 计算当前模拟时间
-            simulated_minutes = round_num * minutes_per_round
-            simulated_hour = (simulated_minutes // 60) % 24
-            simulated_day = simulated_minutes // (60 * 24) + 1
-            
-            # 获取本轮激活的Agent
-            active_agents = self._get_active_agents_for_round(
-                self.env, simulated_hour, round_num
-            )
-            
-            if not active_agents:
-                continue
-            
-            # 构建动作
-            actions = {
-                agent: LLMAction()
-                for _, agent in active_agents
-            }
-            
-            # 执行动作
-            await self.env.step(actions)
-            
-            # 打印进度
-            if (round_num + 1) % 10 == 0 or round_num == 0:
-                elapsed = (datetime.now() - start_time).total_seconds()
-                progress = (round_num + 1) / total_rounds * 100
-                print(f"  [Day {simulated_day}, {simulated_hour:02d}:00] "
-                      f"Round {round_num + 1}/{total_rounds} ({progress:.1f}%) "
-                      f"- {len(active_agents)} agents active "
-                      f"- elapsed: {elapsed:.1f}s")
-        
-        total_elapsed = (datetime.now() - start_time).total_seconds()
-        print(f"\n模拟循环完成!")
-        print(f"  - 总耗时: {total_elapsed:.1f}秒")
-        print(f"  - 数据库: {db_path}")
-        
-        # 是否进入等待命令模式
-        if self.wait_for_commands:
-            print("\n" + "=" * 60)
-            print("进入等待命令模式 - 环境保持运行")
-            print("支持的命令: interview, batch_interview, close_env")
-            print("=" * 60)
-            
-            self.ipc_handler.update_status("alive")
-            
-            # 等待命令循环（使用全局 _shutdown_event）
-            try:
-                while not _shutdown_event.is_set():
-                    should_continue = await self.ipc_handler.process_commands()
-                    if not should_continue:
-                        break
+        try:
+            action_logger = PlatformActionLogger("twitter", self.simulation_dir)
+            # Each run recreates its database and owns a fresh action stream.
+            with open(action_logger.log_path, "w", encoding="utf-8"):
+                pass
+            action_logger.log_simulation_start(self.config, total_rounds=total_rounds)
+            agent_names = get_agent_names_from_config(self.config)
+            last_rowid = 0
+            total_actions = 0
+            await self.env.reset()
+            print("环境初始化完成\n")
+
+            # 初始化IPC处理器
+            self.ipc_handler = IPCHandler(self.simulation_dir, self.env, self.agent_graph)
+            self.ipc_handler.update_status("running")
+
+            if shutdown_event.is_set():
+                return
+
+            action_logger.log_round_start(0, 0)
+            # 执行初始事件
+            event_config = self.config.get("event_config", {})
+            initial_posts = event_config.get("initial_posts", [])
+
+            if initial_posts:
+                print(f"执行初始事件 ({len(initial_posts)}条初始帖子)...")
+                initial_actions = {}
+                for post in initial_posts:
+                    agent_id = post.get("poster_agent_id", 0)
+                    content = post.get("content", "")
                     try:
-                        await asyncio.wait_for(_shutdown_event.wait(), timeout=0.5)
-                        break  # 收到退出信号
-                    except asyncio.TimeoutError:
-                        pass
-            except KeyboardInterrupt:
-                print("\n收到中断信号")
-            except asyncio.CancelledError:
-                print("\n任务被取消")
-            except Exception as e:
-                print(f"\n命令处理出错: {e}")
-            
-            print("\n关闭环境...")
-        
-        # 关闭环境
-        self.ipc_handler.update_status("stopped")
-        await self.env.close()
+                        agent = self.env.agent_graph.get_agent(agent_id)
+                        initial_actions[agent] = ManualAction(
+                            action_type=ActionType.CREATE_POST,
+                            action_args={"content": content}
+                        )
+                    except Exception as e:
+                        print(f"  警告: 无法为Agent {agent_id}创建初始帖子: {e}")
+
+                if initial_actions:
+                    await self.env.step(initial_actions)
+                    print(f"  已发布 {len(initial_actions)} 条初始帖子")
+
+            # Only persisted, executed actions count; advance past seeds before round 1.
+            actual_actions, last_rowid = fetch_new_actions_from_db(
+                db_path, last_rowid, agent_names, strict=True
+            )
+            for action_data in actual_actions:
+                action_logger.log_action(round_num=0, **action_data)
+            total_actions += len(actual_actions)
+            action_logger.log_round_end(0, len(actual_actions), simulated_hours=0)
+
+            # 主模拟循环
+            print("\n开始模拟循环...")
+            start_time = datetime.now()
+
+            completed = False
+            for round_num in range(total_rounds):
+                if shutdown_event.is_set():
+                    break
+                # 计算当前模拟时间
+                simulated_minutes = round_num * minutes_per_round
+                simulated_hour = (simulated_minutes // 60) % 24
+                simulated_day = simulated_minutes // (60 * 24) + 1
+
+                # 获取本轮激活的Agent
+                active_agents = self._get_active_agents_for_round(
+                    self.env, simulated_hour, round_num
+                )
+
+                action_logger.log_round_start(round_num + 1, simulated_hour)
+                if not active_agents:
+                    action_logger.log_round_end(
+                        round_num + 1, 0, simulated_hours=(round_num + 1) * minutes_per_round / 60
+                    )
+                    continue
+
+                # 构建动作
+                actions = {
+                    agent: LLMAction()
+                    for _, agent in active_agents
+                }
+
+                # 执行动作
+                await self.env.step(actions)
+                actual_actions, last_rowid = fetch_new_actions_from_db(
+                    db_path, last_rowid, agent_names, strict=True
+                )
+                for action_data in actual_actions:
+                    action_logger.log_action(round_num=round_num + 1, **action_data)
+                total_actions += len(actual_actions)
+                action_logger.log_round_end(
+                    round_num + 1, len(actual_actions),
+                    simulated_hours=(round_num + 1) * minutes_per_round / 60,
+                )
+
+                # 打印进度
+                if (round_num + 1) % 10 == 0 or round_num == 0:
+                    elapsed = (datetime.now() - start_time).total_seconds()
+                    progress = (round_num + 1) / total_rounds * 100
+                    print(f"  [Day {simulated_day}, {simulated_hour:02d}:00] "
+                          f"Round {round_num + 1}/{total_rounds} ({progress:.1f}%) "
+                          f"- {len(active_agents)} agents active "
+                          f"- elapsed: {elapsed:.1f}s")
+
+            else:
+                completed = not shutdown_event.is_set()
+
+            if not completed:
+                print("\n模拟已中断")
+                return
+            if self.wait_for_commands:
+                # The monitor can publish completion as soon as it reads the marker.
+                self.ipc_handler.update_status("alive")
+            action_logger.log_simulation_end(total_rounds, total_actions)
+
+            total_elapsed = (datetime.now() - start_time).total_seconds()
+            print(f"\n模拟循环完成!")
+            print(f"  - 总耗时: {total_elapsed:.1f}秒")
+            print(f"  - 数据库: {db_path}")
+
+            # 是否进入等待命令模式
+            if self.wait_for_commands:
+                print("\n" + "=" * 60)
+                print("进入等待命令模式 - 环境保持运行")
+                print("支持的命令: interview, batch_interview, close_env")
+                print("=" * 60)
+
+                # 等待命令循环（使用全局 _shutdown_event）
+                try:
+                    while not shutdown_event.is_set():
+                        should_continue = await self.ipc_handler.process_commands()
+                        if not should_continue:
+                            break
+                        try:
+                            await asyncio.wait_for(shutdown_event.wait(), timeout=0.5)
+                            break  # 收到退出信号
+                        except asyncio.TimeoutError:
+                            pass
+                except KeyboardInterrupt:
+                    print("\n收到中断信号")
+                except asyncio.CancelledError:
+                    print("\n任务被取消")
+                except Exception as e:
+                    print(f"\n命令处理出错: {e}")
+
+                print("\n关闭环境...")
+
+        finally:
+            try:
+                if self.ipc_handler is not None:
+                    self.ipc_handler.update_status("stopped")
+            finally:
+                await self.env.close()
         
         print("环境已关闭")
         print("=" * 60)

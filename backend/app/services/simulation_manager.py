@@ -20,6 +20,8 @@ from ..utils.preparation_cancellation import PreparationCancelled
 from .zep_entity_reader import ZepEntityReader, FilteredEntities
 from .oasis_profile_generator import OasisProfileGenerator, OasisAgentProfile
 from .simulation_config_generator import SimulationConfigGenerator, SimulationParameters
+from .platform_selection import validate_platform_flags
+from .profile_formats import normalize_twitter_profile
 from ..utils.locale import t
 
 logger = get_logger('mirofish.simulation')
@@ -183,6 +185,8 @@ class SimulationManager:
         
         with open(state_file, 'r', encoding='utf-8') as f:
             data = json.load(f)
+        if type(data) is not dict or data.get("simulation_id", simulation_id) != simulation_id:
+            raise ValueError("Invalid saved simulation metadata")
         
         state = SimulationState(
             simulation_id=simulation_id,
@@ -227,6 +231,7 @@ class SimulationManager:
         Returns:
             SimulationState
         """
+        validate_platform_flags(enable_twitter, enable_reddit)
         import uuid
         simulation_id = f"sim_{uuid.uuid4().hex[:12]}"
         
@@ -637,7 +642,7 @@ class SimulationManager:
             import csv
 
             with open(profile_path, 'r', encoding='utf-8', newline='') as f:
-                return list(csv.DictReader(f))
+                return [normalize_twitter_profile(row) for row in csv.DictReader(f)]
 
         with open(profile_path, 'r', encoding='utf-8') as f:
             return json.load(f)

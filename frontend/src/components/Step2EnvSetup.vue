@@ -115,7 +115,7 @@
                   <span class="profile-profession">{{ profile.profession || $t('step2.unknownProfession') }}</span>
                 </div>
                 <p class="profile-bio">{{ profile.bio || $t('step2.noBio') }}</p>
-                <div v-if="profile.interested_topics?.length" class="profile-topics">
+                <div v-if="Array.isArray(profile.interested_topics) && profile.interested_topics.length" class="profile-topics">
                   <span 
                     v-for="topic in profile.interested_topics.slice(0, 3)" 
                     :key="topic" 
@@ -131,12 +131,12 @@
         </div>
       </div>
 
-      <!-- Step 03: 生成双平台模拟配置 -->
+      <!-- Step 03: 生成所选平台模拟配置 -->
       <div class="step-card" :class="{ 'active': phase === 2, 'completed': phase > 2 }">
         <div class="card-header">
           <div class="step-info">
             <span class="step-num">03</span>
-            <span class="step-title">{{ $t('step2.dualPlatformConfig') }}</span>
+            <span class="step-title">{{ $t('step2.selectedPlatformConfig') }}</span>
           </div>
           <div class="step-status">
             <span v-if="phase > 2" class="badge success">{{ $t('common.completed') }}</span>
@@ -148,7 +148,7 @@
         <div class="card-content">
           <p class="api-note">POST /api/simulation/prepare</p>
           <p class="description">
-            {{ $t('step2.dualPlatformConfigDesc') }}
+            {{ $t('step2.selectedPlatformConfigDesc') }}
           </p>
           
           <!-- Config Preview -->
@@ -548,7 +548,7 @@
               :disabled="phase < 4 || cancellationBlocked || cancelPending || (runtimeMode === 'local' && !localRoundsValid)"
               :onClick="plannerActions.start"
             >
-              {{ $t('step2.startDualWorldSim') }} ➝
+              {{ $t('step2.startSelectedSim') }} ➝
             </button>
           </div>
         </div>
@@ -598,7 +598,7 @@
           </div>
 
           <!-- 关注话题 -->
-          <div class="modal-section" v-if="selectedProfile.interested_topics?.length">
+          <div class="modal-section" v-if="Array.isArray(selectedProfile.interested_topics) && selectedProfile.interested_topics.length">
             <span class="section-label">{{ $t('step2.profileModalTopics') }}</span>
             <div class="topics-grid">
               <span 
@@ -1036,7 +1036,7 @@ const getAgentUsername = (agentId) => {
 // 计算所有人设的关联话题总数
 const totalTopicsCount = computed(() => {
   return profiles.value.reduce((sum, p) => {
-    return sum + (p.interested_topics?.length || 0)
+    return sum + (Array.isArray(p.interested_topics) ? p.interested_topics.length : 0)
   }, 0)
 })
 

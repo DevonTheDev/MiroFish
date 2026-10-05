@@ -36,6 +36,15 @@ save selected agents, profile mode and a round cap to a small JSON file, then
 explicitly apply those choices to a fresh setup on the same project and graph.
 Opening a preset does not prepare or start a simulation.
 
+## Choose one or both simulation platforms
+
+After graph building, choose **Info Plaza**, **Topic Community**, or **Both**
+before entering setup. The choice follows that simulation through preparation,
+startup, live activity and agent interviews. Both remains the default; selecting
+one environment is useful for a smaller local experiment. The shared graph,
+profile/configuration work and model settings still affect resource use.
+See [choosing a platform](docs/LOCAL_MODE.md#choose-a-simulation-platform).
+
 ## Revisit saved reports
 
 Open **Saved reports** from Home to search earlier saved reports, filter their
@@ -195,7 +204,7 @@ Click the image to watch MiroFish's deep prediction of the lost ending based on 
 
 1. **Graph Building**: Seed extraction & Individual/collective memory injection & GraphRAG construction
 2. **Environment Setup**: Entity relationship extraction & Persona generation & Agent configuration injection
-3. **Simulation**: Dual-platform parallel simulation & Auto-parse prediction requirements & Dynamic temporal memory updates
+3. **Simulation**: Choose one social platform or run both in parallel & Auto-parse prediction requirements & Dynamic temporal memory updates
 4. **Report Generation**: ReportAgent with rich toolset for deep interaction with post-simulation environment
 5. **Deep Interaction**: Chat with any agent in the simulated world & Interact with ReportAgent
 

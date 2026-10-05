@@ -595,7 +595,11 @@ def test_local_start_preserves_runner_admission_error_code(local, monkeypatch, o
     def refuse(*args, **kwargs):
         raise PlanningError("lifecycle_busy")
     monkeypatch.setattr(SimulationRunner, f"{operation}_simulation", refuse)
-    response = local.client.post(f"/api/simulation/{operation}", json={"simulation_id": "sim_fixture", "max_rounds": 1})
+    body = {"simulation_id": "sim_fixture", "max_rounds": 1}
+    if operation == "start":
+        # This fixture enables only Reddit; exercise admission after resolving it.
+        body["platform"] = "auto"
+    response = local.client.post(f"/api/simulation/{operation}", json=body)
     assert response.status_code == 409
     assert response.json["error_code"] == "lifecycle_busy"
 

@@ -24,13 +24,14 @@ from ..shutdown import register_shutdown_callback
 from ..storage import StoragePathError, storage_path, validate_record_id
 from ..utils.logger import get_logger
 from ..utils.locale import get_locale, set_locale
-from ..utils.persistence import write_json_atomic
+from ..utils.persistence import write_json_atomic, write_text_atomic
 from ..utils.zep import (
     ZEP_HTTP_REQUEST_TIMEOUT_SECONDS,
     ZEP_INGESTION_WAIT_TIMEOUT_SECONDS,
 )
 from .zep_graph_memory_updater import ZepGraphMemoryManager
 from .simulation_ipc import SimulationIPCClient, CommandType, IPCResponse
+from .platform_selection import resolve_platform, validate_platform_mode
 
 logger = get_logger('mirofish.simulation_runner')
 
@@ -373,7 +374,7 @@ class SimulationRunner:
     def start_simulation(
         cls,
         simulation_id: str,
-        platform: str = "parallel",  # twitter / reddit / parallel
+        platform: str = "parallel",  # auto / twitter / reddit / parallel
         max_rounds: int = None,  # 最大模拟轮数（可选，用于截断过长的模拟）
         enable_graph_memory_update: bool = False,  # 是否将活动更新到Zep图谱
         graph_id: str = None  # Zep图谱ID（启用图谱更新时必需）
@@ -383,7 +384,7 @@ class SimulationRunner:
         
         Args:
             simulation_id: 模拟ID
-            platform: 运行平台 (twitter/reddit/parallel)
+            platform: 运行平台 (auto/twitter/reddit/parallel)
             max_rounds: 最大模拟轮数（可选，用于截断过长的模拟）
             enable_graph_memory_update: 是否将Agent活动动态更新到Zep图谱
             graph_id: Zep图谱ID（启用图谱更新时必需）
@@ -391,6 +392,7 @@ class SimulationRunner:
         Returns:
             SimulationRunState
         """
+        validate_platform_mode(platform)
         if Config.LOCAL_MODE:
             from . import preparation_plan
             admission = preparation_plan.admission_lock(simulation_id)
@@ -407,6 +409,29 @@ class SimulationRunner:
             preparation_cancellation.assert_not_blocked(simulation_id, run=True)
             if Config.LOCAL_MODE:
                 preparation_plan.assert_idle_locked(simulation_id)
+
+            # Re-read metadata under admission, without constructing a manager
+            # or taking a graph lock. The manager root is authoritative; only
+            # legacy relocated runners may use metadata in their own root.
+            from . import preparation_plan
+            from .simulation_manager import SimulationManager
+            for metadata_root in (SimulationManager.SIMULATION_DATA_DIR, cls.RUN_STATE_DIR):
+                metadata_path = storage_path(metadata_root, validate_record_id(simulation_id), "state.json")
+                if not os.path.exists(metadata_path):
+                    continue
+                metadata = preparation_plan._read_json(metadata_path, preparation_plan.MAX_STATE_BYTES)
+                if (type(metadata) is not dict
+                        or metadata.get("simulation_id", simulation_id) != simulation_id):
+                    raise ValueError("Invalid saved simulation platform metadata")
+                platform = resolve_platform(
+                    platform, metadata.get("enable_twitter", True), metadata.get("enable_reddit", True)
+                )
+                break
+            else:
+                if platform == "auto":
+                    raise ValueError("platform auto requires saved simulation metadata")
+
+            if Config.LOCAL_MODE:
                 config_path = preparation_plan._path(
                     simulation_id, "simulation_config.json", run=True
                 )
@@ -535,6 +560,13 @@ class SimulationRunner:
 
         # 启动模拟进程
         try:
+            if platform in ("twitter", "reddit"):
+                # The monitor can run before the child finishes model setup.
+                # Retire the previous single run's events before publishing it.
+                actions_path = storage_path(cls.RUN_STATE_DIR, simulation_id, platform, "actions.jsonl")
+                os.makedirs(os.path.dirname(actions_path), exist_ok=True)
+                write_text_atomic(actions_path, "", logger=logger)
+
             # 构建运行命令，使用完整路径
             # 新的日志结构：
             #   twitter/actions.jsonl - Twitter 动作日志

@@ -17,6 +17,12 @@ from ..storage import StoragePathError, storage_path, validate_record_id
 from ..services.zep_entity_reader import ZepEntityReader
 from ..services.oasis_profile_generator import OasisProfileGenerator
 from ..services.simulation_manager import SimulationManager, SimulationStatus
+from ..services.platform_selection import (
+    resolve_platform,
+    validate_platform_flags,
+    validate_platform_mode,
+)
+from ..services.profile_formats import normalize_twitter_profile
 from ..services.simulation_comparison import (
     ComparisonError,
     compare_saved_simulations,
@@ -268,6 +274,11 @@ def create_simulation():
     """
     try:
         data = request.get_json() or {}
+        if not isinstance(data, dict):
+            raise ValueError("The request must be a JSON object")
+        enable_twitter, enable_reddit = validate_platform_flags(
+            data.get('enable_twitter', True), data.get('enable_reddit', True)
+        )
         
         project_id = data.get('project_id')
         if not project_id:
@@ -294,8 +305,8 @@ def create_simulation():
         state = manager.create_simulation(
             project_id=project_id,
             graph_id=graph_id,
-            enable_twitter=data.get('enable_twitter', True),
-            enable_reddit=data.get('enable_reddit', True),
+            enable_twitter=enable_twitter,
+            enable_reddit=enable_reddit,
         )
         
         return jsonify({
@@ -303,6 +314,8 @@ def create_simulation():
             "data": state.to_dict()
         })
         
+    except ValueError as e:
+        return jsonify({"success": False, "error": str(e)}), 400
     except Exception as e:
         logger.error(f"创建模拟失败: {str(e)}")
         return jsonify({
@@ -349,8 +362,7 @@ def _check_simulation_prepared(simulation_id: str, *, _lock_held=False) -> tuple
 
         twitter = state_data.get("enable_twitter", True)
         reddit = state_data.get("enable_reddit", True)
-        if type(twitter) is not bool or type(reddit) is not bool or not (twitter or reddit):
-            return False, {"reason": "模拟必须启用至少一个平台，平台标志必须是布尔值"}
+        validate_platform_flags(twitter, reddit)
         required_files = ["state.json", "simulation_config.json"]
         if reddit:
             required_files.append("reddit_profiles.json")
@@ -1299,7 +1311,8 @@ def get_simulation_profiles_realtime(simulation_id: str):
         platform = request.args.get('platform') or _get_default_platform(simulation_id)
 
         # 获取模拟目录
-        sim_dir = os.path.join(Config.OASIS_SIMULATION_DATA_DIR, simulation_id)
+        root = SimulationManager.SIMULATION_DATA_DIR
+        sim_dir = storage_path(root, validate_record_id(simulation_id))
         
         if not os.path.exists(sim_dir):
             return jsonify({
@@ -1308,10 +1321,10 @@ def get_simulation_profiles_realtime(simulation_id: str):
             }), 404
         
         # 确定文件路径
-        if platform == "reddit":
-            profiles_file = os.path.join(sim_dir, "reddit_profiles.json")
-        else:
-            profiles_file = os.path.join(sim_dir, "twitter_profiles.csv")
+        profiles_file = storage_path(
+            root, simulation_id,
+            "reddit_profiles.json" if platform == "reddit" else "twitter_profiles.csv",
+        )
         
         # 检查文件是否存在
         file_exists = os.path.exists(profiles_file)
@@ -1328,9 +1341,9 @@ def get_simulation_profiles_realtime(simulation_id: str):
                     with open(profiles_file, 'r', encoding='utf-8') as f:
                         profiles = json.load(f)
                 else:
-                    with open(profiles_file, 'r', encoding='utf-8') as f:
+                    with open(profiles_file, 'r', encoding='utf-8', newline='') as f:
                         reader = csv.DictReader(f)
-                        profiles = list(reader)
+                        profiles = [normalize_twitter_profile(row) for row in reader]
             except (json.JSONDecodeError, Exception) as e:
                 logger.warning(f"读取 profiles 文件失败（可能正在写入中）: {e}")
                 profiles = []
@@ -1341,7 +1354,7 @@ def get_simulation_profiles_realtime(simulation_id: str):
         status = None
         error = None
         
-        state_file = os.path.join(sim_dir, "state.json")
+        state_file = storage_path(root, simulation_id, "state.json")
         if os.path.exists(state_file):
             try:
                 with open(state_file, 'r', encoding='utf-8') as f:
@@ -1710,7 +1723,7 @@ def start_simulation():
     请求（JSON）：
         {
             "simulation_id": "sim_xxxx",          // 必填，模拟ID
-            "platform": "parallel",                // 可选: twitter / reddit / parallel (默认)
+            "platform": "parallel",                // 可选: auto / twitter / reddit / parallel (默认)
             "max_rounds": 100,                     // 可选: 最大模拟轮数，用于截断过长的模拟
             "enable_graph_memory_update": false,   // 可选: 是否将Agent活动动态更新到Zep图谱记忆
             "force": false                         // 可选: 强制重新开始（会停止运行中的模拟并清理日志）
@@ -1760,6 +1773,7 @@ def start_simulation():
             return _planning_response(error=error)
 
         platform = data.get('platform', 'parallel')
+        validate_platform_mode(platform)
         max_rounds = data.get('max_rounds')  # 可选：最大模拟轮数
         enable_graph_memory_update = data.get('enable_graph_memory_update', False)  # 可选：是否启用图谱记忆更新
         force = data.get('force', False)  # 可选：强制重新开始
@@ -1804,12 +1818,6 @@ def start_simulation():
             except Exception as error:
                 return _planning_response(error=error)
 
-        if platform not in ['twitter', 'reddit', 'parallel']:
-            return jsonify({
-                "success": False,
-                "error": t('api.invalidPlatform', platform=platform)
-            }), 400
-
         # 检查模拟是否已准备好
         manager = SimulationManager()
         state = manager.get_simulation(simulation_id)
@@ -1820,6 +1828,12 @@ def start_simulation():
                 "error": t('api.simulationNotFound', id=simulation_id)
             }), 404
 
+        # Resolve before readiness reconciliation, forced cleanup, or graph work.
+        platform = resolve_platform(
+            platform,
+            getattr(state, "enable_twitter", True),
+            getattr(state, "enable_reddit", True),
+        )
         force_restarted = False
         
         # 智能处理状态：如果准备工作已完成，允许重新启动
@@ -1987,6 +2001,7 @@ def start_simulation():
             )
         
         response_data = run_state.to_dict()
+        response_data['platform'] = platform
         if max_rounds:
             response_data['max_rounds_applied'] = max_rounds
         response_data['graph_memory_update_enabled'] = enable_graph_memory_update

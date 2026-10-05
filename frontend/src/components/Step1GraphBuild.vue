@@ -158,10 +158,26 @@
         <div class="card-content">
           <p class="api-note">POST /api/simulation/create</p>
           <p class="description">{{ $t('step1.buildCompleteDesc') }}</p>
-          <button 
-            class="action-btn" 
-            :disabled="currentPhase < 2 || creatingSimulation"
-            @click="handleEnterEnvSetup"
+          <label class="platform-choice">
+            <span>{{ $t('step1.platformChoice') }}</span>
+            <select
+              data-testid="simulation-platform"
+              :aria-label="$t('step1.platformChoice')"
+              :value="selectedPlatform"
+              :disabled="creatingSimulation || createdSimulation"
+              :onChange="creationActions.select"
+            >
+              <option value="parallel">{{ $t('step1.platformBoth') }}</option>
+              <option value="twitter">{{ $t('step1.platformTwitter') }}</option>
+              <option value="reddit">{{ $t('step1.platformReddit') }}</option>
+            </select>
+          </label>
+          <p class="description">{{ $t('step1.platformChoiceDesc') }}</p>
+          <button
+            data-testid="create-simulation"
+            class="action-btn"
+            :disabled="!canCreateSimulation || creatingSimulation || createdSimulation"
+            :onClick="creationActions.create"
           >
             <span v-if="creatingSimulation" class="spinner-sm"></span>
             {{ creatingSimulation ? $t('step1.creating') : $t('step1.enterEnvSetup') + ' ➝' }}
@@ -187,7 +203,7 @@
 </template>
 
 <script setup>
-import { computed, ref, watch, nextTick } from 'vue'
+import { computed, ref, watch, nextTick, onUnmounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { createSimulation } from '../api/simulation'
@@ -210,40 +226,80 @@ const selectedOntologyItem = ref(null)
 const logContent = ref(null)
 const creatingSimulation = ref(false)
 
-// 进入环境搭建 - 创建 simulation 并跳转
-const handleEnterEnvSetup = async () => {
-  if (!props.projectData?.project_id || !props.projectData?.graph_id) {
-    console.error('缺少项目或图谱信息')
-    return
+const selectedPlatform = ref('parallel')
+const createdSimulation = ref(false)
+const creationActions = ref({})
+let creationTarget = null
+let mounted = true
+
+const validId = id => typeof id === 'string' && id.trim().length > 0
+const canCreateSimulation = computed(() => props.currentPhase >= 2 &&
+  validId(props.projectData?.project_id) && validId(props.projectData?.graph_id))
+const ownsCreation = target => mounted && target === creationTarget &&
+  props.projectData?.project_id === target.projectId && props.projectData?.graph_id === target.graphId
+
+// Every target gets fresh handlers as well as a fresh HTTP observer. Comparing
+// IDs alone would allow an old A handler/response to affect a later A view.
+watch(() => [props.projectData?.project_id, props.projectData?.graph_id], ([projectId, graphId]) => {
+  if (creationTarget && creationTarget.projectId === projectId && creationTarget.graphId === graphId) return
+  creationTarget?.controller.abort()
+  const target = { projectId, graphId, controller: new AbortController(), pending: false, created: false }
+  creationTarget = target
+  selectedPlatform.value = 'parallel'
+  creatingSimulation.value = false
+  createdSimulation.value = false
+  creationActions.value = {
+    select: event => {
+      const mode = event?.target?.value
+      if (ownsCreation(target) && !target.pending && !target.created && ['parallel', 'twitter', 'reddit'].includes(mode)) {
+        selectedPlatform.value = mode
+      }
+    },
+    create: () => handleEnterEnvSetup(target),
   }
-  
+}, { immediate: true, flush: 'sync' })
+
+const handleEnterEnvSetup = async target => {
+  if (!ownsCreation(target) || target.pending || target.created || !canCreateSimulation.value) return
+  const mode = selectedPlatform.value
+  if (!['parallel', 'twitter', 'reddit'].includes(mode)) return
+  target.pending = true
   creatingSimulation.value = true
-  
+  // Snapshot the selected mode before awaiting. Aborting this observer does not
+  // delete a simulation that the server has already created.
   try {
     const res = await createSimulation({
-      project_id: props.projectData.project_id,
-      graph_id: props.projectData.graph_id,
-      enable_twitter: true,
-      enable_reddit: true
-    })
-    
+      project_id: target.projectId,
+      graph_id: target.graphId,
+      enable_twitter: mode === 'parallel' || mode === 'twitter',
+      enable_reddit: mode === 'parallel' || mode === 'reddit'
+    }, target.controller.signal)
+    if (!ownsCreation(target)) return
     if (res.success && res.data?.simulation_id) {
-      // 跳转到 simulation 页面
-      router.push({
-        name: 'Simulation',
-        params: { simulationId: res.data.simulation_id }
-      })
+      target.created = true
+      createdSimulation.value = true
+      router.push({ name: 'Simulation', params: { simulationId: res.data.simulation_id } })
     } else {
       console.error('创建模拟失败:', res.error)
       alert(t('step1.createSimulationFailed', { error: res.error || t('common.unknownError') }))
     }
   } catch (err) {
+    if (!ownsCreation(target)) return
     console.error('创建模拟异常:', err)
     alert(t('step1.createSimulationException', { error: err.message }))
   } finally {
-    creatingSimulation.value = false
+    if (ownsCreation(target)) {
+      target.pending = false
+      creatingSimulation.value = false
+    }
   }
 }
+
+onUnmounted(() => {
+  mounted = false
+  creationTarget?.controller.abort()
+  creationTarget = null
+})
 
 const selectOntologyItem = (item, type) => {
   selectedOntologyItem.value = { ...item, itemType: type }
@@ -273,6 +329,31 @@ watch(() => props.systemLogs.length, () => {
 </script>
 
 <style scoped>
+.platform-choice {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 16px 0 8px;
+  font-size: 13px;
+  font-weight: 600;
+}
+.platform-choice select {
+  width: 100%;
+  padding: 10px;
+  border: 1px solid #D8D8D8;
+  border-radius: 6px;
+  background: #FFF;
+  color: #222;
+  font: inherit;
+}
+.platform-choice select:focus-visible {
+  outline: 2px solid #FF5722;
+  outline-offset: 2px;
+}
+.platform-choice select:disabled {
+  opacity: 0.6;
+}
+
 .workbench-panel {
   height: 100%;
   background-color: #FAFAFA;

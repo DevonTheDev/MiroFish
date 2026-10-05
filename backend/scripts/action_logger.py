@@ -77,7 +77,7 @@ class PlatformActionLogger:
         with open(self.log_path, 'a', encoding='utf-8') as f:
             f.write(json.dumps(entry, ensure_ascii=False) + '\n')
     
-    def log_round_end(self, round_num: int, actions_count: int):
+    def log_round_end(self, round_num: int, actions_count: int, simulated_hours: Optional[float] = None):
         """记录轮次结束"""
         entry = {
             "round": round_num,
@@ -85,17 +85,19 @@ class PlatformActionLogger:
             "event_type": "round_end",
             "actions_count": actions_count,
         }
+        if simulated_hours is not None:
+            entry["simulated_hours"] = simulated_hours
         
         with open(self.log_path, 'a', encoding='utf-8') as f:
             f.write(json.dumps(entry, ensure_ascii=False) + '\n')
     
-    def log_simulation_start(self, config: Dict[str, Any]):
+    def log_simulation_start(self, config: Dict[str, Any], total_rounds: Optional[int] = None):
         """记录模拟开始"""
         entry = {
             "timestamp": datetime.now().isoformat(),
             "event_type": "simulation_start",
             "platform": self.platform,
-            "total_rounds": config.get("time_config", {}).get("total_simulation_hours", 72) * 2,
+            "total_rounds": total_rounds if total_rounds is not None else config.get("time_config", {}).get("total_simulation_hours", 72) * 2,
             "agents_count": len(config.get("agent_configs", [])),
         }
         

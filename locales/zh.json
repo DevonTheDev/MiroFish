@@ -104,7 +104,12 @@
     "creating": "创建中...",
     "enterEnvSetup": "进入环境搭建",
     "createSimulationFailed": "创建模拟失败: {error}",
-    "createSimulationException": "创建模拟异常: {error}"
+    "createSimulationException": "创建模拟异常: {error}",
+    "platformChoice": "模拟平台",
+    "platformBoth": "两个平台：信息广场 + 话题社区",
+    "platformTwitter": "仅信息广场（Twitter）",
+    "platformReddit": "仅话题社区（Reddit）",
+    "platformChoiceDesc": "选择本次模拟需要准备并运行的平台。"
   },
   "step2": {
     "simInstanceInit": "模拟实例初始化",
@@ -183,7 +188,10 @@
     "genderOther": "其他",
     "yearsOld": "岁",
     "initializing": "初始化",
-    "generating": "生成中"
+    "generating": "生成中",
+    "selectedPlatformConfig": "生成所选平台模拟配置",
+    "selectedPlatformConfigDesc": "LLM 根据模拟需求与现实种子，为所选平台设置时间流速、推荐算法、活跃时段、发言频率和事件触发等参数。",
+    "startSelectedSim": "启动所选平台模拟"
   },
   "step3": {
     "startGenerateReport": "开始生成结果报告",
@@ -214,7 +222,12 @@
     "forceStopSuccess": "模拟已强制停止",
     "forceStopFailed": "强制停止失败: {error}",
     "startGenerateReportBtn": "开始生成结果报告",
-    "generatingReportBtn": "启动中..."
+    "generatingReportBtn": "启动中...",
+    "resolvingPlatform": "正在确认所选平台…",
+    "platformUnavailable": "所选平台详情暂不可用，仍可查看模拟运行状态。",
+    "waitingForPlatformDetails": "平台活动详情暂不可用。",
+    "infoPlaza": "信息广场",
+    "topicCommunity": "话题社区"
   },
   "step4": {
     "generatingSection": "正在生成{title}...",
@@ -574,7 +587,8 @@
     "getReportInfoFailed": "获取报告信息失败: {error}",
     "enterStep": "进入 Step {step}: {name}",
     "returnToStep": "返回 Step {step}: {name}",
-    "customSimRounds": "自定义模拟轮数: {rounds} 轮"
+    "customSimRounds": "自定义模拟轮数: {rounds} 轮",
+    "startingSelectedSim": "正在启动所选平台模拟…"
   },
   "report": {
     "taskStarted": "报告生成任务开始",

@@ -1394,6 +1394,8 @@ class ZepToolsService:
             # 双平台模式返回格式: {"twitter_0": {...}, "reddit_0": {...}, "twitter_1": {...}, ...}
             api_data = api_result.get("result", {})
             results_dict = api_data.get("results", {}) if isinstance(api_data, dict) else {}
+            actual_platform = api_data.get("platform") if isinstance(api_data, dict) else None
+            report_platforms = [actual_platform] if actual_platform in ("twitter", "reddit") else ["twitter", "reddit"]
             
             for i, agent_idx in enumerate(selected_indices):
                 agent = selected_agents[i]
@@ -1401,25 +1403,20 @@ class ZepToolsService:
                 agent_role = agent.get("profession", "未知")
                 agent_bio = agent.get("bio", "")
                 
-                # 获取该Agent在两个平台的采访结果
-                twitter_result = results_dict.get(f"twitter_{agent_idx}", {})
-                reddit_result = results_dict.get(f"reddit_{agent_idx}", {})
-                
-                twitter_response = twitter_result.get("response", "")
-                reddit_response = reddit_result.get("response", "")
-
-                # 清理可能的工具调用 JSON 包裹
-                twitter_response = self._clean_tool_call_response(twitter_response)
-                reddit_response = self._clean_tool_call_response(reddit_response)
-
-                # 始终输出双平台标记
-                twitter_text = twitter_response if twitter_response else "（该平台未获得回复）"
-                reddit_text = reddit_response if reddit_response else "（该平台未获得回复）"
-                response_text = f"【Twitter平台回答】\n{twitter_text}\n\n【Reddit平台回答】\n{reddit_text}"
+                # New single-environment results identify their actual platform.
+                # Legacy payloads retain both platform sections.
+                responses = []
+                response_sections = []
+                for platform in report_platforms:
+                    platform_result = results_dict.get(f"{platform}_{agent_idx}", {})
+                    response = self._clean_tool_call_response(platform_result.get("response", "")) or ""
+                    responses.append(response)
+                    response_sections.append(f"【{platform.title()}平台回答】\n{response or '（该平台未获得回复）'}")
+                response_text = "\n\n".join(response_sections)
 
                 # 提取关键引言（从两个平台的回答中）
                 import re
-                combined_responses = f"{twitter_response} {reddit_response}"
+                combined_responses = " ".join(responses)
 
                 # 清理响应文本：去掉标记、编号、Markdown 等干扰
                 clean_text = re.sub(r'#{1,6}\s+', '', combined_responses)
@@ -1504,17 +1501,18 @@ class ZepToolsService:
         """加载模拟的Agent人设文件"""
         import os
         import csv
+        from ..storage import storage_path, validate_record_id
+        from .profile_formats import normalize_twitter_profile
+        from .simulation_manager import SimulationManager
         
         # 构建人设文件路径
-        sim_dir = os.path.join(
-            os.path.dirname(__file__), 
-            f'../../uploads/simulations/{simulation_id}'
-        )
+        simulation_id = validate_record_id(simulation_id)
+        root = SimulationManager.SIMULATION_DATA_DIR
         
         profiles = []
         
         # 优先尝试读取Reddit JSON格式
-        reddit_profile_path = os.path.join(sim_dir, "reddit_profiles.json")
+        reddit_profile_path = storage_path(root, simulation_id, "reddit_profiles.json")
         if os.path.exists(reddit_profile_path):
             try:
                 with open(reddit_profile_path, 'r', encoding='utf-8') as f:
@@ -1525,20 +1523,15 @@ class ZepToolsService:
                 logger.warning(t("console.readRedditProfilesFailed", error=e))
         
         # 尝试读取Twitter CSV格式
-        twitter_profile_path = os.path.join(sim_dir, "twitter_profiles.csv")
+        twitter_profile_path = storage_path(root, simulation_id, "twitter_profiles.csv")
         if os.path.exists(twitter_profile_path):
             try:
                 with open(twitter_profile_path, 'r', encoding='utf-8') as f:
                     reader = csv.DictReader(f)
                     for row in reader:
-                        # CSV格式转换为统一格式
-                        profiles.append({
-                            "realname": row.get("name", ""),
-                            "username": row.get("username", ""),
-                            "bio": row.get("description", ""),
-                            "persona": row.get("user_char", ""),
-                            "profession": "未知"
-                        })
+                        profile = normalize_twitter_profile(row)
+                        profile.setdefault("realname", row.get("name", ""))
+                        profiles.append(profile)
                 logger.info(t("console.loadedTwitterProfiles", count=len(profiles)))
                 return profiles
             except Exception as e:

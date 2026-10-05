@@ -10,6 +10,61 @@ PC's RAM, disk, compute and electricity. Small-model accuracy is not equivalent
 to a large hosted model. Generated simulations are exploratory, not validated
 forecasts or a basis for consequential decisions.
 
+## Choose a simulation platform
+
+In Step 1, after the graph is ready, select **Info Plaza** (Twitter), **Topic
+Community** (Reddit), or **Both** before entering environment setup. Both is the
+existing default. The choice belongs to the new simulation; create another
+simulation from the project to try a different choice. It applies in both local
+and cloud mode.
+
+Preparation writes the enabled profile files and platform configuration. The
+setup preview chooses Reddit when both are enabled and Twitter for a
+simulation that only uses Info Plaza. Twitter preview data retains the biography and
+persona from its canonical OASIS CSV; absent optional demographics or topic tags
+are not synthesized. The same canonical CSV fields are used while preparation
+is in progress and after it finishes.
+
+Start uses the saved platform flags. The running view displays that accepted
+selection and only its platform status and activity panels. A legacy server
+response without a recognized platform remains observable, with platform details
+shown as unavailable. Completion, Stop and report generation still follow the
+owned run's status. Agent surveys and report interviews use replies attributed
+to the actual environment; an unavailable second platform is not presented as a
+participant that failed to answer.
+
+Single-platform runs publish their recorded SQLite actions and round progress
+through the same event-log interface as the dual runner, including rounds with
+no active agents. Natural completion is published after the existing graph-memory
+drain; the environment may remain alive for interviews. A model step or required
+trace read that fails does not write a normal completion event. This does not
+make an in-flight model request immediately interruptible.
+
+Selecting one environment reduces the number of social environments launched.
+It does not promise half the memory, half the generation time, or better model
+quality: graph building and other preparation are shared, and inference cost
+depends on the cast, rounds, model and hardware. The normal local agent, round,
+request and concurrency limits still apply.
+
+API callers may send `platform: "auto"` to `/api/simulation/start`; a successful
+reply includes the resolved `data.platform` (`twitter`, `reddit` or `parallel`).
+Omitting the field retains the existing `parallel` request default. Explicit
+requests for disabled platforms are rejected before restart cleanup or startup.
+Creation flags must be booleans and at least one platform must be enabled.
+Single-platform batch interview replies use the same `twitter_<id>` or
+`reddit_<id>` keys as dual-platform replies, with source platform metadata. An
+explicit request for the opposite platform is rejected before interviewing any
+agent in that batch.
+
+Local tests cover all three creation/preparation/start choices through real
+Flask, production Axios and compiled Vue, plus actual single-platform command
+files, SQLite interview replies, report consumption and the installed OASIS
+profile loader. The graph/model/process boundaries use synthetic fixtures; the
+Vue test host is not a native browser. This does not establish model quality,
+measured hardware savings, Windows behavior or a completed live model run.
+Aborting a page request retires its observation and does not delete an already
+created simulation or stop accepted backend work.
+
 ## Plan a small local simulation
 
 After building a graph, Step 2 offers a local preparation planner. Choose a small

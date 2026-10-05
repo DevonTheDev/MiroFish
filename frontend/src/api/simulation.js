@@ -4,8 +4,9 @@ import service from './index'
  * 创建模拟
  * @param {Object} data - { project_id, graph_id?, enable_twitter?, enable_reddit? }
  */
-export const createSimulation = (data) => {
-  return service.post('/api/simulation/create', data)
+// Abort cancels HTTP observation only; it does not delete a created simulation.
+export const createSimulation = (data, signal) => {
+  return service.post('/api/simulation/create', data, { signal })
 }
 
 /**

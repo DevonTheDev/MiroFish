@@ -951,15 +951,8 @@ class OasisProfileGenerator:
                         with open(realtime_output_path, 'w', encoding='utf-8') as f:
                             json.dump(profiles_data, f, ensure_ascii=False, indent=2)
                     else:
-                        # Twitter CSV 格式
-                        import csv
-                        profiles_data = [p.to_twitter_format() for p in existing_profiles]
-                        if profiles_data:
-                            fieldnames = list(profiles_data[0].keys())
-                            with open(realtime_output_path, 'w', encoding='utf-8', newline='') as f:
-                                writer = csv.DictWriter(f, fieldnames=fieldnames)
-                                writer.writeheader()
-                                writer.writerows(profiles_data)
+                        # Realtime previews use the same OASIS schema as final output.
+                        self._save_twitter_csv(existing_profiles, realtime_output_path)
                 except Exception as e:
                     if cancellation_check is not None:
                         e.preparation_write_uncertain = True

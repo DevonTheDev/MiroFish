@@ -104,7 +104,12 @@
     "creating": "Creating...",
     "enterEnvSetup": "Enter Environment Setup",
     "createSimulationFailed": "Failed to create simulation: {error}",
-    "createSimulationException": "Simulation creation error: {error}"
+    "createSimulationException": "Simulation creation error: {error}",
+    "platformChoice": "Simulation platforms",
+    "platformBoth": "Both: Info Plaza + Topic Community",
+    "platformTwitter": "Info Plaza only (Twitter)",
+    "platformReddit": "Topic Community only (Reddit)",
+    "platformChoiceDesc": "Choose the platforms to prepare and run for this simulation."
   },
   "step2": {
     "simInstanceInit": "Simulation Instance Initialization",
@@ -183,7 +188,10 @@
     "genderOther": "Other",
     "yearsOld": "years old",
     "initializing": "Initializing",
-    "generating": "Generating"
+    "generating": "Generating",
+    "selectedPlatformConfig": "Generate Selected Platform Config",
+    "selectedPlatformConfigDesc": "LLM sets time flow, recommendation algorithms, activity and event parameters for the selected platforms, based on requirements and reality seeds.",
+    "startSelectedSim": "Start Selected Platform Simulation"
   },
   "step3": {
     "startGenerateReport": "Generate Report",
@@ -214,7 +222,12 @@
     "forceStopSuccess": "Simulation force stopped",
     "forceStopFailed": "Force stop failed: {error}",
     "startGenerateReportBtn": "Generate Report",
-    "generatingReportBtn": "Starting..."
+    "generatingReportBtn": "Starting...",
+    "resolvingPlatform": "Checking selected platforms…",
+    "platformUnavailable": "Selected platform details unavailable. Run status remains available.",
+    "waitingForPlatformDetails": "Platform activity details are unavailable.",
+    "infoPlaza": "Info Plaza",
+    "topicCommunity": "Topic Community"
   },
   "step4": {
     "generatingSection": "Generating {title}...",
@@ -574,7 +587,8 @@
     "getReportInfoFailed": "Failed to get report info: {error}",
     "enterStep": "Entering Step {step}: {name}",
     "returnToStep": "Returning to Step {step}: {name}",
-    "customSimRounds": "Custom simulation rounds: {rounds} rounds"
+    "customSimRounds": "Custom simulation rounds: {rounds} rounds",
+    "startingSelectedSim": "Starting simulation on the selected platforms…"
   },
   "report": {
     "taskStarted": "Report generation task started",

@@ -63,10 +63,10 @@ for (const rejected of [false, true]) test(`retired start ${rejected ? 'failure'
   assert.equal(h.requests.startSimulation[0].signal?.aborted, true)
 })
 
-for (const rounds of [undefined, 42]) test(`automatic startup preserves parallel/force/memory payload with rounds ${rounds}`, async () => {
+for (const rounds of [undefined, 42]) test(`automatic startup preserves auto/force/memory payload with rounds ${rounds}`, async () => {
   const h = harness('A', rounds); try {
     await h.mount(); const payload = h.requests.startSimulation[0].args[0]
-    assert.equal(payload.simulation_id, 'A'); assert.equal(payload.platform, 'parallel')
+    assert.equal(payload.simulation_id, 'A'); assert.equal(payload.platform, 'auto')
     assert.equal(payload.force, true); assert.equal(payload.enable_graph_memory_update, true)
     assert.equal(payload.max_rounds, rounds)
     assert.equal(Object.hasOwn(payload, 'max_rounds'), rounds !== undefined)
