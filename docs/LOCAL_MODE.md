@@ -330,7 +330,7 @@ that its metadata revision still matches. A change produces a conflict requiring
 Refresh, instead of silently relabeling a different record. The body is captured
 freshly when opened. Download reuses those accepted bytes without another server
 read. Editing filters, changing the selected report or leaving the page retires
-the previous reader/download; late HTTP replies cannot restore them. Aborting
+the previous single-report reader/download; late HTTP replies cannot restore them. Aborting
 these requests only stops the view's observation.
 
 Reads have explicit limits: 2,000 top-level catalog entries, 8 MiB per metadata
@@ -353,6 +353,38 @@ legacy sources, metadata-only and empty content, malformed records, bounded read
 revision conflicts, literal display and exact captured downloads. Network fixtures
 are disposable loopback services. Native browser layout/download dialogs and
 Windows filesystem behavior still need platform validation.
+
+### Compare captured report text
+
+Open a saved report, then use the comparison controls to capture it as the left
+or right side. Browse to another report and capture the other side. The two
+captures stay fixed while you filter, page, open reports or use the library's
+Refresh button. Replace or clear a side explicitly, or swap the pair to reverse
+the comparison. A full page reload or leaving the library clears this temporary
+pair; it is not saved in the URL or browser storage.
+
+Each side shows its own report identity, saved status, observation time, content
+source and hashes. You can capture the same report ID twice, including after a
+fresh read changes its body. These are independently observed texts: metadata
+revisions do not pin body versions, and the pair is not an atomic shared snapshot
+or a persistent report-version archive. Saved partial/failed status remains
+visible. Unavailable text is unknown, while a saved empty body is a valid empty
+document.
+
+The comparison checks exact text equality and shows bounded line changes for
+different available bodies. It preserves Unicode and line-ending/trailing-newline
+differences. Each visible text preview is limited to 64 KiB of UTF-8. A complete
+line diff additionally requires each body to fit 64 KiB and 2,000 logical lines,
+at most 1,000,000 comparison cells, and at most 4,000 output rows. Larger different
+texts show a limited-comparison state with unknown change counts; they are not
+silently presented as a complete truncated diff. Exact equality can still be
+reported for larger identical captured texts without building diff rows.
+
+Download either side to retain its exact full captured Markdown, including text
+beyond the preview limit. Capturing, comparing, swapping, clearing and downloading
+these accepted snapshots make no additional server reads, inference requests or
+report writes. Report HTML and links remain literal text. This is textual review,
+with no model-quality score or causal interpretation of the differences.
 
 ## Monitor local runtime activity
 

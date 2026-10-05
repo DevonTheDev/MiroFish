@@ -6,6 +6,7 @@ import { parse, compileScript, compileTemplate } from '@vue/compiler-sfc'
 import * as Vue from 'vue'
 import * as Router from 'vue-router'
 import { createI18n, useI18n } from 'vue-i18n'
+import * as savedReportComparison from '../../src/utils/savedReportComparison.js'
 
 export const ok = data => ({ success: true, data })
 export async function flush() {
@@ -84,6 +85,7 @@ export async function mountReportLibrary({ api, initialPath = '/reports', locale
     vue: { ...Vue, Transition: passThrough },
     'vue-router': { ...Router, createWebHistory: Router.createMemoryHistory },
     'vue-i18n': { useI18n },
+    '../utils/savedReportComparison.js': savedReportComparison,
   }
   const components = { '../components/LanguageSwitcher.vue': stub }
   function evaluate(source, returnName = 'component') {
@@ -113,6 +115,7 @@ export async function mountReportLibrary({ api, initialPath = '/reports', locale
     value.render = evaluate(template.code, 'render')
     return value
   }
+  components['../components/SavedReportComparison.vue'] = component('components/SavedReportComparison.vue')
   components['../views/SavedReportsView.vue'] = component('views/SavedReportsView.vue')
   components['../views/Home.vue'] = component('views/Home.vue')
   const router = evaluate(readFileSync(new URL('../../src/router/index.js', import.meta.url), 'utf8'))

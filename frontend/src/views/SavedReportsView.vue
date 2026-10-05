@@ -48,6 +48,7 @@
         </article>
         <p v-else-if="!detailLoading && !detailError" class="note">{{ t('savedReports.chooseReport') }}</p>
       </section>
+      <SavedReportComparison :source="savedReport" :is-current="isCurrentComparisonSource" />
     </main>
   </div>
 </template>
@@ -57,6 +58,7 @@ import { computed, ref, watch, onBeforeUnmount } from 'vue'
 import { useRoute, useRouter, RouterLink } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import LanguageSwitcher from '../components/LanguageSwitcher.vue'
+import SavedReportComparison from '../components/SavedReportComparison.vue'
 import { getSavedReports, getSavedReport } from '../api/report'
 
 const { t } = useI18n()
@@ -206,6 +208,7 @@ function closeReader() {
   if (dirty.value) { retireDetail(); selectedReportId.value = null; return }
   try { return navigateSelected({ ...selection(), report_id: null, metadata_revision: null }, { keepList: true }) } catch { retireDetail() }
 }
+function isCurrentComparisonSource(source) { return source === savedReport.value && !!activeDetail && ownsDetail(activeDetail) && !detailLoading.value }
 const canDownload = computed(() => !!savedReport.value?.content_available && !dirty.value && !detailLoading.value)
 function downloadReport() {
   if (!canDownload.value || !activeDetail || !ownsDetail(activeDetail)) return

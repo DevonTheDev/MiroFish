@@ -21,7 +21,7 @@ const requests = [], replies = []
 service.interceptors.request.use(config => {
   requests.push(config)
   assert.equal(config.method, 'get')
-  assert.ok(config.url === '/api/report/library/records' || config.url === '/api/report/library/records/report_old')
+  assert.ok(config.url === '/api/report/library/records' || ['report_old', 'report_new'].some(id => config.url === '/api/report/library/records/' + id))
   return config
 })
 service.interceptors.response.use(body => { replies.push(structuredClone(body)); return body })
@@ -70,11 +70,33 @@ try {
     assert.equal(view.downloads[0].filename, 'report_old.md')
     assert.deepEqual(Buffer.from(await view.downloads[0].blob.arrayBuffer()), expected)
   }
+  await view.click('capture-left')
   const previousRequests = requests.length
   await view.click('refresh')
   await waitFor(() => requests.length > previousRequests && view.byId('results') && !view.byId('loading'))
   assert.ok(!view.byId('reader'))
   assert.ok(!view.byId('download') || view.byId('download').props.disabled)
+  assert.ok(view.byId('comparison-left'))
+  await view.click('open-report_new')
+  await waitFor(() => view.byId('reader') && replies.at(-1).data.report_id === 'report_new')
+  const newer = replies.at(-1).data
+  const beforeComparison = requests.length
+  await view.click('capture-right')
+  assert.equal(view.byId('comparison-status').props['data-status'], contentMode === 'unavailable' ? 'unavailable' : 'different')
+  assert.match(view.text(view.byId('comparison-left')), /report_old/)
+  assert.match(view.text(view.byId('comparison-right')), /report_new/)
+  await view.click('comparison-right-download')
+  assert.deepEqual(Buffer.from(await view.downloads.at(-1).blob.arrayBuffer()), Buffer.from(newer.markdown_content))
+  if (captured.content_available) {
+    await view.click('comparison-left-download')
+    assert.deepEqual(Buffer.from(await view.downloads.at(-1).blob.arrayBuffer()), Buffer.from(captured.markdown_content))
+  }
+  await view.click('comparison-swap')
+  assert.match(view.text(view.byId('comparison-left')), /report_new/)
+  await view.click('comparison-clear')
+  assert.equal(view.byId('comparison-left-text'), undefined)
+  assert.equal(requests.length, beforeComparison)
+  assert.equal(view.all(node => Object.hasOwn(node.props, 'innerHTML')).length, 0)
   assert.deepEqual(view.warnings, [])
   console.log('actual Flask/Axios/Vue saved report library passed')
 } finally {

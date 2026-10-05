@@ -65,6 +65,6 @@ def test_saved_report_library_http_browser_workflow(saved_reports_client, conten
         thread.join(timeout=5)
     assert not thread.is_alive()
     assert len(observed) >= 4
-    assert all(method == 'GET' and (path == '/api/report/library/records' or path == '/api/report/library/records/report_old')
+    assert all(method == 'GET' and (path == '/api/report/library/records' or path in {'/api/report/library/records/report_old', '/api/report/library/records/report_new'})
                and language == 'en' for method, path, language in observed)
     assert inventory(root) == before

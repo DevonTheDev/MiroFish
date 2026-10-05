@@ -53,6 +53,10 @@ download the exact displayed snapshot. Modern and legacy report files are
 supported. This view reads local saved files without calling models or starting
 new work. See the [saved report library guide](docs/LOCAL_MODE.md#revisit-saved-reports).
 
+Capture opened reports into left/right slots to compare their literal text and
+bounded line changes while browsing the library. Each side retains its own
+observed source and exact text download. See [captured report comparison](docs/LOCAL_MODE.md#compare-captured-report-text).
+
 ## Monitor local runtime activity
 
 Open **Runtime monitor** from Home to see loaded model settings, resource limits,

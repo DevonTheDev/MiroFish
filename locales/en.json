@@ -1891,5 +1891,49 @@
     "draftPrivacy": "This download contains ALL source prompts and replies and ALL target drafts, including unapproved and empty targets. Keep it private as needed. No automatic saving or browser storage is used. The draft contains no approvals; targets must be approved again after restoring it.",
     "downloadDraft": "Download curation draft",
     "draftExportError": "The curation draft download could not be completed. Check your downloads before retrying; a file may already have been saved. Also check every target's character and byte limits and unsupported control characters. Current targets, approvals and any built bundle are retained."
+  },
+  "savedReportComparison": {
+    "title": "Compare captured report text",
+    "scope": "These are temporary, independent observations of literal saved text. They are not a common atomic snapshot, a version archive, or a semantic quality assessment. Captures stay fixed while you browse; leaving this page clears them. The URL does not save the pair.",
+    "instructions": "Open a report in the reader, then capture it on either side. Open another report or reopen the same ID to capture another observation. Replacing or clearing a capture is explicit.",
+    "left": "Left capture",
+    "right": "Right capture",
+    "capture": "Capture open report",
+    "replace": "Replace with open report",
+    "swap": "Swap sides",
+    "clear": "Clear pair",
+    "clearSide": "Clear side",
+    "download": "Download exact source",
+    "unknown": "Unknown",
+    "emptySlot": "No report captured on this side.",
+    "needPair": "Capture both sides to compare their exact saved text.",
+    "truncated": "Preview limited to the first 64 KiB of UTF-8 text. Download the exact source for the full captured document.",
+    "textLabel": "{side}: literal captured text",
+    "changes": "Complete bounded line comparison",
+    "lineNote": "Line numbers: left / right. Endings and blank lines are shown explicitly; a changed line counts as a removal and an addition.",
+    "blank": "Blank line",
+    "results": {
+      "identical": "Captured texts are exactly identical. Added: 0; removed: 0.",
+      "different": "Captured texts differ. Complete line comparison: {added} added; {removed} removed.",
+      "unavailable": "Text comparison unavailable: at least one captured body is unavailable. Added and removed counts are unknown.",
+      "limited": "Captured texts differ. Line comparison is limited / unavailable in-page; added and removed counts are unknown. Exact source downloads remain available."
+    },
+    "limits": {
+      "bytes": "Each diff input must be at most 64 KiB of UTF-8 text.",
+      "lines": "Each diff input must have at most 2,000 logical lines.",
+      "cells": "The line comparison exceeds the 1,000,000-cell work budget.",
+      "rows": "The line comparison exceeds the 4,000-row output budget."
+    },
+    "kinds": {
+      "same": "Unchanged",
+      "added": "Added +",
+      "removed": "Removed −"
+    },
+    "endings": {
+      "LF": "LF",
+      "CRLF": "CRLF",
+      "CR": "CR",
+      "NONE": "No line ending"
+    }
   }
 }
