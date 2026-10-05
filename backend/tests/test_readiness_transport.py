@@ -41,6 +41,7 @@ def test_health_advertises_the_supported_deadline_cap_without_forwarding():
         assert response.json() == {
             "status": "ok", "service": "local-inference-gateway",
             "request_deadline_cap": CAP_HEADER,
+            "request_disconnect_cancel": "X-MiroFish-Cancel-On-Disconnect",
         }
         assert gateway_module().DEADLINE_CAP_HEADER == CAP_HEADER
         assert not upstream.calls

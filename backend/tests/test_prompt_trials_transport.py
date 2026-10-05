@@ -345,7 +345,9 @@ def test_queued_trial_expires_before_reaching_model_and_shared_gateway_survives(
                 assert len(capped) == 1
                 assert 0 < int(capped[0][CAP_HEADER]) <= 250
                 metrics = local_runtime._gateway.snapshot()["metrics"]
-                assert metrics["timed_out_requests"] == 1
+                # The caller's timeout now closes an opted-in connection. It
+                # may cancel the queued forward before the gateway's own cap.
+                assert metrics["timed_out_requests"] + metrics["cancelled_requests"] == 1
                 assert metrics["active_requests"] == 1
             finally:
                 upstream.release.set()

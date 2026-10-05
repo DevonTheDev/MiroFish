@@ -9,13 +9,19 @@ export const getPromptTrial = (requestId, signal) => {
   return service.get(`/api/runtime/trials/${requestId}`, { signal }).then(response => response.data)
 }
 export const startPromptTrial = (request, signal) => service.post('/api/runtime/trials', acceptPromptTrialRequest(request), { signal }).then(response => response.data)
+export const cancelPromptTrial = (target, signal) => {
+  if (!object(target) || !uuid(target.request_id) || !uuid(target.instance_id) ||
+    typeof target.fingerprint !== 'string' || !/^[a-f0-9]{64}$/.test(target.fingerprint)) return invalid()
+  return service.post(`/api/runtime/trials/${target.request_id}/cancel`,
+    { instance_id: target.instance_id, fingerprint: target.fingerprint }, { signal }).then(response => response.data)
+}
 
 const invalid = () => { throw new Error('Invalid prompt trial observation') }
 const object = value => value !== null && typeof value === 'object' && !Array.isArray(value)
 const uuid = value => typeof value === 'string' && /^[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}$/.test(value)
 const fields = ['label', 'system_prompt', 'user_prompt', 'temperature', 'max_output_tokens']
 const terminalStates = ['succeeded', 'truncated', 'refused', 'failed', 'timed_out', 'cancelled']
-const errorCodes = ['invalid_configuration', 'gateway_unavailable', 'gateway_unsupported', 'gateway_busy', 'startup_timeout', 'request_timeout', 'overall_timeout', 'response_too_large', 'malformed_response', 'unsupported_completion', 'model_unavailable', 'cleanup_failed', 'backend_closing', 'internal_failure']
+const errorCodes = ['invalid_configuration', 'gateway_unavailable', 'gateway_unsupported', 'gateway_busy', 'startup_timeout', 'request_timeout', 'overall_timeout', 'response_too_large', 'malformed_response', 'unsupported_completion', 'model_unavailable', 'cleanup_failed', 'backend_closing', 'user_cancelled', 'internal_failure']
 const unavailableCodes = ['local_mode_required', 'inherited_process', 'backend_closing', 'cleanup_failed', 'invalid_configuration']
 const fixedLimits = { max_body_bytes: 32768, label_chars: 80, system_prompt_chars: 1000, user_prompt_chars: 4000,
   response_bytes: 65536, retained_output_chars: 16384, gateway_startup_ms: 5000, request_ms: 60000, overall_ms: 65000, cleanup_ms: 10000 }
@@ -84,6 +90,7 @@ export function acceptPromptTrialSnapshot(envelope) {
   if (data.run !== null) {
     const source = data.run
     if (!object(source) || !uuid(source.request_id) || typeof source.fingerprint !== 'string' || !/^[a-f0-9]{64}$/.test(source.fingerprint) ||
+      (Object.hasOwn(source, 'instance_id') && !uuid(source.instance_id)) ||
       !['running', ...terminalStates].includes(source.state) || !object(source.configuration) || !object(source.cleanup) ||
       !['pending', 'running', 'succeeded', 'failed'].includes(source.cleanup.state) ||
       !(source.error_code === null || errorCodes.includes(source.error_code))) return invalid()
@@ -107,11 +114,13 @@ export function acceptPromptTrialSnapshot(envelope) {
       if (source.state === 'refused' && response.finish_reason !== 'content_filter' && (response.refusal === null || response.refusal === '')) return invalid()
     }
     if (['failed', 'timed_out', 'cancelled'].includes(source.state) && source.error_code === null) return invalid()
+    if (source.error_code === 'user_cancelled' && (!['running', 'cancelled'].includes(source.state) || response !== null)) return invalid()
     if (source.cleanup.state === 'failed' && (source.state !== 'failed' || source.error_code !== 'cleanup_failed')) return invalid()
     run = { request_id: source.request_id, fingerprint: source.fingerprint, state: source.state, started_at: startedAt, finished_at: finishedAt,
       elapsed_ms: number(source.elapsed_ms), request_duration_ms: nullableNumber(source.request_duration_ms), request: requestFields(source.request),
       configuration, response, error_code: source.error_code,
       cleanup: { state: source.cleanup.state, duration_ms: nullableNumber(source.cleanup.duration_ms) } }
+    if (Object.hasOwn(source, 'instance_id')) run.instance_id = source.instance_id
   }
   return { schema_version: 1, kind: 'mirofish_local_prompt_trials', mode: data.mode, available: data.available,
     unavailable_code: data.unavailable_code, observed_at: observedAt, limits, run }

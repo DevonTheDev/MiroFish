@@ -8,7 +8,8 @@ from werkzeug.exceptions import BadRequest, RequestEntityTooLarge
 from . import runtime_bp
 from ..local_runtime.gateway import validate_loopback_url
 from ..local_runtime.prompt_trials import (
-    MAX_BODY_BYTES, PromptTrialError as _InputError, _strict_json, normalize_request, valid_uuid,
+    MAX_BODY_BYTES, MAX_CANCEL_BODY_BYTES, PromptTrialError as _InputError, _strict_json,
+    normalize_cancellation, normalize_request, valid_uuid,
 )
 
 
@@ -116,3 +117,21 @@ def prompt_trials_start():
     except (ValueError, UnicodeError, RecursionError, BadRequest, RequestEntityTooLarge, _InputError):
         return _error("invalid_request")
     return _call("start_prompt_trial", value, status=202)
+
+
+@runtime_bp.route("/trials/<request_id>/cancel", methods=["POST"])
+def prompt_trials_cancel(request_id):
+    invalid = _boundary(request_id)
+    if invalid is not None:
+        return invalid
+    if (request.mimetype != "application/json"
+            or request.content_length is not None and request.content_length > MAX_CANCEL_BODY_BYTES):
+        return _error("invalid_request")
+    try:
+        raw = request.stream.read(MAX_CANCEL_BODY_BYTES + 1)
+        if len(raw) > MAX_CANCEL_BODY_BYTES:
+            return _error("invalid_request")
+        value = normalize_cancellation(_strict_json(raw))
+    except (ValueError, UnicodeError, RecursionError, BadRequest, RequestEntityTooLarge, _InputError):
+        return _error("invalid_request")
+    return _call("cancel_prompt_trial", request_id, value, status=202)

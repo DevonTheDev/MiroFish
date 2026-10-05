@@ -34,10 +34,12 @@
       <section class="panel" aria-labelledby="latest-title">
         <div class="panel-heading"><h2 id="latest-title">{{ t('promptTrials.latest') }}</h2><span v-if="snapshot?.run" class="badge" data-testid="trial-state">{{ t(`promptTrials.states.${snapshot.run.state}`) }}</span></div>
         <div class="toolbar">
+          <template v-for="view in stopViews" :key="view.generation"><button type="button" data-testid="trial-stop" @click="view.stop">{{ t('promptTrials.stop') }}</button></template>
           <button type="button" data-testid="trial-pin" :disabled="!canPin" @click="pin">{{ t('promptTrials.pin') }}</button>
           <button type="button" data-testid="trial-download" :disabled="!canDownload" @click="download(snapshot)">{{ t('promptTrials.download') }}</button>
           <button type="button" data-testid="trial-reuse" :disabled="!canDownload" @click="reuse(snapshot)">{{ t('promptTrials.reuse') }}</button>
         </div>
+        <p v-if="snapshot?.run?.state === 'running'" class="reading-note">{{ t('promptTrials.stopNote') }}</p>
         <div v-if="snapshot?.run" data-testid="trial-result"><ResultDetails :run="snapshot.run" prefix="trial" /></div>
         <p v-else class="reading-note">{{ t('promptTrials.noResult') }}</p>
         <p class="reading-note">{{ t('promptTrials.privateExport') }}</p>
@@ -91,7 +93,7 @@ import { RouterLink } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import LanguageSwitcher from '../components/LanguageSwitcher.vue'
 import PromptTrialSuiteBuilder from '../components/PromptTrialSuiteBuilder.vue'
-import { acceptPromptTrialRequest, acceptPromptTrialSnapshot, getPromptTrial, getPromptTrials, isPromptTrialTerminal, samePromptTrialRequest, startPromptTrial } from '../api/promptTrials'
+import { acceptPromptTrialRequest, acceptPromptTrialSnapshot, cancelPromptTrial, getPromptTrial, getPromptTrials, isPromptTrialTerminal, samePromptTrialRequest, startPromptTrial } from '../api/promptTrials'
 import { PROMPT_TRIAL_FILE_MAX_BYTES, parsePromptTrialFile } from '../utils/promptTrialFiles.js'
 
 const { t, locale } = useI18n()
@@ -121,9 +123,12 @@ function begin() {
 function accept(response) {
   const accepted = acceptPromptTrialSnapshot(response)
   if (owner && (!accepted.run || accepted.run.request_id !== ownerId.value || !samePromptTrialRequest(accepted.run.request, owner.request) ||
-    (owner.fingerprint !== null && accepted.run.fingerprint !== owner.fingerprint))) throw new Error('Unconfirmed trial identity')
-  if (owner) owner.fingerprint = accepted.run.fingerprint
-  snapshot.value = accepted; stale.value = false; error.value = false; notice.value = null
+    (owner.fingerprint !== null && accepted.run.fingerprint !== owner.fingerprint) ||
+    (owner.instanceId !== null && accepted.run.instance_id !== owner.instanceId))) throw new Error('Unconfirmed trial identity')
+  if (owner) { owner.fingerprint = accepted.run.fingerprint; owner.instanceId = accepted.run.instance_id ?? null }
+  snapshot.value = accepted; stale.value = false; error.value = false
+  notice.value = owner?.stopAttempted && accepted.run.state === 'running'
+    ? accepted.run.error_code === 'user_cancelled' ? 'stopAccepted' : 'stopUnconfirmed' : null
 }
 function schedule() {
   clearTimer()
@@ -143,7 +148,7 @@ async function observe() {
     if (!current(token)) return
     accept(response)
   } catch {
-    if (current(token)) { error.value = true; notice.value = owner ? 'uncertain' : null }
+    if (current(token)) { error.value = true; notice.value = owner?.stopAttempted ? 'stopUncertain' : owner ? 'uncertain' : null }
   } finally {
     if (current(token)) { request = null; loading.value = false; schedule() }
   }
@@ -158,7 +163,7 @@ async function start() {
     if (frozen.max_output_tokens > snapshot.value.limits.max_output_tokens) throw new Error('Loaded output limit')
   } catch { validationError.value = true; return }
   validationError.value = false; error.value = false; notice.value = null; polls = 0
-  owner = { request: frozen, fingerprint: null }; ownerId.value = frozen.request_id
+  owner = { request: frozen, fingerprint: null, instanceId: null, stopAttempted: false }; ownerId.value = frozen.request_id
   const token = begin()
   let reconcile = false
   try {
@@ -175,6 +180,48 @@ async function start() {
         request = null; loading.value = false; owner = null; ownerId.value = null; generation++
       } else { notice.value = 'uncertain'; error.value = true; reconcile = true }
     }
+  } finally {
+    if (current(token)) {
+      request = null; loading.value = false
+      if (reconcile) observe()
+      else schedule()
+    }
+  }
+}
+function canStop(observed) {
+  return !retired && !request && !loading.value && !stale.value && observed === snapshot.value &&
+    observed?.run?.state === 'running' && typeof observed.run.instance_id === 'string' &&
+    observed.run.error_code !== 'user_cancelled' && (!owner || (ownerId.value === observed.run.request_id &&
+      owner.instanceId === observed.run.instance_id && owner.fingerprint === observed.run.fingerprint &&
+      samePromptTrialRequest(owner.request, observed.run.request)))
+}
+// A render-local alias binds the action to this observation, owner and generation.
+// Cached template handlers must never look up a newer latest run at event time.
+const stopViews = computed(() => {
+  const observed = snapshot.value
+  if (!canStop(observed)) return []
+  const observedOwner = owner, expected = generation
+  return [{ generation: expected, stop: () => stop(observed, observedOwner, expected) }]
+})
+async function stop(observed, observedOwner, expected) {
+  if (generation !== expected || owner !== observedOwner || !canStop(observed)) return
+  const run = observed.run
+  const target = Object.freeze({ request_id: run.request_id, instance_id: run.instance_id, fingerprint: run.fingerprint })
+  if (!owner) {
+    owner = { request: Object.freeze(acceptPromptTrialRequest({ request_id: run.request_id, ...run.request })),
+      fingerprint: run.fingerprint, instanceId: run.instance_id, stopAttempted: false }
+    ownerId.value = run.request_id
+  }
+  owner.stopAttempted = true; polls = 0; notice.value = 'stopping'; error.value = false
+  const token = begin()
+  let reconcile = false
+  try {
+    const response = await cancelPromptTrial(target, token.controller.signal)
+    if (!current(token)) return
+    accept(response)
+    reconcile = snapshot.value.run.state === 'running' && snapshot.value.run.error_code !== 'user_cancelled'
+  } catch {
+    if (current(token)) { notice.value = 'stopUncertain'; error.value = true; reconcile = true }
   } finally {
     if (current(token)) {
       request = null; loading.value = false

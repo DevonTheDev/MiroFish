@@ -1352,9 +1352,13 @@
     "releaseNote": "The old request may have run. Releasing keeps your draft and pins, reads the latest status, and lets you explicitly submit a new request when available. It does not cancel or retry the old request.",
     "notices": {
       "uncertain": "This request’s outcome is not confirmed. Refresh reconciles only its exact request ID and never resends it. No unrelated trial is adopted.",
-      "paused": "Automatic observation is paused after the bounded observation window. Refresh this request ID to check again; backend work was not cancelled.",
+      "paused": "Automatic observation is paused after the bounded observation window. Refresh this request ID to check again; pausing observation does not stop backend work.",
       "rejected": "The server did not admit this request. Refresh the latest status before trying again.",
-      "released": "The previous observation was released. Review the current status and choose Run trial explicitly to create a new request."
+      "released": "The previous observation was released. Review the current status and choose Run trial explicitly to create a new request.",
+      "stopping": "Requesting a stop for this exact trial. Waiting for confirmation.",
+      "stopAccepted": "The stop was accepted. This trial remains running while bounded cleanup finishes.",
+      "stopUncertain": "The stop outcome is not confirmed. Reconciliation reads only this exact trial; it never repeats the stop or starts another request.",
+      "stopUnconfirmed": "A stop is not confirmed for this trial. You can explicitly try Stop waiting again after reviewing this observation."
     },
     "states": {
       "running": "Running",
@@ -1363,7 +1367,7 @@
       "refused": "Refused by the server",
       "failed": "Failed",
       "timed_out": "Timed out",
-      "cancelled": "Cancelled during backend shutdown"
+      "cancelled": "Cancelled"
     },
     "cleanupStates": {
       "pending": "Pending",
@@ -1392,8 +1396,11 @@
       "model_unavailable": "The configured local model was unavailable.",
       "cleanup_failed": "Trial resource cleanup failed.",
       "backend_closing": "The backend shut down before the trial completed.",
-      "internal_failure": "The trial could not complete."
-    }
+      "internal_failure": "The trial could not complete.",
+      "user_cancelled": "An explicit stop was accepted for this trial request. The model server may continue computing."
+    },
+    "stop": "Stop waiting for this trial",
+    "stopNote": "Stops this trial request and wait. This may affect the same trial in another tab or suite. Queued forwarding is withdrawn if caught before dispatch; work may already have reached the model server and may continue. This does not unload or stop the model server."
   },
   "promptSuites": {
     "navTitle": "Prompt suites",

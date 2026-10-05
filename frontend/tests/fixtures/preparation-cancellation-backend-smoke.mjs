@@ -12,7 +12,7 @@ import { productionClient } from '../helpers/readiness-view-fixture.js'
 
 const [backendURL, scenario] = process.argv.slice(2)
 assert.match(backendURL, /^http:\/\/127\.0\.0\.1:[0-9]+$/)
-assert.ok(['cancel', 'lost_response', 'finalizing'].includes(scenario))
+assert.ok(['cancel', 'lost_response', 'finalizing', 'cancel_conflict'].includes(scenario))
 const root = fileURLToPath(new URL('../../', import.meta.url))
 const cacheDir = await mkdtemp(path.join(tmpdir(), 'miro-preparation-cancel-vite-'))
 let proxy, view, service
@@ -68,6 +68,19 @@ try {
     await settle()
   }
   const getPlan = () => api.getPreparationPlan('sim_fixture')
+  const readStablePlan = async reader => {
+    try { return (await reader()).data } catch (error) {
+      // A saved-state replacement can legitimately invalidate one observation.
+      // Other HTTP/transport failures must still fail this integration test.
+      if (error.response?.status === 409 && error.response?.data?.error_code === 'source_changed') return null
+      throw error
+    }
+  }
+  for (const error of [new Error('unavailable'),
+    { response: { status: 500, data: { error_code: 'source_changed' } } },
+    { response: { status: 409, data: { error_code: 'another_conflict' } } }]) {
+    await assert.rejects(() => readStablePlan(() => Promise.reject(error)), value => value === error)
+  }
   await view.mount('/simulation/sim_fixture')
   await waitFor(() => control('load-cast') && !control('load-cast').props.disabled, 'local plan is ready')
   await click('load-cast')
@@ -112,9 +125,22 @@ try {
     assert.ok(!control('cancel-preparation') || control('cancel-preparation').props.disabled)
     assert.notEqual(view.state(setupChild).phase, 4)
     await release('profile')
-    await waitFor(async () => (await getPlan()).data.cancellation?.phase === 'cancelled', 'worker drains and records cancellation')
+    let injectConflict = scenario === 'cancel_conflict'
+    const nextPlan = () => {
+      if (injectConflict) {
+        injectConflict = false
+        return service.get('/api/fixture/plan-conflict')
+      }
+      return getPlan()
+    }
+    let plan
+    await waitFor(async () => {
+      const observed = await readStablePlan(nextPlan)
+      if (observed?.cancellation?.phase !== 'cancelled' || observed.owner.busy !== false) return false
+      plan = observed
+      return true
+    }, 'worker drains and records cancellation')
     await waitFor(() => control('preparation-cancellation-status'), 'cancellation is visible in the actual view')
-    const plan = (await getPlan()).data
     assert.equal(plan.owner.busy, false)
     assert.equal(plan.can_prepare, false)
     assert.equal(plan.can_reuse, false)

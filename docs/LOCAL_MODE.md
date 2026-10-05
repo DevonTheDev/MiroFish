@@ -331,9 +331,11 @@ The monitor separates three kinds of activity:
 These gauges are not agent counts or GPU utilization. In particular, subtracting
 active requests from admitted connections does not give the queue length.
 Timeout/cancellation labels describe the forwarding task's observed result, not
-necessarily the HTTP status seen by its caller. A disconnected caller may retain
-its slot until the existing deadline or completion, and an upstream model may
-continue computing after cancellation.
+necessarily the HTTP status seen by its caller. Legacy disconnected callers may
+retain work until the existing deadline or completion. Prompt trials opt in to
+withdrawal on an observed disconnect; their own cleanup can finish before the
+gateway notices and drains that forward. An upstream model may keep computing
+after either form of cancellation.
 
 Counters belong to one gateway instance and reset when it is replaced. Each
 independent backend process has its own owner and budgets. A process using an
@@ -480,8 +482,8 @@ Gateway startup has up to five seconds and the completion request up to sixty,
 within an overall sixty-five-second operation budget. Owned-client cleanup has
 a separate allowance of ten seconds plus bounded drain overhead. These are
 cooperative application deadlines, not a guarantee that a model server or GPU
-stops computing. There is no user cancellation control for this single bounded
-request. Leaving the page stops observation, while an accepted backend request
+stops computing. The explicit stop action below applies only to the selected
+trial request. Leaving the page stops observation, while an accepted backend request
 may continue. A lost Start response is reconciled using its exact request ID,
 without automatically repeating inference. If that result has been replaced or
 the backend has restarted, it may be unavailable.
@@ -515,6 +517,61 @@ ownership, lost replies, literal results and exact snapshot downloads. The Vite
 proxy's forwarding of supplied Origin/Fetch Metadata is also checked. No real
 model weights or GPU, private documents, paid service, hosted test, native
 browser-generated headers or Windows behavior is established by these tests.
+
+### Stop waiting for a trial
+
+A confirmed live running result offers **Stop waiting for this trial**. This can
+target the current observation after returning to the page, and may affect a
+request being observed by another tab or a suite. Historical pins, imported
+files and an unconfirmed Start reply cannot establish a cancellable live run.
+A lost Start reply must first be reconciled using its exact request ID.
+
+The action captures the request ID, input fingerprint and server-issued instance
+ID. An old control cannot switch to a replacement run, even if it reuses the same
+request ID and inputs. The first outcome decision wins: a completed or already
+decided result stays unchanged. An accepted stop records `user_cancelled` and
+stays **Running** while owned cleanup and drain finish. A late model response
+cannot replace that decision. Cleanup failure remains a failure and quarantines
+the trial runner until the backend restarts.
+
+If the Stop reply is lost, the page reconciles only the exact captured run with
+GET requests; it does not repeat Stop or Start automatically. A running result
+without the cancellation marker is still unconfirmed. A replaced result or an
+unavailable read stays uncertain rather than adopting the latest run. Leaving
+the page stops observation only. Starting another trial requires an explicit
+**Run trial** after the previous cleanup and worker exit permit admission.
+
+Trial requests opt in to withdrawal from the inference gateway when it observes
+their HTTP connection closing. A queued forward is removed when cancellation
+wins before dispatch; an active upstream HTTP operation is cooperatively closed.
+The model server may continue computing, and an undetected connection failure
+can retain work until the original deadline. Trial cleanup may finish before
+the gateway notices and drains its forward. This action does not stop or unload
+the model server, or promise immediate gateway or GPU capacity.
+
+A cancelled suite case stops further cases, leaves them unattempted, and marks
+its checks as not evaluated. A completion that wins the race can still allow the
+suite to continue. Use **Stop scheduling** to stop future cases separately.
+Cancelled observations can be pinned, downloaded, reopened and reused as inputs.
+Older schema-1 files without an instance ID still open, but cannot establish a
+live cancellable instance. Older clients that do not recognize `user_cancelled`
+cannot open the new cancelled records.
+
+Upgrade the backend, gateway and frontend together. Trials require the gateway's
+advertised disconnect-cancellation capability before dispatching a model request;
+an older inherited gateway fails explicitly and its owner must be restarted.
+The opt-in header is consumed by the gateway and never forwarded to the model.
+It is accepted only for chat-completion POSTs. For opted-in requests, closing the
+write half of the socket after the request body also means abandonment; legacy
+SDK requests without the header retain their previous behavior. Each opted-in
+handler retains admission until its actual forwarding task settles or the
+original deadline expires, including cancellation before the task first runs.
+
+Local tests cover real sockets for queued and active cancellation, half-close,
+cleanup, deadlines and shutdown, plus instance ownership through Flask and
+compiled Vue/Axios. Linked tests exercise a lost successful Stop reply, export
+and reopen, and a later explicit request. These checks do not establish real
+model/GPU cancellation latency, native browser behavior or Windows networking.
 
 ### Reopen saved trial files
 
@@ -1441,9 +1498,10 @@ children. Chat, embeddings and memory extraction share its budget. It refuses
 remote URLs, redirects, cloud-tag model names, streaming, multimodal requests,
 inherited HTTP proxies/cookies and oversized payloads. SDK credentials are the
 literal placeholder `local`. Boost-provider settings are ignored in local mode.
-A disconnected caller retains its slot until completion/deadline. A model server
-may keep computing after transport cancellation, so its own parallel limit is
-still necessary. Running multiple independent MiroFish backends creates separate
+Legacy disconnected callers retain work until completion/deadline; prompt trials
+use the scoped opt-in withdrawal described above. A model server may keep
+computing after transport cancellation, so its own parallel limit is still
+necessary. Running multiple independent MiroFish backends creates separate
 gateway budgets; run one backend for this preset.
 
 Local Twitter uses OASIS's random recommendation policy instead of its hidden

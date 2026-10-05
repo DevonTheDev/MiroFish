@@ -3,8 +3,9 @@
 Constructing settings or importing this module performs no network I/O. Start one
 instance in the owning backend and give every worker its returned /v1 URL. This
 bounds *gateway requests*; a model server may keep computing after a cancellation.
-Client disconnects retain their slot until completion or the request deadline;
-they do not cause immediate cancellation of the upstream model request.
+Legacy client disconnects retain their work until completion or its deadline.
+Opted-in chat clients treat post-body write-side EOF/reset as abandonment, cancel
+only their forward, and retain admission until cleanup or the original deadline.
 No remote fallback, redirects, environment proxies, credentials, or prompt logs.
 """
 
@@ -35,6 +36,7 @@ MAX_REQUEST_BYTES = 1024 * 1024
 MAX_RESPONSE_BYTES = 8 * 1024 * 1024
 MAX_SAFE_INTEGER = 2**53 - 1
 DEADLINE_CAP_HEADER = "X-MiroFish-Timeout-Ms"
+DISCONNECT_CANCEL_HEADER = "X-MiroFish-Cancel-On-Disconnect"
 
 
 class GatewayStartupCleanupError(RuntimeError):
@@ -154,6 +156,60 @@ class _GatewayError(Exception):
     def __init__(self, status, message):
         self.status = status
         self.message = message
+
+
+class _ForwardSubmission:
+    """A thread-safe cancellation request with actual asyncio task completion.
+
+    Cancelling run_coroutine_threadsafe's Future marks it done before the task
+    finishes cleanup. This separate completion is settled by the task's done
+    callback, including when cancellation precedes the first coroutine step.
+    Task creation and cancellation use only public, loop-owned asyncio APIs.
+    """
+
+    def __init__(self, loop, coroutine):
+        self.completion = concurrent.futures.Future()
+        self._loop = loop
+        self._task = None
+        self._cancel_requested = threading.Event()
+        self._cancel_delivered = False
+        try:
+            loop.call_soon_threadsafe(self._start, coroutine)
+        except BaseException:
+            coroutine.close()
+            raise
+
+    def _start(self, coroutine):
+        try:
+            self._task = self._loop.create_task(coroutine)
+        except BaseException as exc:
+            coroutine.close()
+            self.completion.set_exception(exc)
+            return
+        self._task.add_done_callback(self._completed)
+        if self._cancel_requested.is_set():
+            self._cancel_task()
+
+    def _completed(self, task):
+        if task.cancelled():
+            self.completion.cancel()
+        elif (error := task.exception()) is not None:
+            self.completion.set_exception(error)
+        else:
+            self.completion.set_result(task.result())
+
+    def _cancel_task(self):
+        if self._task is not None and not self._cancel_delivered:
+            self._cancel_delivered = True
+            self._task.cancel()
+
+    def cancel(self):
+        self._cancel_requested.set()
+        try:
+            self._loop.call_soon_threadsafe(self._cancel_task)
+        except RuntimeError:
+            # Shutdown may already have drained tasks and closed the loop.
+            pass
 
 
 def _error_body(message):
@@ -416,6 +472,60 @@ class _Handler(BaseHTTPRequestHandler):
         except (ValueError, UnicodeError, RecursionError):
             raise _GatewayError(400, "A valid JSON request is required") from None
 
+    def _disconnect_cancellation(self):
+        values = self.headers.get_all(DISCONNECT_CANCEL_HEADER, [])
+        if not values:
+            return False
+        if values != ["1"]:
+            raise _GatewayError(400, "Invalid local disconnect cancellation flag")
+        if self.path != "/v1/chat/completions":
+            raise _GatewayError(400, "Disconnect cancellation is supported only for chat completions")
+        return True
+
+    def _peer_abandoned(self):
+        """Opt-in contract: post-body write-side EOF/reset also cancels half-close.
+
+        Portable sockets cannot distinguish a peer's write half-close from full
+        closure. Controlled clients opt in knowing both mean abandonment here.
+        MSG_PEEK preserves any unexpected trailing bytes; bounded completion
+        waits pace further checks, without reading another pipelined request.
+        """
+        timeout = self.connection.gettimeout()
+        try:
+            self.connection.setblocking(False)
+            return self.connection.recv(1, socket.MSG_PEEK) == b""
+        except (BlockingIOError, InterruptedError):
+            return False
+        except OSError:
+            return True
+        finally:
+            try:
+                self.connection.settimeout(timeout)
+            except OSError:
+                pass
+
+    def _wait_forward(self, submission):
+        abandoned = False
+        while True:
+            if not abandoned and not submission.completion.done() and self._peer_abandoned():
+                abandoned = True
+                submission.cancel()
+            remaining = self.deadline - time.monotonic()
+            try:
+                result = submission.completion.result(timeout=max(0, min(0.05, remaining)))
+                return None if abandoned else result
+            except concurrent.futures.TimeoutError:
+                if time.monotonic() < self.deadline:
+                    continue
+                submission.cancel()
+                if abandoned:
+                    return None
+                raise _GatewayError(504, "Local inference request timed out") from None
+            except concurrent.futures.CancelledError:
+                if abandoned:
+                    return None
+                raise _GatewayError(503, "Local inference gateway is shutting down") from None
+
     def _dispatch(self):
         try:
             # SDK-only listener: reject cross-origin browser requests and DNS
@@ -434,13 +544,28 @@ class _Handler(BaseHTTPRequestHandler):
                 self._reply(200, json.dumps({
                     "status": "ok", "service": "local-inference-gateway",
                     "request_deadline_cap": DEADLINE_CAP_HEADER,
+                    "request_disconnect_cancel": DISCONNECT_CANCEL_HEADER,
                 }).encode())
                 return
+            cancel_on_disconnect = self._disconnect_cancellation()
             gateway = self.server.gateway
             payload = _prepare_payload(self.path, self._read_payload(), gateway.settings) if self.command == "POST" else None
             remaining = self.deadline - time.monotonic()
             if remaining <= 0:
                 raise _GatewayError(408, "Request body timed out")
+            if cancel_on_disconnect:
+                if self._peer_abandoned():
+                    self.close_connection = True
+                    return
+                submission = gateway._submit_forward(
+                    self.path, payload, remaining, deadline=self.deadline,
+                )
+                result = self._wait_forward(submission)
+                if result is None:
+                    self.close_connection = True
+                else:
+                    self._reply(*result)
+                return
             future = asyncio.run_coroutine_threadsafe(gateway._forward(
                 self.path, payload, remaining,
                 deadline=self.deadline if DEADLINE_CAP_HEADER in self.headers else None,
@@ -467,6 +592,7 @@ class LocalInferenceGateway:
     def __init__(self, settings: GatewaySettings):
         self.settings = settings
         self._lock = threading.Lock()
+        self._submission_lock = threading.Lock()
         # Never use lifecycle locks or semaphore internals to observe activity.
         # This lock only protects small scalar copies/counter transitions.
         self._metrics_lock = threading.Lock()
@@ -645,6 +771,18 @@ class LocalInferenceGateway:
             self._set_state("running")
             return self._base_url
 
+    def _submit_forward(self, path, payload, remaining, *, deadline):
+        # Close marks this boundary before queueing _shutdown. Thus every
+        # accepted creation callback runs before shutdown snapshots its tasks;
+        # a late handler cannot leave an unstarted coroutine on a stopped loop.
+        # Never wait for task execution while holding this short-lived lock.
+        with self._submission_lock:
+            if self._closed:
+                raise _GatewayError(503, "Local inference gateway is shutting down")
+            return _ForwardSubmission(self._loop, self._forward(
+                path, payload, remaining, deadline=deadline,
+            ))
+
     async def _forward(self, path, payload, remaining, *, deadline=None):
         self._change_metrics(started_requests=1, queued_requests=1)
         active = False
@@ -721,7 +859,8 @@ class LocalInferenceGateway:
                 self._closed = True
                 self._set_state("closed")
                 return
-            self._closed = True
+            with self._submission_lock:
+                self._closed = True
             self._set_state("closing")
             if self._server is None:
                 self._set_state("closed")

@@ -17,12 +17,13 @@ import os
 import threading
 import time
 import unicodedata
-from uuid import UUID
+from uuid import UUID, uuid4
 
 from ..config import Config
 from ..shutdown import register_shutdown_callback
 
 MAX_BODY_BYTES = 32768
+MAX_CANCEL_BODY_BYTES = 1024
 MAX_RESPONSE_BYTES = 65536
 MAX_OUTPUT_CHARS = 16384
 MAX_SAFE_INTEGER = 2**53 - 1
@@ -117,6 +118,15 @@ def _fingerprint(value):
     body = {key: item for key, item in value.items() if key != "request_id"}
     return hashlib.sha256(json.dumps(body, ensure_ascii=False, sort_keys=True,
                                      separators=(",", ":"), allow_nan=False).encode("utf-8")).hexdigest()
+
+
+def normalize_cancellation(value):
+    if (type(value) is not dict or set(value) != {"instance_id", "fingerprint"}
+            or not valid_uuid(value["instance_id"])
+            or type(value["fingerprint"]) is not str or len(value["fingerprint"]) != 64
+            or any(char not in "0123456789abcdef" for char in value["fingerprint"])):
+        raise PromptTrialError("invalid_request", 400)
+    return dict(value)
 
 
 def _configuration():
@@ -238,6 +248,45 @@ def start_prompt_trial(value):
         return _snapshot_locked()
 
 
+def _schedule_cancel(owner, loop, task):
+    if loop is not None and task is not None:
+        def cancel_operation():
+            with _lock:
+                if owner.active and not owner.sealed and not owner.cleaning and owner.task is task:
+                    task.cancel()
+        try:
+            loop.call_soon_threadsafe(cancel_operation)
+        except RuntimeError:
+            pass
+
+
+def cancel_prompt_trial(request_id, target):
+    """Decide one exact instance's outcome, then let its worker finish cleanup."""
+    if not Config.LOCAL_MODE:
+        raise PromptTrialError("local_mode_required", 403)
+    if _owner_pid != os.getpid():
+        raise PromptTrialError("trials_unavailable", 503)
+    if not valid_uuid(request_id):
+        raise PromptTrialError("invalid_request", 400)
+    target = normalize_cancellation(target)
+    with _lock:
+        owner = _manager
+        if owner is None or owner.data["request_id"] != request_id:
+            raise PromptTrialError("run_not_found", 404)
+        if any(owner.data[key] != target[key] for key in ("instance_id", "fingerprint")):
+            raise PromptTrialError("request_conflict", 409)
+        accepted = owner.active and not owner.sealed and not owner.outcome_decided and not owner.cleaning
+        if accepted:
+            owner.cancel_requested = True
+            owner.decide("cancelled", error_code="user_cancelled")
+        loop, task = owner.loop, owner.task
+        # A later replacement must not change which run this response describes.
+        snapshot = _snapshot_locked()
+    if accepted:
+        _schedule_cancel(owner, loop, task)
+    return snapshot
+
+
 def close_prompt_trials():
     global _closing, _cleanup_failed
     if _owner_pid != os.getpid():
@@ -248,16 +297,9 @@ def close_prompt_trials():
         if owner is None or not owner.active:
             return
         owner.cancel_requested = True
+        owner.decide("cancelled", error_code="backend_closing")
         loop, task = owner.loop, owner.task
-    if loop is not None and task is not None:
-        def cancel_operation():
-            with _lock:
-                if owner.active and not owner.cleaning and owner.task is task:
-                    task.cancel()
-        try:
-            loop.call_soon_threadsafe(cancel_operation)
-        except RuntimeError:
-            pass
+    _schedule_cancel(owner, loop, task)
     if owner.thread is threading.current_thread():
         return
     # Startup is a bounded synchronous shared-owner operation; allow it to
@@ -327,7 +369,8 @@ class _Run:
         self.deadline = self.started + self.budgets["overall_ms"] / 1000
         self.captured = {name: getattr(Config, name) for name in _CONFIG_FIELDS}
         self.gateway_environment = os.environ.get("MIROFISH_LOCAL_GATEWAY_URL")
-        self.data = {"request_id": value["request_id"], "fingerprint": fingerprint, "state": "running",
+        self.data = {"request_id": value["request_id"], "instance_id": str(uuid4()),
+                     "fingerprint": fingerprint, "state": "running",
                      "started_at": _utc(), "finished_at": None, "elapsed_ms": 0, "request_duration_ms": None,
                      "request": {key: item for key, item in value.items() if key != "request_id"},
                      "configuration": {key: config[key] for key in ("model", "reasoning_effort")},
@@ -338,6 +381,7 @@ class _Run:
         self.payload = {"model": config["model"], "messages": messages,
             "temperature": value["temperature"], "max_tokens": value["max_output_tokens"], "stream": False}
         self.active, self.sealed, self.cleaning, self.cancel_requested = True, False, False, False
+        self.outcome_decided = False
         self.outcome = "failed"
         self.loop = self.task = self.http = None
         self.resources, self.pending = [], set()
@@ -357,11 +401,16 @@ class _Run:
         if time.monotonic() >= self.deadline:
             raise _TrialFailure("overall_timeout")
 
+    def decide(self, state, *, error_code=None, response=None):
+        """First locked decision wins; caller must hold the service lock."""
+        if not self.sealed and not self.outcome_decided:
+            self.outcome_decided = True
+            self.outcome = state
+            self.data.update(error_code=error_code, response=response)
+
     def publish(self, state, *, error_code=None, response=None):
         with _lock:
-            if not self.sealed:
-                self.outcome = state
-                self.data.update(error_code=error_code, response=response)
+            self.decide(state, error_code=error_code, response=response)
 
     async def bounded(self, operation, seconds):
         task = asyncio.create_task(operation)
@@ -382,7 +431,7 @@ class _Run:
     async def gateway(self, deadline):
         import httpx
         from . import get_local_gateway_url
-        from .gateway import DEADLINE_CAP_HEADER, validate_loopback_url
+        from .gateway import DEADLINE_CAP_HEADER, DISCONNECT_CANCEL_HEADER, validate_loopback_url
 
         self.ensure_current()
         base = validate_loopback_url(get_local_gateway_url(deadline_monotonic=deadline))
@@ -400,7 +449,8 @@ class _Run:
             raise _TrialFailure("gateway_unsupported") from None
         if (type(health) is not dict or health.get("status") != "ok"
                 or health.get("service") != "local-inference-gateway"
-                or health.get("request_deadline_cap") != DEADLINE_CAP_HEADER):
+                or health.get("request_deadline_cap") != DEADLINE_CAP_HEADER
+                or health.get("request_disconnect_cancel") != DISCONNECT_CANCEL_HEADER):
             raise _TrialFailure("gateway_unsupported")
         self.ensure_current()
         return base.rstrip("/")
@@ -429,10 +479,13 @@ class _Run:
             return bytes(raw)
 
     async def model(self, base, deadline):
-        from .gateway import DEADLINE_CAP_HEADER
+        from .gateway import DEADLINE_CAP_HEADER, DISCONNECT_CANCEL_HEADER
         self.ensure_current()
         raw = await self.read_response("POST", base.removesuffix("/v1") + "/v1/chat/completions", deadline,
-                                       json=self.payload, headers={DEADLINE_CAP_HEADER: str(max(1, math.floor((deadline - time.monotonic()) * 1000)))})
+                                       json=self.payload, headers={
+                                           DEADLINE_CAP_HEADER: str(max(1, math.floor((deadline - time.monotonic()) * 1000))),
+                                           DISCONNECT_CANCEL_HEADER: "1",
+                                       })
         self.ensure_current()
         try:
             return _parse_completion(_strict_json(raw))

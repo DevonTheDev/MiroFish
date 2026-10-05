@@ -480,7 +480,8 @@ def test_cancellation_resistant_late_health_cannot_start_model_after_cleanup(tri
                 except asyncio.CancelledError:
                     pass
             raw = json.dumps({"status": "ok", "service": "local-inference-gateway",
-                              "request_deadline_cap": "X-MiroFish-Timeout-Ms"}).encode()
+                              "request_deadline_cap": "X-MiroFish-Timeout-Ms",
+                              "request_disconnect_cancel": "X-MiroFish-Cancel-On-Disconnect"}).encode()
             yield httpx.Response(200, headers={"Content-Type": "application/json"}, stream=httpx.ByteStream(raw))
     monkeypatch.setattr(httpx, "AsyncClient", LateHealthClient)
     trials.start_prompt_trial(request())

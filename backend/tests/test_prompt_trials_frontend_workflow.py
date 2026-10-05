@@ -22,7 +22,7 @@ from app.services.simulation_runner import SimulationRunner
 
 
 @contextmanager
-def synthetic_trial_model(*, delay=0, truncated=False, empty=False, controls=False):
+def synthetic_trial_model(*, delay=0, truncated=False, empty=False, controls=False, gate=None, entered=None):
     calls = []
 
     class Handler(BaseHTTPRequestHandler):
@@ -32,6 +32,10 @@ def synthetic_trial_model(*, delay=0, truncated=False, empty=False, controls=Fal
         def do_POST(self):
             payload = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
             calls.append((self.path, payload, dict(self.headers)))
+            if entered is not None:
+                entered.set()
+            if gate is not None:
+                gate.wait(15)
             if delay:
                 time.sleep(delay)
             prompt = payload["messages"][-1]["content"]
@@ -69,7 +73,8 @@ def synthetic_trial_model(*, delay=0, truncated=False, empty=False, controls=Fal
 
 @pytest.mark.parametrize("scenario", ["succeeded", "truncated", "lost", "leave", "cloud", "empty", "controls",
                                       "reopen", "reopen_offline", "reopen_single",
-                                      "suite_builder", "suite_builder_imported", "suite_builder_offline"])
+                                      "suite_builder", "suite_builder_imported", "suite_builder_offline",
+                                      "cancel", "cancel_lost"])
 def test_real_prompt_trial_workflow(monkeypatch, scenario, caplog):
     repo = Path(__file__).resolve().parents[2]
     node = shutil.which("node")
@@ -112,13 +117,25 @@ def test_real_prompt_trial_workflow(monkeypatch, scenario, caplog):
     }.items():
         monkeypatch.setattr(Config, name, value)
 
+    cancel_case = scenario in {"cancel", "cancel_lost"}
+    gate, entered = (threading.Event(), threading.Event()) if cancel_case else (None, None)
     with synthetic_trial_model(delay=1 if scenario == "leave" else 0,
                                truncated=scenario == "truncated", empty=scenario == "empty",
-                               controls=scenario == "controls") as (model_url, calls):
+                               controls=scenario == "controls", gate=gate, entered=entered) as (model_url, calls):
         monkeypatch.setattr(Config, "LLM_BASE_URL", model_url)
         monkeypatch.setattr(Config, "LOCAL_EMBEDDING_BASE_URL", model_url)
         app = create_app()
         observed = []
+
+        if cancel_case:
+            @app.get("/__test_trial_model/entered")
+            def model_entered():
+                return {"entered": entered.is_set()}
+
+            @app.post("/__test_trial_model/release")
+            def release_model():
+                gate.set()
+                return {"released": True}
 
         @app.before_request
         def record_request():
@@ -130,7 +147,9 @@ def test_real_prompt_trial_workflow(monkeypatch, scenario, caplog):
         thread.start()
         try:
             run = subprocess.run([
-                node, str(repo / "frontend/tests/fixtures/prompt-trials-backend-smoke.mjs"),
+                node, str(repo / "frontend/tests/fixtures" / (
+                    "prompt-trial-cancellation-backend-smoke.mjs" if cancel_case
+                    else "prompt-trials-backend-smoke.mjs")),
                 f"http://127.0.0.1:{server.server_port}", scenario,
             ], cwd=repo / "frontend", capture_output=True, text=True, timeout=45)
             assert run.returncode == 0, run.stdout + run.stderr
@@ -146,7 +165,7 @@ def test_real_prompt_trial_workflow(monkeypatch, scenario, caplog):
                     time.sleep(0.02)
                     snapshot = prompt_trials.get_prompt_trials_snapshot()
                 assert snapshot["run"]["state"] == ("truncated" if scenario == "truncated" else "succeeded")
-                expected_calls = (4 if scenario in {"suite_builder", "suite_builder_imported"}
+                expected_calls = (2 if cancel_case else 4 if scenario in {"suite_builder", "suite_builder_imported"}
                                   else 3 if scenario in {"reopen", "reopen_single"}
                                   else 2 if scenario in {"succeeded", "reopen_offline", "suite_builder_offline"}
                                   else 1)
@@ -158,6 +177,11 @@ def test_real_prompt_trial_workflow(monkeypatch, scenario, caplog):
                            and not body.get("stream", False) for _path, body, _headers in calls)
                 assert all("x-mirofish-timeout-ms" not in {key.lower() for key in headers}
                            for _path, _body, headers in calls)
+                assert all("x-mirofish-cancel-on-disconnect" not in {key.lower() for key in headers}
+                           for _path, _body, headers in calls)
+                if cancel_case:
+                    assert sum(method == "POST" and path.endswith("/cancel") for method, path in observed) == 1
+                    assert sum(method == "POST" and path == "/api/runtime/trials" for method, path in observed) == 2
                 assert "SECRET_" not in json.dumps(snapshot)
                 gateway = local_runtime._gateway
                 assert gateway is not None
@@ -167,6 +191,8 @@ def test_real_prompt_trial_workflow(monkeypatch, scenario, caplog):
             assert "SECRET_CONFIG_KEY" not in caplog.text
             assert "请求: GET /api/runtime/trials" in caplog.text
         finally:
+            if gate is not None:
+                gate.set()
             server.shutdown()
             server.server_close()
             thread.join(5)

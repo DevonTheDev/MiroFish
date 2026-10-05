@@ -56,8 +56,8 @@ function renderer() {
   return { host, root, body }
 }
 
-export async function mountTrials({ api, initialPath = '/prompt-trials', locale = 'en', timers = fakeTimers(), cacheHandlers } = {}) {
-  const requests = deferredTrials()
+export async function mountTrials({ api, initialPath = '/prompt-trials', locale = 'en', timers = fakeTimers(), cacheHandlers, cancellation = false } = {}) {
+  const requests = deferredTrials({ cancellation })
   api = { ...trialApi(), ...requests.api, ...api }
   const warnings = [], downloads = [], revokedUrls = []
   const blobs = new Map()
@@ -200,8 +200,8 @@ export function trialSnapshot(state = null, overrides = {}) {
     }, ...overrides,
   }
 }
-export function deferredTrials() {
-  const calls = { getPromptTrials: [], getPromptTrial: [], startPromptTrial: [] }
+export function deferredTrials({ cancellation = false } = {}) {
+  const calls = { getPromptTrials: [], getPromptTrial: [], startPromptTrial: [], ...(cancellation ? { cancelPromptTrial: [] } : {}) }
   const api = Object.fromEntries(Object.keys(calls).map(name => [name, (...args) => new Promise((resolve, reject) => {
     calls[name].push({ args, signal: args.at(-1), resolve, reject })
   })]))
@@ -214,7 +214,7 @@ export function trialApi({ baseURL, logger = console } = {}) {
     .replace(/^import .*$/gm, '').replaceAll('export const ', 'const ').replaceAll('export function ', 'function ')
   return new Function('axios', 'console', 'baseURL', source + `
     if (baseURL) { service.defaults.baseURL = baseURL; service.defaults.proxy = false; service.defaults.maxRedirects = 0; }
-    return { getPromptTrials, getPromptTrial, startPromptTrial, acceptPromptTrialSnapshot,
+    return { getPromptTrials, getPromptTrial, startPromptTrial, cancelPromptTrial, acceptPromptTrialSnapshot,
       acceptPromptTrialRequest, samePromptTrialRequest, isPromptTrialTerminal, service };
   `)(axios, logger, baseURL)
 }

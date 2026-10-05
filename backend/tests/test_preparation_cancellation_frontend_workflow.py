@@ -24,7 +24,7 @@ from app.services.simulation_config_generator import (
 )
 
 
-@pytest.mark.parametrize('scenario', ['cancel', 'lost_response', 'finalizing'])
+@pytest.mark.parametrize('scenario', ['cancel', 'lost_response', 'finalizing', 'cancel_conflict'])
 def test_actual_preparation_cancel_drain_and_finalization(tmp_path, monkeypatch, scenario):
     repo = Path(__file__).resolve().parents[2]
     node = shutil.which('node')
@@ -100,7 +100,7 @@ def test_actual_preparation_cancel_drain_and_finalization(tmp_path, monkeypatch,
                         lambda *_a, **_k: 'Synthetic context')
     entered_profile, release_profile = threading.Event(), threading.Event()
     entered_final, release_final = threading.Event(), threading.Event()
-    calls = {'profiles': [], 'config': 0}
+    calls = {'profiles': [], 'config': 0, 'conflicts': 0}
 
     def llm_profile(self, **kwargs):
         calls['profiles'].append(kwargs['entity_name'])
@@ -166,6 +166,11 @@ def test_actual_preparation_cancel_drain_and_finalization(tmp_path, monkeypatch,
         (release_profile if unit == 'profile' else release_final).set()
         return jsonify(success=True, data={})
 
+    @app.get('/api/fixture/plan-conflict')
+    def fixture_plan_conflict():
+        calls['conflicts'] += 1
+        return jsonify(success=False, error_code='source_changed'), 409
+
     server = make_server('127.0.0.1', 0, app, threaded=True)
     serving = threading.Thread(target=server.serve_forever, daemon=True)
     serving.start()
@@ -176,6 +181,7 @@ def test_actual_preparation_cancel_drain_and_finalization(tmp_path, monkeypatch,
         ], cwd=repo / 'frontend', capture_output=True, text=True, timeout=65)
         assert result.returncode == 0, result.stdout + result.stderr
         assert 'actual preparation cancellation workflow passed' in result.stdout
+        assert calls['conflicts'] == int(scenario == 'cancel_conflict')
         state = json.loads((folder / 'state.json').read_text())
         if scenario == 'finalizing':
             assert state['status'] == 'ready' and state['config_generated'] is True

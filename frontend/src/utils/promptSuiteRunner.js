@@ -105,8 +105,10 @@ export function createPromptSuiteRunner(options = {}) {
     try { snapshot = acceptPromptTrialSnapshot(envelope) } catch { return 'invalid_observation' }
     const owner = active.owner
     if (!snapshot.run || snapshot.run.request_id !== owner.request.request_id || !samePromptTrialRequest(snapshot.run.request, owner.request) ||
-      (owner.fingerprint !== null && owner.fingerprint !== snapshot.run.fingerprint)) return 'identity_mismatch'
+      (owner.fingerprint !== null && owner.fingerprint !== snapshot.run.fingerprint) ||
+      (owner.instanceId !== null && owner.instanceId !== snapshot.run.instance_id)) return 'identity_mismatch'
     owner.fingerprint = snapshot.run.fingerprint
+    owner.instanceId = snapshot.run.instance_id ?? null
     const row = state.report.cases[active.index], item = active.definition.cases[active.index]
     row.snapshot = snapshot; row.status = snapshot.run.state; row.error_code = null
     row.check = evaluatePromptSuiteCheck(item, row.status, snapshot.run.response?.content)
@@ -137,7 +139,7 @@ export function createPromptSuiteRunner(options = {}) {
     if (!owned(expected) || active.stop) { if (owned(expected)) finish('stopped'); return }
     if (active.pause) { park(); return }
     const index = active.index, row = state.report.cases[index]
-    active.owner = { request: active.requests[index], fingerprint: null }; active.polls = 0
+    active.owner = { request: active.requests[index], fingerprint: null, instanceId: null }; active.polls = 0
     row.request_id = active.owner.request.request_id; row.status = 'submitting'
     state.latest_stale = true
     const result = await issue('startPromptTrial', [active.owner.request], 'submitting', expected, () => owned(expected) && !active.stop && !active.pause)
@@ -257,7 +259,7 @@ export function createPromptSuiteRunner(options = {}) {
     const expected = ++generation, row = state.report.cases[index], definition = state.report.definition
     active = { generation: expected, definition, index, stop: state.report.stop_requested, automatic: false, captured: true, polls: 0,
       owner: { request: Object.freeze(acceptPromptTrialRequest({ request_id: row.request_id, ...acceptPromptTrialInputs(definition.cases[index]) })),
-        fingerprint: row.snapshot?.run.fingerprint ?? null } }
+        fingerprint: row.snapshot?.run.fingerprint ?? null, instanceId: row.snapshot?.run.instance_id ?? null } }
     await observe(expected, true)
     return true
   }
