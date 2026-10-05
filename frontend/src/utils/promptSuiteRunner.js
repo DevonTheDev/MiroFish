@@ -235,6 +235,12 @@ export function createPromptSuiteRunner(options = {}) {
     if (active.captured && !active.owner && request === null) finish('stopped')
     else emit()
   }
+  function captureStopHandler() {
+    // Initial readiness owns an operation before it replaces the previous report.
+    // Capture that private generation, never the still-visible report's run_id.
+    const expected = active?.generation
+    return () => { if (owned(expected)) stop() }
+  }
   function pause(expectedRunId) {
     if (!controllable() || active.pause || expectedRunId !== state.report.run_id) return false
     active.pause = true; active.schedulingRevision++
@@ -268,5 +274,5 @@ export function createPromptSuiteRunner(options = {}) {
     disposed = true; generation++; clearTimer(); request?.controller.abort(); request = null; active = null
     state.phase = 'disposed'; state.busy = false
   }
-  return { refresh, start, stop, pause, resume, reconcile, dispose, getState }
+  return { refresh, start, stop, captureStopHandler, pause, resume, reconcile, dispose, getState }
 }

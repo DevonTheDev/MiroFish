@@ -100,7 +100,7 @@
         <p v-if="!acceptedDraft" class="reading-note" data-testid="suite-validation">{{ t('promptSuites.validation') }}</p>
         <p v-if="!acceptedSelection" class="reading-note" data-testid="suite-selection-validation">{{ t(selectedCases.length === 0 ? 'promptSuites.selectionEmpty' : 'promptSuites.selectionInvalid') }}</p>
         <p v-if="capExceeded" class="notice warning" data-testid="suite-cap-warning">{{ t('promptSuites.capExceeded', { cap: state.latest.limits.max_output_tokens }) }}</p>
-        <div class="toolbar"><button class="primary" type="submit" data-testid="suite-run" :disabled="!canRun">{{ t('promptSuites.run') }}</button><template v-for="controls in schedulingControls" :key="controls.runId"><button type="button" data-testid="suite-pause" :disabled="!state.can_pause" @click="controls.pause">{{ t('promptSuites.pause') }}</button><button type="button" data-testid="suite-resume" :disabled="!state.can_resume" @click="controls.resume">{{ t('promptSuites.resume') }}</button></template><button type="button" data-testid="suite-stop" :disabled="!canStop" @click="runner.stop()">{{ t('promptSuites.stop') }}</button></div>
+        <div class="toolbar"><button class="primary" type="submit" data-testid="suite-run" :disabled="!canRun">{{ t('promptSuites.run') }}</button><template v-for="controls in schedulingControls" :key="controls.runId"><button type="button" data-testid="suite-pause" :disabled="!state.can_pause" @click="controls.pause">{{ t('promptSuites.pause') }}</button><button type="button" data-testid="suite-resume" :disabled="!state.can_resume" @click="controls.resume">{{ t('promptSuites.resume') }}</button><button type="button" data-testid="suite-stop" :disabled="!canStop" @click="controls.stop">{{ t('promptSuites.stop') }}</button></template></div>
         <p v-if="state.pause_requested" class="notice" data-testid="suite-scheduling-state" :data-phase="state.phase === 'paused' ? 'paused' : 'pause_pending'" role="status">{{ t(state.phase === 'paused' ? 'promptSuites.pausedNote' : 'promptSuites.pausePending') }}</p>
         <p class="reading-note">{{ t('promptSuites.runNote') }}</p><p class="reading-note">{{ t('promptSuites.pauseNote') }}</p><p class="reading-note">{{ t('promptSuites.stopNote') }}</p>
       </form>
@@ -171,7 +171,7 @@ const canReconcile = computed(() => !retired && !state.value.busy && state.value
 // latest handler when a retained callback from an older run eventually fires.
 const schedulingControls = computed(() => {
   const runId = state.value.report?.run_id
-  return [{ runId, pause: () => runner.pause(runId), resume: () => runner.resume(runId) }]
+  return [{ runId, pause: () => runner.pause(runId), resume: () => runner.resume(runId), stop: runner.captureStopHandler() }]
 })
 const summaryFields = ['total', 'attempted', 'succeeded', 'evaluated', 'matched', 'mismatched', 'not_requested', 'not_evaluated']
 const summary = computed(() => state.value.report ? summarizePromptSuiteReport(state.value.report) : null)

@@ -945,7 +945,9 @@ Resume retains the same run, case order, prompts, checks and preallocated reques
 identities. Editing or importing another draft while paused does not change those
 captured cases. New Run and Refresh remain disabled while the suite is paused;
 Stop stays available and permanently ends its remaining scheduling. Repeated or
-retired controls cannot launch another copy of a case.
+retired controls cannot launch another copy of a case. Stop also remains available
+during a new run's initial readiness checks. Its control belongs to that attempt;
+a retired control from an earlier run cannot stop a later one.
 
 Pause does not cancel an accepted inference, unload the model or suspend work
 started elsewhere. Leaving or reloading the page discards its ability to resume.
@@ -955,7 +957,9 @@ marked `not_attempted`. These files contain no restart checkpoint; reopening a
 report for comparison or case reuse does not resume its execution.
 
 Local tests cover pending admission and observation, readiness races, exact-ID
-reconciliation, paused exports, retry, Stop, disposal and stale controls. Actual
+reconciliation, paused exports, retry, Stop, disposal and stale controls. Deliberate
+replays of retained Stop handlers verify ownership across later runs; they do not
+establish a normal browser click sequence that triggers the old behavior. Actual
 Flask, Vite, gateway, Axios and compiled Vue tests count synthetic local model
 requests through pause/resume and verify that later draft edits never change the
 captured run. No real weights, GPU performance, native browser or Windows behavior
