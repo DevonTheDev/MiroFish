@@ -6,6 +6,7 @@ import importlib
 import json
 import os
 from pathlib import Path
+import socket
 import threading
 import time
 from uuid import uuid4
@@ -80,6 +81,35 @@ def test_passive_snapshot_starts_nothing_and_is_detached(trials, monkeypatch):
     trials.register_prompt_trials_shutdown()
     assert shutdown._callbacks["prompt_trials"] == [trials.close_prompt_trials]
     assert trials._manager is None
+
+
+def forbid_trial_work(trials, monkeypatch):
+    def forbidden(*args, **kwargs):
+        pytest.fail("Invalid configuration attempted validation I/O, a worker, a gateway, or a socket")
+    monkeypatch.setattr(Config, "validate", forbidden)
+    monkeypatch.setattr(local_runtime, "get_local_gateway_url", forbidden)
+    monkeypatch.setattr(trials.threading, "Thread", forbidden)
+    monkeypatch.setattr(socket.socket, "__init__", forbidden)
+    monkeypatch.setattr(socket.socket, "connect", forbidden)
+    monkeypatch.setattr(socket.socket, "bind", forbidden)
+
+
+@pytest.mark.parametrize("queue", [0, -1, True, False, 1.0, "1", None, 2**53])
+def test_invalid_loaded_queue_rejects_trials_without_starting_work(trials, monkeypatch, queue):
+    monkeypatch.setattr(Config, "LOCAL_MAX_QUEUE", queue)
+    forbid_trial_work(trials, monkeypatch)
+    original = request()
+    for payload in (original, original, request()):
+        snapshot = trials.get_prompt_trials_snapshot()
+        assert snapshot["available"] is False
+        assert snapshot["unavailable_code"] == "invalid_configuration"
+        assert snapshot["run"] is None
+        with pytest.raises(trials.PromptTrialError) as error:
+            trials.start_prompt_trial(payload)
+        assert (error.value.code, error.value.status_code) == ("invalid_configuration", 503)
+        assert trials._manager is None
+        assert local_runtime._gateway is None
+        assert local_runtime._gateway_starting is None
 
 
 def test_real_request_has_exact_text_local_policy_and_no_database(trials, monkeypatch):

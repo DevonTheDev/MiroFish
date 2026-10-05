@@ -144,7 +144,7 @@ def _configuration():
         for name in ("LOCAL_MAX_CONCURRENCY", "LOCAL_MAX_OUTPUT_TOKENS", "LOCAL_MAX_INPUT_CHARS", "LOCAL_CONTEXT_TOKENS"):
             if type(getattr(Config, name)) is not int or not 1 <= getattr(Config, name) <= MAX_SAFE_INTEGER:
                 return None
-        if (type(Config.LOCAL_MAX_QUEUE) is not int or not 0 <= Config.LOCAL_MAX_QUEUE <= MAX_SAFE_INTEGER
+        if (type(Config.LOCAL_MAX_QUEUE) is not int or not 1 <= Config.LOCAL_MAX_QUEUE <= MAX_SAFE_INTEGER
                 or Config.LOCAL_MAX_OUTPUT_TOKENS >= Config.LOCAL_CONTEXT_TOKENS):
             return None
         settings = GatewaySettings(llm_base_url=Config.LLM_BASE_URL,

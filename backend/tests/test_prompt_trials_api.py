@@ -10,6 +10,8 @@ import pytest
 
 from app import local_runtime
 from app.config import Config
+from test_prompt_trials import trials as trials, finished, forbid_trial_work
+from test_local_readiness import synthetic_models
 
 
 REQUEST_ID = "a1234567-89ab-4cde-8fab-0123456789ab"
@@ -424,6 +426,46 @@ def factory_app(monkeypatch):
     monkeypatch.setattr(local_runtime, "configure_local_environment", lambda: None)
     monkeypatch.setattr(readiness, "register_readiness_shutdown", lambda: None)
     return create_app(), logs
+
+
+def test_factory_zero_queue_is_unavailable_and_repeated_posts_start_nothing(trials, monkeypatch):
+    monkeypatch.setattr(Config, "LOCAL_MAX_QUEUE", 0)
+    app, _ = factory_app(monkeypatch)
+    client = app.test_client()
+    forbid_trial_work(trials, monkeypatch)
+    for _ in range(3):
+        snapshot = check(client.get(BASE), 200)["data"]
+        assert snapshot["available"] is False
+        assert snapshot["unavailable_code"] == "invalid_configuration"
+        assert snapshot["run"] is None
+        assert check(client.post(BASE, json=valid_body()), 503) == {
+            "success": False,
+            "error_code": "invalid_configuration",
+            "error": "The loaded local model configuration is unavailable",
+        }
+        assert check(client.get(BASE + "/" + REQUEST_ID), 404)["error_code"] == "run_not_found"
+        assert trials._manager is None
+        assert local_runtime._gateway is None
+        assert local_runtime._gateway_starting is None
+
+
+def test_factory_positive_queue_admits_real_trial(trials, monkeypatch):
+    monkeypatch.setattr(Config, "LOCAL_MAX_QUEUE", 1)
+    app, _ = factory_app(monkeypatch)
+    monkeypatch.setattr(Config, "DEBUG", False)
+    client = app.test_client()
+    with synthetic_models(monkeypatch) as models:
+        assert check(client.get(BASE), 200)["data"]["available"] is True
+        admitted = check(client.post(BASE, json=valid_body()), 202)["data"]
+        assert admitted["run"]["request_id"] == REQUEST_ID
+        result = finished(trials)
+        trials._manager.thread.join(2)
+        assert not trials._manager.thread.is_alive()
+        assert result["run"]["state"] == "succeeded"
+        assert result["run"]["cleanup"]["state"] == "succeeded"
+        assert len(models.calls) == 1
+        assert local_runtime._gateway.snapshot()["limits"]["max_queue"] == 1
+        assert check(client.get(BASE + "/" + REQUEST_ID), 200)["data"]["run"] == result["run"]
 
 
 @pytest.mark.parametrize("suffix", ["", "/" + REQUEST_ID, "/unknown/subpath"])

@@ -565,6 +565,12 @@ existing input/context and concurrency limits still apply. One backend process
 admits one trial at a time, with no queue of trials; simulations and setup checks
 continue to share the same inference gateway budget.
 
+Loaded application budgets require a positive `LOCAL_MAX_QUEUE`. Prompt-trial
+status and admission enforce that same bound: an invalid queue setting reports
+`invalid_configuration` and refuses a new trial before scheduling its worker.
+This is a configuration check, not a model or gateway readiness probe. The normal
+backend entry point also validates the configuration before serving requests.
+
 Gateway startup has up to five seconds and the completion request up to sixty,
 within an overall sixty-five-second operation budget. Owned-client cleanup has
 a separate allowance of ten seconds plus bounded drain overhead. These are
@@ -1591,7 +1597,7 @@ limits in `.env` when you have measured your machine.
 | `LOCAL_MAX_ROUNDS` | 5 | Cap for each simulation platform |
 | `LOCAL_MAX_AGENT_ITERATIONS` | 3 | Maximum model/tool iterations per agent action |
 | `LOCAL_MAX_CONCURRENCY` | 1 | One shared inference budget for all app processes |
-| `LOCAL_MAX_QUEUE` | 32 | Bounded waiting requests; overflow returns 429 |
+| `LOCAL_MAX_QUEUE` | 32 | Positive integer; bounded waiting requests, overflow returns 429 |
 | `LOCAL_REQUEST_TIMEOUT` | 180 | Total gateway request deadline, seconds |
 | `LOCAL_CONTEXT_TOKENS` | 8192 | CAMEL context budget, including output reservation |
 | `LOCAL_MAX_OUTPUT_TOKENS` | 2048 | Hard outgoing completion cap, including retries |
