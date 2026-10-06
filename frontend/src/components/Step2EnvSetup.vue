@@ -1423,9 +1423,10 @@ const pollPrepareStatus = (context = preparationContext) => singleFlight(context
 
 const fetchProfilesRealtime = (context = preparationContext, final = false) => singleFlight(context, 'profiles', async () => {
   const observedTaskId = taskId.value
+  if (cancellationBlocked.value) return
   try {
     const res = await getSimulationProfilesRealtime(context.id, undefined, context.controller.signal)
-    if (!ownsTask(context, observedTaskId) || (!final && context.preparedConfirmed)) return
+    if (!ownsTask(context, observedTaskId) || cancellationBlocked.value || (!final && context.preparedConfirmed)) return
     
     if (res.success && res.data) {
       const prevCount = profiles.value.length
@@ -1459,9 +1460,15 @@ const fetchProfilesRealtime = (context = preparationContext, final = false) => s
           addLog(t('log.allProfilesComplete', { count: currentCount }))
         }
       }
+    } else if (final) {
+      handlePrepareFailure(t('log.loadProfilesFailed', { error: res.error || t('common.unknownError') }), context)
     }
   } catch (err) {
-    if (!ownsTask(context, observedTaskId) || (!final && context.preparedConfirmed)) return
+    if (!ownsTask(context, observedTaskId) || cancellationBlocked.value || (!final && context.preparedConfirmed)) return
+    if (final) {
+      handlePrepareFailure(t('log.loadProfilesFailed', { error: err.message }), context)
+      return
+    }
     console.warn('获取 Profiles 失败:', err)
   }
 })

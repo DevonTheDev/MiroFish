@@ -22,7 +22,8 @@ from app.services.simulation_config_generator import (
 )
 
 
-@pytest.mark.parametrize('scenario', ['template', 'llm', 'reuse', 'reuse_failed', 'cloud'])
+@pytest.mark.parametrize('scenario', ['template', 'llm', 'reuse', 'reuse_failed', 'cloud',
+                                      'reuse_profile_outage', 'reuse_profile_unsuccessful', 'reuse_profile_missing_data'])
 def test_local_planner_real_flask_axios_vue_and_saved_artifacts(tmp_path, monkeypatch, scenario):
     repo = Path(__file__).resolve().parents[2]
     node = shutil.which('node')
@@ -170,8 +171,14 @@ def test_local_planner_real_flask_axios_vue_and_saved_artifacts(tmp_path, monkey
 
     @app.before_request
     def observe():
-        from flask import request
+        from flask import jsonify, request
         observed.append((request.method, request.path))
+        if (scenario.startswith('reuse_profile_') and request.path.endswith('/profiles/realtime')
+                and sum(path.endswith('/profiles/realtime') for _method, path in observed) == 1):
+            if scenario == 'reuse_profile_missing_data':
+                return jsonify(success=True)
+            return jsonify(success=False, error='Synthetic final profile read failure'), (
+                503 if scenario == 'reuse_profile_outage' else 200)
 
     server = make_server('127.0.0.1', 0, app, threaded=True)
     thread = threading.Thread(target=server.serve_forever, daemon=True)
@@ -185,7 +192,10 @@ def test_local_planner_real_flask_axios_vue_and_saved_artifacts(tmp_path, monkey
         assert 'actual local preparation workflow passed' in process.stdout
         assert len(calls['start']) == 1
         assert calls['start'][0]['max_rounds'] == (None if scenario == 'cloud' else 1 if scenario.startswith('reuse') else 2)
-        assert sum(path == '/api/simulation/prepare' for _method, path in observed) == 1
+        assert sum(path == '/api/simulation/prepare' for _method, path in observed) == (2 if scenario.startswith('reuse_profile_') else 1)
+        if scenario.startswith('reuse_profile_'):
+            assert sum(path.endswith('/profiles/realtime') for _method, path in observed) == 2
+            assert sum(path.endswith('/config/realtime') for _method, path in observed) == 1
         if scenario.startswith('reuse'):
             assert calls['nodes'] == calls['edges'] == 0
             assert calls['profile'] == calls['context'] == calls['config'] == []

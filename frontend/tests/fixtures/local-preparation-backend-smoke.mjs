@@ -7,13 +7,15 @@ import path from 'node:path'
 import { setTimeout as pause } from 'node:timers/promises'
 import { fileURLToPath } from 'node:url'
 import { createServer, loadConfigFromFile } from 'vite'
-import { build, settle, setupChild } from '../helpers/parent-route-fixture.js'
+import { build, settle, setupView, setupChild } from '../helpers/parent-route-fixture.js'
 import { productionClient } from '../helpers/readiness-view-fixture.js'
 
 const [backendURL, scenario] = process.argv.slice(2)
 assert.match(backendURL, /^http:\/\/127\.0\.0\.1:[0-9]+$/)
-assert.ok(['template', 'llm', 'reuse', 'reuse_failed', 'cloud'].includes(scenario))
+assert.ok(['template', 'llm', 'reuse', 'reuse_failed', 'cloud',
+  'reuse_profile_outage', 'reuse_profile_unsuccessful', 'reuse_profile_missing_data'].includes(scenario))
 const reuse = scenario.startsWith('reuse')
+const profileFailure = scenario.startsWith('reuse_profile_')
 const root = fileURLToPath(new URL('../../', import.meta.url))
 const cacheDir = await mkdtemp(path.join(tmpdir(), 'miro-local-planner-vite-'))
 let proxy, view
@@ -107,7 +109,37 @@ try {
         selected_entity_ids: ['node_02', 'node_11'], use_llm_for_profiles: scenario === 'llm', parallel_profile_count: 1 })
     }
   }
+  if (profileFailure) {
+    await waitFor(() => view.state(setupChild).planError || view.state(setupChild).phase === 4,
+      'final profile read reaches a terminal observation')
+    assert.equal(view.state(setupChild).phase, 0, 'failed final profiles must not complete setup')
+    assert.equal(view.state(setupView).currentStatus, 'error')
+    assert.equal(view.state(setupChild).planError, 'localPlan.requestError')
+    assert.equal(view.state(setupChild).localPlan.prepared.available, true)
+    assert.equal(count('/api/simulation/sim_fixture/config/realtime'), 0)
+    const blockedStart = view.find(node => node.type === 'button' && String(node.props.class).includes('action-btn primary'))
+    assert.equal(blockedStart.props.disabled, true)
+    blockedStart.props.onClick(); await settle()
+    assert.equal(count('/api/simulation/start'), 0)
+    assert.equal(view.router.currentRoute.value.name, 'Simulation')
+    await view.tick(2000); await view.tick(3000)
+    assert.equal(count('/api/simulation/sim_fixture/profiles/realtime'), 1, 'no automatic retry')
+    assert.equal(control('reuse-preparation').props.disabled, true)
+    await click('refresh-plan')
+    await waitFor(() => control('reuse-preparation') && !control('reuse-preparation').props.disabled, 'Refresh plan restores explicit reuse')
+    assert.equal(count('/api/simulation/prepare'), 1, 'refresh never submits preparation')
+    await click('reuse-preparation')
+    await waitFor(() => count('/api/simulation/prepare') === 2, 'explicit second reuse posted')
+    assert.ok(calls.filter(call => call.url === '/api/simulation/prepare').every(call =>
+      JSON.stringify(call.data) === JSON.stringify({ simulation_id: 'sim_fixture', preparation_mode: 'reuse' })))
+    assert.equal(count('/api/simulation/prepare/preview'), 0)
+  }
   await waitFor(() => view.state(setupChild).phase === 4, 'authoritative prepared config loads')
+  if (profileFailure) {
+    assert.equal(view.state(setupChild).profiles.length, 2, 'retry displays the saved cast')
+    assert.equal(count('/api/simulation/sim_fixture/profiles/realtime'), 2)
+    assert.equal(count('/api/simulation/sim_fixture/config/realtime'), 1)
+  }
   if (scenario !== 'cloud') {
     assert.ok(!calls.some(call => call.url.startsWith('/api/graph/data/')), 'prepare/reuse does not need parent graph rendering')
     const rounds = control('maximum-rounds')
@@ -127,7 +159,7 @@ try {
   const submittedStart = calls.find(call => call.url === '/api/simulation/start').data
   if (scenario === 'cloud') assert.ok(!Object.hasOwn(submittedStart, 'max_rounds'))
   else assert.equal(submittedStart.max_rounds, reuse ? 1 : 2)
-  assert.equal(count('/api/simulation/prepare'), 1)
+  assert.equal(count('/api/simulation/prepare'), profileFailure ? 2 : 1)
   assert.deepEqual(view.warnings, [])
   console.log('actual local preparation workflow passed')
 } finally {

@@ -112,6 +112,11 @@ with a newly selected cast. Create another simulation through the existing
 project flow to prepare a different cast. The saved files do not record the
 original template/LLM choice, so the planner does not invent that provenance.
 
+If a final request for saved profiles or configuration fails, setup shows an
+error and keeps Start unavailable. Choose **Refresh plan**, then explicitly
+choose **Reuse saved preparation** to retry loading the saved files. This
+recovery does not regenerate profiles or replace the saved preparation.
+
 Preparation and run ownership are checked again on the backend. A pending or
 processing preparation, active run, live process/monitor or retained graph updater
 prevents conflicting work. Loading an existing preparation task observes that
@@ -150,7 +155,9 @@ check, not complete validation of every OASIS field.
 
 Local verification uses disposable files, synthetic graph entities and model
 boundaries, actual Flask/Axios/compiled Vue routes and the existing preparation
-and runner lifecycle tests. A disposable Neo4j/Graphiti test also verifies that
+and runner lifecycle tests. Final profile-read checks distinguish failed requests
+from successful empty responses and exercise explicit refresh/reuse recovery.
+A disposable Neo4j/Graphiti test also verifies that
 previewing real stored entities and reading a selected cast add no model or
 embedding requests after graph construction. It does not use pretrained weights, private documents
 or paid services. Native browser rendering, Windows behavior, real-model quality
