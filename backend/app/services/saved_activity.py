@@ -105,6 +105,11 @@ def _json(value):
     return json.dumps(value, ensure_ascii=True, allow_nan=False, sort_keys=True, separators=(",", ":"))
 
 
+def _source_revision(simulation_id, before):
+    """Share the exact v1 fingerprint encoding across saved activity readers."""
+    return hashlib.sha256(_json([_REVISION_VERSION, simulation_id, before]).encode("ascii")).hexdigest()
+
+
 def _first_string_match(row, phrase, case_sensitive):
     """Find within one decoded value at a time, in saved insertion/list order.
 
@@ -239,7 +244,7 @@ def read_saved_activity(simulation_root, run_root, simulation_id, *, platform=No
     paths = saved._paths(simulation_root, run_root, simulation_id)
     before = saved._snapshot(paths)
     try:
-        source_revision = hashlib.sha256(_json([_REVISION_VERSION, simulation_id, before]).encode("ascii")).hexdigest()
+        source_revision = _source_revision(simulation_id, before)
         if revision is not None and revision != source_revision:
             raise saved.ComparisonError("sources_changed", "Saved files changed. Refresh and try again.", 409)
         collector = _PageCollector(filters, offset, limit)

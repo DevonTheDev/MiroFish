@@ -1950,5 +1950,41 @@
       "CR": "CR",
       "NONE": "No line ending"
     }
+  },
+  "savedActivityRounds": {
+    "title": "Activity by round",
+    "entry": "Explore all rounds for this platform",
+    "backRecords": "Back to saved records",
+    "scope": "This overview covers all saved attempts for its own platform and inclusive round range. Record-page phrase, agent, type and outcome filters do not apply here.",
+    "filtersTitle": "Filter saved rounds",
+    "roundFrom": "From round (inclusive)",
+    "roundTo": "To round (inclusive)",
+    "filterNote": "Use nonnegative decimal rounds with up to 64 digits; zero is valid. Leave bounds blank for all observed rounds. Apply preserves the observed revision; Refresh reads the latest files using the applied URL filters.",
+    "download": "Download all overview rows JSON",
+    "orderNote": "Observed rounds in ascending numeric order. Gaps are not filled; a requested or last-saved round does not prove it executed.",
+    "draftNote": "Filters have changed. Apply filters to read a new overview; the previous observation and its links are retired.",
+    "loading": "Reading saved rounds…",
+    "resultsTitle": "Observed saved attempts by round",
+    "roundCount": "Observed rounds: {count}",
+    "total": "All attempts",
+    "partialNote": "Partial counts cover only readable, valid observations. An em dash means unavailable, not zero. Downloads include all rows of this accepted overview, including rows on other local pages.",
+    "tableCaption": "Saved attempt counts by observed round · positive counts open matching saved records",
+    "unsupportedRound": "This saved round has more than 64 decimal digits. Its counts can be exported; exact record drilldown is unavailable.",
+    "openCount": "Open {count} {outcome} saved attempts in round {round}",
+    "pagination": "Local round table pages",
+    "pagePosition": "Local page {page} of {pages} · 25 rows per page",
+    "errors": {
+      "generic": "The saved round overview could not be loaded. Apply filters or Refresh to try again.",
+      "invalid_selection": "The URL contains an invalid selection. Use one simulation ID and one value for each supported platform, round bound and revision.",
+      "invalid_filters": "Use Twitter or Reddit and inclusive nonnegative decimal round bounds of up to 64 digits. The from round cannot exceed the to round.",
+      "invalid_revision": "The saved revision in this URL is invalid. Refresh to read the latest saved files.",
+      "unsafe_path": "This saved record cannot be safely read. Return to history and choose another simulation.",
+      "simulation_not_found": "This saved simulation no longer exists. Return to history and choose another simulation.",
+      "simulation_unreadable": "This saved simulation record could not be read. Refresh to try again.",
+      "simulation_active": "The saved run is marked active. Wait until it has stopped, then Refresh.",
+      "sources_changed": "The saved files changed. Refresh to read the latest files for the applied platform and round range.",
+      "too_many_rounds": "More than 1000 observed matching rounds cannot be returned safely. Narrow the platform or inclusive round range, then Apply filters.",
+      "response_too_large": "The overview exceeds the 1 MiB response limit. Narrow the platform or inclusive round range, then Apply filters."
+    }
   }
 }

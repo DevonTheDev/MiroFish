@@ -1950,5 +1950,41 @@
       "CR": "CR",
       "NONE": "无行尾换行符"
     }
+  },
+  "savedActivityRounds": {
+    "title": "按轮次查看活动",
+    "entry": "查看此平台的全部轮次",
+    "backRecords": "返回已保存记录",
+    "scope": "此概览包含其所选平台和含边界轮次范围内的全部已保存尝试。记录页的短语、Agent、类型和结果筛选不适用于此处。",
+    "filtersTitle": "筛选已保存轮次",
+    "roundFrom": "起始轮次（含）",
+    "roundTo": "结束轮次（含）",
+    "filterNote": "请输入最多 64 位的非负十进制轮次，支持零。留空表示全部已观察轮次。应用筛选保留观察版本；刷新会依据 URL 中已应用的筛选读取最新文件。",
+    "download": "下载概览全部行 JSON",
+    "orderNote": "已观察轮次按数字升序排列，不补齐缺失轮次。请求轮次或最后保存轮次不能证明该轮次已执行。",
+    "draftNote": "筛选条件已修改。应用筛选以读取新概览；之前的观察及其链接已清除。",
+    "loading": "正在读取已保存轮次…",
+    "resultsTitle": "按轮次汇总已观察的保存尝试",
+    "roundCount": "已观察轮次：{count}",
+    "total": "全部尝试",
+    "partialNote": "部分计数仅包含可读取的有效记录。破折号表示不可用，并非零。下载包含此已接受概览的全部行，包括其他本地分页中的行。",
+    "tableCaption": "按已观察轮次汇总保存尝试 · 正数计数可打开对应的已保存记录",
+    "unsupportedRound": "此已保存轮次超过 64 位十进制数字。计数可导出，但无法打开该轮次的精确记录。",
+    "openCount": "打开轮次 {round} 的 {count} 条{outcome}已保存尝试",
+    "pagination": "轮次表本地分页",
+    "pagePosition": "本地第 {page} / {pages} 页 · 每页 25 行",
+    "errors": {
+      "generic": "无法加载已保存轮次概览。请应用筛选或刷新重试。",
+      "invalid_selection": "URL 中的选择无效。请使用一个模拟 ID，每个平台、轮次边界和版本只能有一个值。",
+      "invalid_filters": "请选择 Twitter 或 Reddit，使用最多 64 位非负十进制轮次边界（含）。起始轮次不能大于结束轮次。",
+      "invalid_revision": "此 URL 中的保存版本无效。请刷新以读取最新已保存文件。",
+      "unsafe_path": "无法安全读取此已保存记录。请返回历史记录并选择其他模拟。",
+      "simulation_not_found": "此已保存模拟已不存在。请返回历史记录并选择其他模拟。",
+      "simulation_unreadable": "无法读取此已保存模拟记录。请刷新重试。",
+      "simulation_active": "已保存运行被标记为活动状态。请在停止后刷新。",
+      "sources_changed": "已保存文件发生变化。请刷新，依据已应用的平台和轮次范围读取最新文件。",
+      "too_many_rounds": "匹配的已观察轮次超过 1000，无法安全返回。请缩小平台或含边界轮次范围，然后应用筛选。",
+      "response_too_large": "概览超过 1 MiB 响应限制。请缩小平台或含边界轮次范围，然后应用筛选。"
+    }
   }
 }

@@ -48,6 +48,7 @@
       <p v-if="dirty" class="notice" role="status">{{ t('savedActivity.draftNote') }}</p>
       <p v-if="loading" data-testid="loading" class="notice" role="status" aria-live="polite">{{ t('savedActivity.loading') }}</p>
       <p v-if="error" data-testid="error" class="notice error" role="alert">{{ t(`savedActivity.errors.${error}`) }}</p>
+      <p v-if="acceptedCurrent"><RouterLink data-testid="activity-rounds-entry" :to="roundsLocation">{{ t('savedActivityRounds.entry') }}</RouterLink></p>
       <section v-if="result" data-testid="results" :aria-label="t('savedActivity.resultsTitle')">
         <article class="panel" data-testid="saved-context">
           <div class="summary-heading"><h2>{{ t('savedActivity.contextTitle') }}</h2><span data-testid="availability" class="availability" :class="result.availability">{{ availabilityLabel(result.availability) }}</span></div>
@@ -271,6 +272,8 @@ function refresh() {
   observedRevision = null
   return navigateSelected({ ...selected, offset: 0, revision: null })
 }
+const acceptedCurrent = computed(() => !!result.value && !dirty.value && !loading.value && !!activeRequest && owns(activeRequest))
+const roundsLocation = computed(() => ({ name: 'SavedActivityRounds', params: { simulationId: result.value?.simulation_id }, query: { ...(result.value?.filters.platform ? { platform: result.value.filters.platform } : {}), revision: result.value?.source_revision } }))
 const canPrevious = computed(() => !!result.value && !dirty.value && !loading.value && result.value.offset > 0)
 const canNext = computed(() => !!result.value && !dirty.value && !loading.value && result.value.has_more && result.value.offset + result.value.limit <= 500000)
 function goPage(offset) {

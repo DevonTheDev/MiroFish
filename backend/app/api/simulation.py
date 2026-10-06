@@ -28,8 +28,9 @@ from ..services.simulation_comparison import (
     compare_saved_simulations,
     list_comparison_candidates,
 )
-from ..services import saved_activity
+from ..services import saved_activity, saved_activity_rounds
 from ..services.saved_activity import read_saved_activity, parse_saved_activity_query
+from ..services.saved_activity_rounds import read_saved_activity_rounds, parse_saved_activity_rounds_query
 from ..services.simulation_runner import (
     SimulationRunner,
     RunnerStatus,
@@ -1117,6 +1118,40 @@ def get_saved_simulation_actions(simulation_id: str):
         }), 400
     except Exception:
         logger.exception("Could not read saved simulation actions")
+        return jsonify({
+            "success": False, "error": "The saved activity could not be read.",
+            "error_code": "activity_unavailable",
+        }), 500
+
+
+@simulation_bp.route('/<simulation_id>/saved-action-rounds', methods=['GET'])
+def get_saved_simulation_action_rounds(simulation_id: str):
+    """Observe admitted saved attempts by round without consulting live services."""
+    try:
+        query = parse_saved_activity_rounds_query(request.args)
+        data = read_saved_activity_rounds(
+            SimulationManager.SIMULATION_DATA_DIR, SimulationRunner.RUN_STATE_DIR,
+            simulation_id, **query,
+        )
+        encoded = current_app.json.dumps(
+            {"success": True, "data": data}, ensure_ascii=True,
+            allow_nan=False, separators=(",", ":"),
+        )
+        response = current_app.response_class(encoded, mimetype="application/json")
+        if len(response.get_data()) > saved_activity_rounds.MAX_RESPONSE_BYTES:
+            raise saved_activity_rounds.response_too_large()
+        return response
+    except ComparisonError as error:
+        return jsonify({
+            "success": False, "error": str(error), "error_code": error.code,
+        }), error.status_code
+    except StoragePathError:
+        return jsonify({
+            "success": False, "error": "The saved storage path is not safe to read.",
+            "error_code": "unsafe_path",
+        }), 400
+    except Exception:
+        logger.exception("Could not read saved simulation action rounds")
         return jsonify({
             "success": False, "error": "The saved activity could not be read.",
             "error_code": "activity_unavailable",

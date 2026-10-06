@@ -1433,6 +1433,71 @@ templates and routing; native browser layout/download dialogs and Windows storag
 behavior remain separate platform checks. No model weights or paid services are
 used.
 
+## Inspect activity by round
+
+Open **Activity by round** from an accepted **Saved activity** result. The
+dedicated `/simulation/<id>/activity/rounds` page groups the latest saved action
+attempts by their recorded round, without mounting the execution screen or
+calling models. It carries the selected platform and accepted source revision.
+The overview covers all attempts within its own platform and round-range
+selection; the record page's phrase, agent, action-type and outcome filters are
+separate selections.
+
+1. Choose both platforms or one platform, and optionally enter inclusive
+   **From round** and **To round** bounds. Round zero is valid. Apply keeps the
+   accepted revision; **Refresh** reads current files using the URL's applied
+   filters and starts a new observation.
+2. Read the observed attempt totals and saved succeeded, failed and unknown
+   counts. Rounds appear in numeric ascending order, with 25 rows shown at a
+   time. Table paging stays within the accepted overview and does not reread
+   files. Only rounds containing matching admitted records appear; omitted
+   rounds are not invented zeroes or proof that those rounds never ran.
+3. Choose a positive total or outcome count to open the existing saved-record
+   view with that exact round, platform, optional outcome and source revision.
+   This is a path to the recorded evidence, not an explanation of why a count
+   changed. If files change before drilldown, the record view asks for Refresh.
+4. **Download overview JSON** exports all rows of the accepted overview,
+   including filters, totals, coverage, warnings, saved context, observation time
+   and revision. It is independent of the current local table page. Editing
+   filters or leaving the view retires the old result and export controls.
+
+Outcome counts use only the exact saved boolean success flag; missing, null or
+nonboolean flags are unknown. They do not independently verify successful
+execution. Duplicate records remain separate attempts, and a missing round keeps
+the existing round-zero default. Partial observations contain only valid matching
+records from admitted sources. Unavailable observations have unknown totals;
+admitted empty sources can establish observed zero. Saved status does not verify
+current process ownership, and source revisions are observation fingerprints,
+not durable run IDs or an archive.
+
+The read-only API is `GET /api/simulation/<id>/saved-action-rounds`, accepting only
+single `platform`, `round_from`, `round_to` and `revision` values. Bounds accept
+up to 64 ASCII decimal digits and are normalized as strings, with the lower bound
+no greater than the upper. Stored rounds longer than 64 digits remain visible and
+exportable, but their record links are disabled because the existing record
+filter cannot represent them. Numeric ordering does not use JavaScript floating
+point conversion. No agent lists, action-type dictionaries or raw action payloads
+are added to this response.
+
+An overview admits at most 1,000 distinct matching rounds and at most 1 MiB of
+encoded response data. It refuses an oversized overview rather than silently
+truncating it; narrow the round bounds for a smaller selection. Sparse large
+round numbers consume one bucket each, without allocating intervening rounds.
+The existing saved-reader file, line, record and action-type budgets still apply
+to whole sources before filtering. A source refused late contributes no tentative
+counts or tentative overview-overflow error. Modern sources keep precedence over
+legacy leftovers, and file changes supersede ordinary read or size failures.
+The shared reader also retains its existing bounded agent/round sets; this is not
+a constant-memory scan.
+
+Local tests exercise real saved loggers, source admission, revision-compatible
+drilldown, and a real Flask/Axios/compiled-Vue workflow through export, a changed
+source conflict and Refresh. The page renders literal English/Chinese text and
+rejects stale or malformed responses. These checks do not certify native browser
+layout/download dialogs, Windows storage behavior or real-model quality. The
+existing live timeline endpoint, immutable run captures and execution controls
+retain their own workflows.
+
 ## Compare latest saved simulations
 
 Use **Compare simulations** in the homepage history section, or the comparison

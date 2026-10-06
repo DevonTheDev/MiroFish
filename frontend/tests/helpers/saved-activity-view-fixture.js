@@ -20,7 +20,7 @@ export async function waitFor(predicate, { timeout = 5000 } = {}) {
   }
 }
 export function deferredApi() {
-  const calls = { getSavedActivity: [], getSimulationHistory: [] }
+  const calls = { getSavedActivity: [], getSavedActivityRounds: [], getSimulationHistory: [] }
   const api = Object.fromEntries(Object.keys(calls).map(name => [name, (...args) => new Promise((resolve, reject) => {
     calls[name].push({ args, signal: args.at(-1), resolve, reject })
   })]))
@@ -113,6 +113,7 @@ export async function mountSavedActivity({ api, initialPath = '/simulation/sim_A
     return value
   }
   components['../views/SavedActivityView.vue'] = component('views/SavedActivityView.vue')
+  components['../views/SavedActivityRoundsView.vue'] = component('views/SavedActivityRoundsView.vue')
   const history = component('components/HistoryDatabase.vue')
   components['../views/Home.vue'] = { render: () => Vue.h(history) }
   const router = evaluate(readFileSync(new URL('../../src/router/index.js', import.meta.url), 'utf8'))

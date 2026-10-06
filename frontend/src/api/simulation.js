@@ -233,3 +233,10 @@ export const getSavedActivity = (simulationId, params = {}, signal) => {
   const query = Object.fromEntries(allowed.filter(key => Object.hasOwn(params, key)).map(key => [key, params[key]]))
   return service.get(`/api/simulation/${encodeURIComponent(simulationId)}/saved-actions`, { params: query, signal })
 }
+
+/** Read the bounded round overview of latest saved attempts; never starts a run. */
+export const getSavedActivityRounds = (simulationId, params = {}, signal) => {
+  const allowed = ['platform', 'round_from', 'round_to', 'revision']
+  const query = Object.fromEntries(allowed.filter(key => Object.hasOwn(params, key)).map(key => [key, params[key]]))
+  return service.get(`/api/simulation/${encodeURIComponent(simulationId)}/saved-action-rounds`, { params: query, signal })
+}

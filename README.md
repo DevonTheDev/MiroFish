@@ -129,6 +129,12 @@ It distinguishes missing or partial logs from a complete zero-match result and
 requires Refresh if files change between pages. See the
 [saved activity guide](docs/LOCAL_MODE.md#explore-latest-saved-activity).
 
+From an accepted saved-activity view, open **Activity by round** to see where
+recorded attempts and saved failures occur. Select a platform and round range,
+then open a round's total or outcome count to inspect its exact records at the
+same source revision. Download the accepted aggregate overview as JSON. See
+[activity by round](docs/LOCAL_MODE.md#inspect-activity-by-round).
+
 ## Compare saved simulations
 
 Open **Compare simulations** in the home history section, or choose a saved
