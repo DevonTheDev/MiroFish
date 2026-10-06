@@ -361,6 +361,35 @@ revision conflicts, literal display and exact captured downloads. Network fixtur
 are disposable loopback services. Native browser layout/download dialogs and
 Windows filesystem behavior still need platform validation.
 
+### Find a passage in an opened report
+
+Use **Find in this report** in the saved-report reader to locate a literal phrase in
+its captured text. Matching ignores case by default; enable **Match case** when
+capitalization matters. Spaces and punctuation are literal, including characters
+that would have special meaning in a regular expression. Windows and Unix line
+break styles match one another, so a pasted multiline passage can match without
+changing the stored text or its highlight positions. This search covers the
+opened body, while the library's catalog search continues to cover metadata.
+
+Matches are highlighted without interpreting Markdown or HTML. **Previous match**
+and **Next match** move between matches and wrap at the ends; the current match is
+distinct. **Clear find** restores the original text without highlights. Empty bodies
+and queries with no matches stay distinguishable from unavailable report content.
+
+A query can contain at most 200 Unicode characters. An oversized paste shows a
+limit message and does not run a shortened partial search. At most the first
+1,000 non-overlapping matches are retained and highlighted. If more exist, the
+reader says so explicitly; navigation then covers those first 1,000 matches.
+The complete admitted body remains visible and downloadable, including text
+beyond those matches.
+
+Search belongs to the currently opened snapshot. Closing the reader, editing
+catalog filters, refreshing, opening another report or leaving the page clears
+it; a replacement body also retires earlier matches and pending navigation.
+Search makes no extra server requests or model calls, changes no saved files,
+and does not alter comparison captures or the exact downloaded Markdown bytes.
+Its query and selection are not stored in the URL or browser storage.
+
 ### Compare captured report text
 
 Open a saved report, then use the comparison controls to capture it as the left

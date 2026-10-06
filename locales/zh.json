@@ -975,6 +975,21 @@
     },
     "doctorLink": "查看本地模式与 CLI doctor 说明 ↗"
   },
+  "savedReportSearch": {
+    "label": "在此报告中查找",
+    "matchCase": "区分大小写",
+    "previous": "上一个匹配",
+    "next": "下一个匹配",
+    "clear": "清除查找",
+    "note": "仅在当前打开的正文中按字面查找。空格和标点精确匹配，不同换行格式等效；默认不区分大小写。查找文本最多 200 个 Unicode 字符，最多高亮显示 1,000 处不重叠的匹配。完整正文及下载内容不变。",
+    "prompt": "输入要在此报告中查找的文本。",
+    "noMatches": "此报告中没有匹配项。",
+    "emptyBody": "此报告的正文为空，没有可查找的文本。",
+    "unavailable": "此报告的正文不可用，没有可查找的文本。",
+    "tooLong": "查找文本超过 200 个 Unicode 字符，已截短。请编辑或清除后再查找；目前未显示匹配项。",
+    "count": "第 {current} 处，共 {count} 处匹配。",
+    "limited": "当前显示第 {current} 处，共显示 {count} 处；匹配超过 1,000 处，仅显示前 1,000 处。"
+  },
   "savedReports": {
     "navTitle": "已保存报告",
     "home": "首页",

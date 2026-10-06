@@ -7,6 +7,7 @@ import * as Vue from 'vue'
 import * as Router from 'vue-router'
 import { createI18n, useI18n } from 'vue-i18n'
 import * as savedReportComparison from '../../src/utils/savedReportComparison.js'
+import * as savedReportSearch from '../../src/utils/savedReportSearch.js'
 
 export const ok = data => ({ success: true, data })
 export async function flush() {
@@ -30,9 +31,10 @@ export function deferredApi() {
 
 // The real Vue renderer mounts compiled scripts AND templates through the real
 // application router. This host is deliberately not browser/visual validation.
-function renderer() {
+function renderer(scrollCalls) {
   const node = (type, text = '') => ({ type, text, props: {}, children: [], parent: null,
-    listeners: {}, addEventListener(event, callback) { this.listeners[event] = callback } })
+    listeners: {}, addEventListener(event, callback) { this.listeners[event] = callback },
+    scrollIntoView(options) { scrollCalls.push({ node: this, options }) } })
   const root = node('root'), body = node('body')
   const remove = child => {
     if (child.parent) child.parent.children.splice(child.parent.children.indexOf(child), 1)
@@ -61,10 +63,10 @@ function renderer() {
   return { host, root, body }
 }
 
-export async function mountReportLibrary({ api, initialPath = '/reports', locale = 'en', timers = fakeTimers() } = {}) {
+export async function mountReportLibrary({ api, initialPath = '/reports', locale = 'en', timers = fakeTimers(), deferredScrolls = null, onSearchIndex = null } = {}) {
   const requests = api ? null : deferredApi()
   api ??= requests.api
-  const warnings = [], downloads = [], revokedUrls = []
+  const warnings = [], downloads = [], revokedUrls = [], scrollCalls = []
   const blobs = new Map()
   let urlIndex = 0
   const urlApi = {
@@ -78,14 +80,25 @@ export async function mountReportLibrary({ api, initialPath = '/reports', locale
     },
     body: { appendChild() {} },
   }
-  const { host, root, body } = renderer()
+  const { host, root, body } = renderer(scrollCalls)
   const stub = { render: () => Vue.h('fixture-boundary') }
   const passThrough = { setup: (_props, { slots }) => () => slots.default?.() }
   const modules = {
-    vue: { ...Vue, Transition: passThrough },
+    vue: { ...Vue, Transition: passThrough,
+      // Exercise the real nextTick callback with controllable late delivery.
+      // The host only records scroll requests; it makes no layout assertion.
+      nextTick: callback => Vue.nextTick(callback && (() => deferredScrolls ? deferredScrolls.push(callback) : callback())),
+    },
     'vue-router': { ...Router, createWebHistory: Router.createMemoryHistory },
     'vue-i18n': { useI18n },
     '../utils/savedReportComparison.js': savedReportComparison,
+    '../utils/savedReportSearch.js': { ...savedReportSearch,
+      createReportSearchIndex: text => {
+        const index = savedReportSearch.createReportSearchIndex(text)
+        onSearchIndex?.(index)
+        return index
+      },
+    },
   }
   const components = { '../components/LanguageSwitcher.vue': stub }
   function evaluate(source, returnName = 'component') {
@@ -116,6 +129,7 @@ export async function mountReportLibrary({ api, initialPath = '/reports', locale
     return value
   }
   components['../components/SavedReportComparison.vue'] = component('components/SavedReportComparison.vue')
+  components['../components/SavedReportReader.vue'] = component('components/SavedReportReader.vue')
   components['../views/SavedReportsView.vue'] = component('views/SavedReportsView.vue')
   components['../views/Home.vue'] = component('views/Home.vue')
   const router = evaluate(readFileSync(new URL('../../src/router/index.js', import.meta.url), 'utf8'))
@@ -134,7 +148,7 @@ export async function mountReportLibrary({ api, initialPath = '/reports', locale
   const find = predicate => all(predicate)[0]
   const byId = id => find(node => node.props['data-testid'] === id)
   const text = (target = root) => (target.type === '#comment' ? '' : target.text ?? '') + (target.children ?? []).map(text).join(' ')
-  return { root, body, router, i18n, warnings, requests, flush, waitFor, all, find, byId, text, downloads, revokedUrls, timers,
+  return { root, body, router, i18n, warnings, requests, flush, waitFor, all, find, byId, text, downloads, revokedUrls, timers, scrollCalls,
     async click(id) {
       const target = byId(id); assert.ok(target, `missing clickable control ${id}`)
       assert.ok(!target.props.disabled, `disabled control ${id}`)

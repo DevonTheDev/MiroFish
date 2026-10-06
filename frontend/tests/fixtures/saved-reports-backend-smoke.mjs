@@ -18,6 +18,7 @@ service.defaults.proxy = false
 service.defaults.maxRedirects = 0
 service.defaults.timeout = 5000
 const requests = [], replies = []
+const literalText = target => (target.type === '#comment' ? '' : target.text ?? '') + (target.children ?? []).map(literalText).join('')
 service.interceptors.request.use(config => {
   requests.push(config)
   assert.equal(config.method, 'get')
@@ -54,6 +55,8 @@ try {
     assert.ok(view.byId('content-error'))
     assert.ok(!view.byId('download') || view.byId('download').props.disabled)
     assert.equal(view.downloads.length, 0)
+    assert.ok(view.byId('report-find').props.disabled)
+    assert.match(view.text(view.byId('report-find-status')), /body is unavailable/)
   } else {
     const text = contentMode === 'empty' ? '' : '# Earlier report\r\n\r\nCafé 雪 🐟 <script>literal</script>\r\n'
     assert.equal(captured.content_available, true)
@@ -64,6 +67,25 @@ try {
     assert.ok(view.byId('markdown'))
     assert.equal(view.text(view.byId('markdown')), text)
     const requestCount = requests.length
+    if (contentMode === 'empty') {
+      assert.ok(view.byId('report-find').props.disabled)
+      assert.match(view.text(view.byId('report-find-status')), /body is empty/)
+    } else {
+      await view.input('report-find', '<SCRIPT>literal</SCRIPT>')
+      assert.deepEqual(view.all(node => node.type === 'mark').map(literalText), ['<script>literal</script>'])
+      await view.change('report-find-case', true)
+      assert.match(view.text(view.byId('report-find-status')), /No matches/)
+      await view.input('report-find', 'Café 雪 🐟')
+      await view.click('report-find-next'); await view.click('report-find-previous')
+      assert.deepEqual(view.all(node => node.type === 'mark').map(literalText), ['Café 雪 🐟'])
+      await view.input('report-find', '\n\n')
+      assert.deepEqual(view.all(node => node.type === 'mark').map(literalText), ['\r\n\r\n'])
+      await view.input('report-find', '\n\n\n')
+      assert.match(view.text(view.byId('report-find-status')), /No matches/)
+      await view.input('report-find', '# Earlier report\n\nCafé 雪 🐟 <script>literal</script>\n')
+      assert.deepEqual(view.all(node => node.type === 'mark').map(literalText), [text])
+      assert.equal(literalText(view.byId('markdown')), text)
+    }
     await view.click('download')
     assert.equal(requests.length, requestCount)
     assert.equal(view.downloads.length, 1)
@@ -75,11 +97,14 @@ try {
   await view.click('refresh')
   await waitFor(() => requests.length > previousRequests && view.byId('results') && !view.byId('loading'))
   assert.ok(!view.byId('reader'))
+  assert.equal(view.byId('report-find'), undefined)
   assert.ok(!view.byId('download') || view.byId('download').props.disabled)
   assert.ok(view.byId('comparison-left'))
   await view.click('open-report_new')
   await waitFor(() => view.byId('reader') && replies.at(-1).data.report_id === 'report_new')
   const newer = replies.at(-1).data
+  assert.equal(view.byId('report-find').props.value, '')
+  assert.equal(view.all(node => node.type === 'mark').length, 0)
   const beforeComparison = requests.length
   await view.click('capture-right')
   assert.equal(view.byId('comparison-status').props['data-status'], contentMode === 'unavailable' ? 'unavailable' : 'different')

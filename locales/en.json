@@ -975,6 +975,21 @@
     },
     "doctorLink": "Open local mode and CLI doctor instructions ↗"
   },
+  "savedReportSearch": {
+    "label": "Find in this report",
+    "matchCase": "Match case",
+    "previous": "Previous match",
+    "next": "Next match",
+    "clear": "Clear find",
+    "note": "Find literal text in this opened body only. Spaces and punctuation are exact. Line-break styles are equivalent; case is ignored unless Match case is selected. Up to 200 Unicode characters and 1,000 highlighted, non-overlapping matches. The full body and download are unchanged.",
+    "prompt": "Enter text to find in this report.",
+    "noMatches": "No matches in this report.",
+    "emptyBody": "This saved body is empty; there is no text to find.",
+    "unavailable": "This saved body is unavailable; there is no text to find.",
+    "tooLong": "Find text exceeds 200 Unicode characters and has been shortened. Edit or clear it to search; no matches are shown yet.",
+    "count": "Match {current} of {count}.",
+    "limited": "Match {current} of {count} shown; more than 1,000 matches; first 1,000 shown."
+  },
   "savedReports": {
     "navTitle": "Saved reports",
     "home": "Home",
