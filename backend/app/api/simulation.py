@@ -2431,6 +2431,30 @@ def get_agent_stats(simulation_id: str):
 
 # ============== 数据库查询接口 ==============
 
+@simulation_bp.route('/<simulation_id>/saved-interviews', methods=['GET'])
+def get_saved_simulation_interviews(simulation_id: str):
+    """Read bounded current interview traces without touching the live runner."""
+    from ..services import saved_interviews
+    try:
+        query = saved_interviews.parse_saved_interviews_query(request.args)
+        data = saved_interviews.read_saved_interviews(
+            SimulationRunner.RUN_STATE_DIR, simulation_id, **query,
+        )
+        encoded = saved_interviews.encode_response(data)
+        if len(encoded.encode("ascii")) > saved_interviews.MAX_RESPONSE_BYTES:
+            raise saved_interviews.SavedInterviewsError("response_too_large", 413)
+        response = current_app.response_class(encoded, mimetype="application/json")
+    except saved_interviews.SavedInterviewsError as error:
+        response = jsonify({"success": False, "error_code": error.code, "error": str(error)})
+        response.status_code = error.status_code
+    except Exception:
+        response = jsonify({"success": False, "error_code": "interviews_unavailable",
+                            "error": "Saved interviews could not be read."})
+        response.status_code = 500
+    response.headers["Cache-Control"] = "no-store"
+    return response
+
+
 def _simulation_database_query(simulation_id: str):
     """Validate bounded query inputs and resolve files inside simulation storage."""
     reserved = {"con", "prn", "aux", "nul"} | {

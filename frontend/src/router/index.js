@@ -5,6 +5,7 @@ import SimulationView from '../views/SimulationView.vue'
 import SimulationRunView from '../views/SimulationRunView.vue'
 import ReportView from '../views/ReportView.vue'
 import InteractionView from '../views/InteractionView.vue'
+import SavedInterviewsView from '../views/SavedInterviewsView.vue'
 import SavedActivityView from '../views/SavedActivityView.vue'
 import SavedActivityRoundsView from '../views/SavedActivityRoundsView.vue'
 import SimulationComparisonView from '../views/SimulationComparisonView.vue'
@@ -18,6 +19,11 @@ import SavedReportsView from '../views/SavedReportsView.vue'
 import RunCapturesView from '../views/RunCapturesView.vue'
 
 const routes = [
+  {
+    path: '/simulation/:simulationId/interviews',
+    name: 'SavedInterviews',
+    component: SavedInterviewsView
+  },
   {
     path: '/simulation/:simulationId/activity/rounds',
     name: 'SavedActivityRounds',

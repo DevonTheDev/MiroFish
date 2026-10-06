@@ -183,6 +183,7 @@
             </div>
             <div class="comparison-entry">
               <button type="button" class="history-compare-btn" data-testid="history-captures-selected" @click="goToCaptures(selectedProject.simulation_id)">{{ $t('runCaptures.historySelectedEntry') }}</button>
+              <button type="button" class="history-compare-btn" data-testid="history-saved-interviews" @click="goToSavedInterviews(selectedProject.simulation_id)">{{ $t('savedInterviews.historyEntry') }}</button>
               <button type="button" class="history-compare-btn" data-testid="history-saved-activity" @click="goToSavedActivity(selectedProject.simulation_id)">{{ $t('savedActivity.historyEntry') }}</button>
               <button type="button" class="history-compare-btn" data-testid="history-compare-selected" @click="goToComparison(selectedProject.simulation_id)">{{ $t('comparison.historySelectedEntry') }}</button>
             </div>
@@ -414,6 +415,11 @@ const navigateToProject = (simulation) => {
 // 关闭弹窗
 const closeModal = () => {
   selectedProject.value = null
+}
+
+const goToSavedInterviews = (simulationId) => {
+  router.push({ name: 'SavedInterviews', params: { simulationId } })
+  closeModal()
 }
 
 const goToSavedActivity = (simulationId) => {

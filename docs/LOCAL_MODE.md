@@ -1982,6 +1982,60 @@ filesystem sandbox or native Windows guarantee. Tests intercept malformed delete
 use disposable positive fixtures and synthetic resource owners, and exercise a
 real two-thread startup/cleanup boundary plus the force-restart API failure path.
 
+### Reopen saved interviews
+
+Open a simulation in History and choose **Saved interviews**, or open
+`/simulation/<simulation_id>/interviews` directly. The page reads the current
+Twitter and Reddit SQLite interview traces without loading a model, starting a
+runner, or requiring a report, graph, profiles or simulation configuration.
+Choose a platform or enter an exact agent ID, then Apply. Agent zero is valid;
+IDs remain decimal strings so large signed-64-bit identifiers keep their exact
+identity. Refresh observes newly committed replies, including committed WAL
+data from a running environment.
+
+Each platform has its own source status and coverage. A successful empty source
+is different from a missing, unreadable or limited one. Accepted records retain
+their platform, physical row ID, saved timestamp, prompt and reply. The page
+renders these as literal text and distinguishes missing fields from empty text.
+Malformed or oversized payloads have a bounded raw preview and warnings. Records
+appear Twitter first, then Reddit, in descending SQLite row order within each
+platform; this is not a reconstructed conversation or a timestamp chronology.
+Stored prompts may already include earlier context. No historical agent names,
+model versions or batch boundaries are inferred.
+
+The page shows 25 accepted records at a time. **Download observation JSON**
+exports every accepted record and its source/limit metadata, including records
+on other local pages, without reading storage again. Editing a filter, changing
+the selected simulation or refreshing retires the previous result and download.
+A download failure preserves the accepted observation for another attempt; check
+existing downloads first because a file may already have been saved.
+
+The separate GET endpoint
+`/api/simulation/<simulation_id>/saved-interviews` accepts only optional
+`platform=twitter|reddit` and canonical decimal `agent_id` values from `0` through
+`9223372036854775807`. Unknown, repeated, signed, padded or blank query values
+are rejected. Every response uses `Cache-Control: no-store`. Each requested
+platform returns at most 100 rows (200 combined), with a 160 MiB main-database
+limit, 64 MiB WAL limit, two-million-operation SQLite budget and 0.25-second lock
+timeout. Payload previews are limited to 16 KiB and saved timestamps to 256 bytes,
+with UTF-8-safe cuts. The 4 MiB response budget reserves 8 KiB for its envelope
+and divides the remaining bytes equally between requested platforms, so one
+large source cannot use the other source's allowance. Returned counts describe
+retained rows, not matched totals; additional-row availability can be unknown.
+
+All requested main and sidecar paths are validated before either database opens.
+Escaped `mode=ro` connections protect the main database, with normal SQLite
+WAL/shared-memory behavior; no missing directories or databases are created.
+Each platform is observed separately, not as an atomic cross-platform snapshot.
+These are the current databases, which a force restart can replace, not retained
+archives of earlier runs. The legacy interview-history endpoint below keeps its
+existing contract.
+
+Local verification uses real SQLite, Flask, production Axios and compiled Vue
+templates/router, including WAL refresh, partial sources, bounds, exact exports
+and stale request/download ownership. Native browser layout, download dialogs,
+Windows behavior and live model interaction are not verified by these tests.
+
 ### Read-only interview history
 
 The interview-history API and public runner reader validate the simulation ID and

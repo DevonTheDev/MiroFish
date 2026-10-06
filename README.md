@@ -135,6 +135,17 @@ then open a round's total or outcome count to inspect its exact records at the
 same source revision. Download the accepted aggregate overview as JSON. See
 [activity by round](docs/LOCAL_MODE.md#inspect-activity-by-round).
 
+## Reopen saved interviews
+
+Choose **Saved interviews** from a simulation in History to read its current
+stored prompts and replies, including separate Twitter and Reddit answers.
+Filter by platform or exact agent ID, browse the accepted records, refresh after
+new replies, and download the complete accepted observation as JSON. Missing,
+damaged and limited sources stay visibly distinct from a successfully empty
+result. This reads the current platform databases without starting a simulation
+or asking a model; it is not an archive of previous runs. See the
+[saved interviews guide](docs/LOCAL_MODE.md#reopen-saved-interviews).
+
 ## Compare saved simulations
 
 Open **Compare simulations** in the home history section, or choose a saved
