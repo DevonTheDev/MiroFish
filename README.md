@@ -168,6 +168,14 @@ individual capture or the displayed comparison as JSON. This records observed
 activity counts without loading models or copying raw posts and credentials.
 See the [run capture workflow and limits](docs/LOCAL_MODE.md#keep-and-compare-run-captures).
 
+Choose **Open capture files** to reopen those individual or comparison JSON
+downloads in the browser, including when the capture database is unavailable.
+Preview a file, choose its left/right slot, and compare two historical captures
+or download the result. The file reader keeps the selected data in memory and
+recomputes differences from validated counts; it does not verify a file against
+the current backend. The frontend must already be loaded or served. See
+[opening capture files](docs/LOCAL_MODE.md#open-capture-files).
+
 ## ⚡ Overview
 
 **MiroFish** is a next-generation AI prediction engine powered by multi-agent technology. By extracting seed information from the real world (such as breaking news, policy drafts, or financial signals), it automatically constructs a high-fidelity parallel digital world. Within this space, thousands of intelligent agents with independent personalities, long-term memory, and behavioral logic freely interact and undergo social evolution. You can inject variables dynamically from a "God's-eye view" to precisely deduce future trajectories — **rehearse the future in a digital sandbox, and win decisions after countless simulations**.

@@ -2,7 +2,7 @@
   <div class="captures-page">
     <header class="app-header"><RouterLink class="brand" to="/">MIROFISH</RouterLink><div class="header-actions"><RouterLink to="/">{{ t('comparison.backHome') }}</RouterLink><LanguageSwitcher /></div></header>
     <main>
-      <header class="page-heading"><p class="eyebrow">{{ t('runCaptures.eyebrow') }}</p><h1>{{ t('runCaptures.title') }}</h1><p>{{ t('runCaptures.scope') }}</p></header>
+      <header class="page-heading"><p class="eyebrow">{{ t('runCaptures.eyebrow') }}</p><h1>{{ t('runCaptures.title') }}</h1><p>{{ t('runCaptures.scope') }}</p><RouterLink to="/capture-files" data-testid="open-capture-files">{{ t('runCaptureFiles.title') }}</RouterLink></header>
       <p v-if="routeError" class="notice error" role="alert">{{ t('runCaptures.errors.invalid_selection') }}</p>
       <section v-if="recoveryRequired || recoveryLoading || recoveryError" class="notice" data-testid="storage-recovery" aria-live="polite">
         <h2>{{ t('runCaptures.recoveryTitle') }}</h2><p>{{ errorText('capture_recovery_required') }}</p><p class="note">{{ t('runCaptures.storeRecoveryNote') }}</p>

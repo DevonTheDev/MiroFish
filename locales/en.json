@@ -1169,6 +1169,38 @@
       "internal_failure": "The check encountered an internal problem. Review local setup and retry after restarting if needed."
     }
   },
+  "runCaptureFiles": {
+    "eyebrow": "Browser-local saved evidence",
+    "title": "Open capture files",
+    "scope": "Reopen capture JSON downloaded from MiroFish. Read one historical observation or compare two captures, including captures of the same simulation, in this browser session.",
+    "sessionNote": "Files stay in this page’s memory and are not uploaded or saved to a library. Leaving or reloading this page clears the session. The frontend must already be loaded or served locally.",
+    "language": "Language",
+    "openTitle": "Choose a capture file",
+    "file": "Capture or comparison JSON",
+    "fileHint": "Choose one version-1 capture or comparison file at a time, up to {limit} MiB. Preview it before replacing either accepted capture.",
+    "loading": "Reading capture file…",
+    "cancel": "Cancel preview",
+    "preview": "File preview · not yet accepted",
+    "unverified": "File contents have not been verified against the current backend. Capture IDs and source revisions do not authenticate edited files.",
+    "filename": "Filename (local label, not a source URL)",
+    "historicalComparedAt": "Imported comparison generated at (historical)",
+    "historical": "Imported file · historical observation",
+    "savedSettings": "Saved configured model/settings",
+    "sourceRevision": "Saved source revision",
+    "useBoth": "Use both captures",
+    "replaceBoth": "Use both replaces the left and right captures. Compare then computes fresh differences from their saved observations.",
+    "replaceSide": "Use as left or right replaces only that side. The other accepted capture stays in place.",
+    "acceptedTitle": "Accepted captures",
+    "clearAll": "Clear session",
+    "clearSide": "Clear this side",
+    "emptySide": "Open a file, preview it and choose this side to read its observation.",
+    "computedHere": "Computed here from imported captures",
+    "errors": {
+      "invalid": "This file could not be opened. Choose one valid version-1 capture or comparison JSON within the size limit. Existing accepted captures are unchanged.",
+      "duplicate": "These sides need different capture IDs. The simulation IDs may be the same. Existing accepted captures are unchanged.",
+      "download": "The JSON download could not be created. Try again."
+    }
+  },
   "runCaptures": {
     "eyebrow": "Saved experiment history",
     "title": "Run captures",

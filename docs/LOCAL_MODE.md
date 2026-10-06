@@ -2333,8 +2333,8 @@ The dedicated local SQLite store is
 `<configured UPLOAD_FOLDER>/run_captures/run_captures.sqlite3`, outside individual
 simulation directories. Read requests do not create it. Explicit Save creates
 storage and uses a transaction to add a record; existing captures are never
-updated. This increment provides no edit, delete or import operation. The store
-holds at most 500 captures, each at most 256 KiB of encoded JSON. Labels allow
+updated. It provides no edit, delete or file-import operation and holds at most
+500 captures, each at most 256 KiB of encoded JSON. Labels allow
 1–120 Unicode code points and must be nonblank; notes allow up to 2,000. Both
 reject invalid Unicode/control characters, with newline/tab allowed in notes.
 Oversized observations are refused without truncation. Existing source limits
@@ -2393,3 +2393,66 @@ including partial observations, a lost successful response, and explicit recover
 after a real disposable writer process crashes. Native browser
 layout/download dialogs, Windows storage behavior and real-model quality remain
 unverified; no pretrained weights or hosted tests are used.
+
+## Open capture files
+
+Choose **Open capture files** on Run captures, or open `/capture-files` while
+the frontend is served. This separate page reads the version-1 individual and
+comparison JSON downloads produced by Run captures. It remains usable when the
+capture database or original simulation files are unavailable. The frontend must
+already be loaded or served; this does not install or cache the whole app for
+offline use.
+
+1. Select one JSON file and inspect its preview. Its file name is shown as a
+   local label, alongside the capture label/note, captured and observed times,
+   saved status, source revision, configuration context, coverage and warnings.
+2. Explicitly use an individual capture on the left or right. A comparison
+   download previews both embedded captures and its historical generation time;
+   choose **Use both captures** to accept the pair. Cancel or an invalid file
+   leaves previously accepted captures intact.
+3. Read either side on its own, or compare two different capture IDs. They may
+   describe the same simulation. Swap or clear the slots as needed. Differences
+   are recomputed **right minus left** from the admitted observations.
+4. Download an accepted capture or the current locally computed comparison.
+   Captured/observed times and saved context are preserved. A new comparison has
+   a new UTC generation time and uses the existing version-1 comparison shape.
+
+Every imported observation is labelled historical and unverified against the
+current backend. A capture ID or source revision does not authenticate a file
+that someone may have edited. Saved configured models/settings do not establish
+current readiness or which model actually executed. The reader displays file
+names, notes, context and action names as literal text; it does not follow IDs as
+links or load source simulations. Comparison results retain the interpretation
+limits of saved run captures above.
+
+Known zero remains distinct from unavailable data. Partial observations can
+display their observed counts, but aggregate and action-type differences require
+complete coverage on both sides. An absent action type is zero only on a complete
+side. Per-platform differences independently require complete platform coverage
+on both sides. Recorded differences in an imported comparison must exactly match
+the values recomputed from its captures before that file is accepted.
+
+Only current version-1 capture exports are admitted. API response envelopes,
+other export types, unknown fields/versions, duplicate object keys, malformed
+UTF-8, inconsistent counts and altered comparison differences are rejected.
+Each selected file is limited to 2 MiB, with JSON nesting at most 10 levels; each
+capture must also fit the existing 256 KiB canonical ASCII JSON limit. Captures
+allow at most 256 action types of 256 Unicode code points each, 32 warnings, and
+counts up to 500,000. New labels/notes follow the capture-store text rules;
+historical saved context retains valid JSON escapes losslessly. Capture,
+observation and comparison times use extended UTC ISO dates with seconds and an
+optional fractional second, as emitted by the producer.
+
+The page retains at most two accepted captures and one pending file preview in
+memory. It makes no API/model requests and writes neither browser storage nor
+the capture database, including when changing its display language. Leaving or
+reloading the page clears its selections. A late file read or an obsolete
+control cannot replace a newer selection or download an earlier pair. At most
+one download object URL is retained; it is released on the next state change,
+replacement download or departure from the page.
+
+Local validation covers actual Python/Flask/SQLite exports read by the JavaScript
+parser, comparison parity, bounds and malformed input, plus compiled Vue/router
+workflows with delayed file reads, stale controls, literal text, downloads and
+both languages. Native browser file pickers, layout and download dialogs remain
+unverified. No model, provider, database import or restore operation is involved.

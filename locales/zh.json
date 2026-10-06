@@ -1169,6 +1169,38 @@
       "internal_failure": "检查遇到内部问题。请检查本地设置，必要时重启后再试。"
     }
   },
+  "runCaptureFiles": {
+    "eyebrow": "浏览器本地保存证据",
+    "title": "打开捕获文件",
+    "scope": "重新打开从 MiroFish 下载的捕获 JSON。在本次浏览器会话中读取一份历史观察，或比较两份捕获（可来自同一模拟）。",
+    "sessionNote": "文件仅保存在本页面的内存中，不会上传或存入资料库。离开或刷新本页面会清空会话。前端必须已加载，或由本地服务提供。",
+    "language": "语言",
+    "openTitle": "选择捕获文件",
+    "file": "捕获或比较 JSON",
+    "fileHint": "每次选择一个第 1 版捕获或比较文件，大小上限为 {limit} MiB。先预览，再替换已选捕获。",
+    "loading": "正在读取捕获文件…",
+    "cancel": "取消预览",
+    "preview": "文件预览 · 尚未采用",
+    "unverified": "文件内容未经当前后端验证。捕获 ID 和来源修订值无法证明编辑后的文件真实性。",
+    "filename": "文件名（本地标签，并非来源网址）",
+    "historicalComparedAt": "导入比较的生成时间（历史）",
+    "historical": "导入文件 · 历史观察",
+    "savedSettings": "保存的配置模型与设置",
+    "sourceRevision": "保存的来源修订值",
+    "useBoth": "采用两份捕获",
+    "replaceBoth": "采用两份捕获会替换左右两侧。随后点击比较，根据保存的观察重新计算差值。",
+    "replaceSide": "用于左侧或右侧仅替换相应一侧，另一侧已选捕获保持不变。",
+    "acceptedTitle": "已采用的捕获",
+    "clearAll": "清空会话",
+    "clearSide": "清除此侧",
+    "emptySide": "打开文件并预览，再选择用于此侧以读取历史观察。",
+    "computedHere": "在此根据导入捕获计算",
+    "errors": {
+      "invalid": "无法打开此文件。请选择大小限制内的有效第 1 版捕获或比较 JSON。已采用的捕获保持不变。",
+      "duplicate": "左右两侧需要不同的捕获 ID，模拟 ID 可以相同。已采用的捕获保持不变。",
+      "download": "无法创建 JSON 下载，请重试。"
+    }
+  },
   "runCaptures": {
     "eyebrow": "已保存的实验历史",
     "title": "运行快照",

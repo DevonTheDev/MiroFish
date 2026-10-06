@@ -17,8 +17,14 @@ import PromptExamplesView from '../views/PromptExamplesView.vue'
 import SavedReportsView from '../views/SavedReportsView.vue'
 
 import RunCapturesView from '../views/RunCapturesView.vue'
+import RunCaptureFilesView from '../views/RunCaptureFilesView.vue'
 
 const routes = [
+  {
+    path: '/capture-files',
+    name: 'RunCaptureFiles',
+    component: RunCaptureFilesView
+  },
   {
     path: '/simulation/:simulationId/interviews',
     name: 'SavedInterviews',
