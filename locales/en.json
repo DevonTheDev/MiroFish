@@ -2107,5 +2107,57 @@
       "interviews_unavailable": "Saved interviews could not be read. Refresh to try again.",
       "response_too_large": "The observation exceeds the response size limit. Narrow the platform or exact agent ID and apply filters."
     }
+  },
+  "savedInterviewFiles": {
+    "title": "Open saved interview file",
+    "entry": "Open interview file",
+    "openTitle": "Choose a saved interview observation",
+    "file": "Interview observation JSON",
+    "scope": "Reopen one previously downloaded saved-interview observation in this browser. This page makes no backend request.",
+    "sessionNote": "Interview data stays in memory for this page only. Leaving the route clears the file. No interview data is persisted.",
+    "fileHint": "Select exactly one existing observation JSON, at most {limit} MiB. Preview its recorded settings before opening.",
+    "loading": "Reading local interview file…",
+    "invalid": "This file could not be opened safely. Choose one valid saved-interview observation JSON within the size limit. Your accepted observation is retained.",
+    "preview": "Preview historical observation",
+    "unverified": "Unverified historical file. Validation checks its structure, not authenticity, current source status or completeness. Recorded coverage describes only the saved observation.",
+    "filename": "File",
+    "simulation": "Recorded simulation",
+    "filters": "Recorded filters: platform {platform}; exact agent ID {agent}",
+    "observedAt": "Recorded observation time: {time}",
+    "recordCount": "Saved records: {count}",
+    "availability": "Recorded coverage: {status}",
+    "limitsNote": "Recorded limits: at most {count} matching rows per platform and {total} overall. These bounds do not establish a complete source or total count.",
+    "open": "Open this file",
+    "cancel": "Cancel pending file",
+    "clear": "Clear accepted file",
+    "resultsTitle": "Historical saved interviews",
+    "returned": "Recorded returned rows: {count}",
+    "moreAvailable": "The file records that additional matching rows were omitted at observation time. This file cannot establish whether those rows are still available.",
+    "unknownMore": "The file records that additional matching rows were unknown for this source at observation time.",
+    "empty": "This file records zero matching interviews in the selection read at observation time.",
+    "statuses": {
+      "available": "Recorded status: source read",
+      "missing": "Recorded status: database missing",
+      "unreadable": "Recorded status: database unreadable",
+      "too_large": "Recorded status: database or WAL exceeded the read limit",
+      "query_limited": "Recorded status: read budget reached",
+      "not_requested": "Recorded status: not requested"
+    },
+    "coverage": {
+      "complete": "Recorded selection coverage: complete",
+      "partial": "Recorded selection coverage: partial",
+      "unavailable": "Recorded selection coverage: unavailable",
+      "not_requested": "Recorded platform filter excluded this source"
+    },
+    "warnings": {
+      "source_missing": "Recorded warning: the platform database was missing.",
+      "source_unreadable": "Recorded warning: the source could not be read fully.",
+      "database_too_large": "Recorded warning: the database exceeded the 160 MiB read limit.",
+      "wal_too_large": "Recorded warning: the WAL exceeded the 64 MiB read limit.",
+      "query_limited": "Recorded warning: the SQLite query reached its execution budget.",
+      "row_limit": "Recorded warning: the per-platform row limit was reached.",
+      "response_limit": "Recorded warning: the response size limit omitted additional rows.",
+      "record_warnings": "Recorded warning: some returned records have missing, invalid or truncated saved fields."
+    }
   }
 }

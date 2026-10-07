@@ -150,6 +150,12 @@ This reads the current platform databases without starting a simulation
 or asking a model; it is not an archive of previous runs. See the
 [saved interviews guide](docs/LOCAL_MODE.md#reopen-saved-interviews).
 
+Choose **Open interview file** to reopen an earlier observation JSON in the
+browser. Review the file's saved context before opening its records and exact
+questions, including when the original databases are unavailable. File content
+is historical and is not checked against the current backend. See
+[opening interview files](docs/LOCAL_MODE.md#open-interview-files).
+
 ## Compare saved simulations
 
 Open **Compare simulations** in the home history section, or choose a saved

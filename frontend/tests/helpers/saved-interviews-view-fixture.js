@@ -7,6 +7,8 @@ import * as Vue from 'vue'
 import * as Router from 'vue-router'
 import { createI18n, useI18n } from 'vue-i18n'
 import * as savedInterviewQuestions from '../../src/utils/savedInterviewQuestions.js'
+import * as savedInterviewObservation from '../../src/utils/savedInterviewObservation.js'
+import * as savedInterviewFiles from '../../src/utils/savedInterviewFiles.js'
 
 export const ok = data => ({ success: true, data })
 export async function flush() {
@@ -68,7 +70,7 @@ export async function mountSavedInterviews({ api, initialPath = '/simulation/sim
   let urlIndex = 0
   const urlApi = {
     createObjectURL(blob) { downloadHooks.url?.(); const url = `blob:saved-interviews-${++urlIndex}`; blobs.set(url, blob); return url },
-    revokeObjectURL(url) { revokedUrls.push(url); blobs.delete(url) },
+    revokeObjectURL(url) { revokedUrls.push(url); blobs.delete(url); downloadHooks.revoke?.() },
   }
   const document = {
     createElement(type) {
@@ -87,11 +89,13 @@ export async function mountSavedInterviews({ api, initialPath = '/simulation/sim
     'vue-router': { ...Router, createWebHistory: Router.createMemoryHistory },
     'vue-i18n': { useI18n },
     '../utils/savedInterviewQuestions': savedInterviewQuestions,
+    '../utils/savedInterviewObservation.js': savedInterviewObservation,
+    '../utils/savedInterviewFiles.js': savedInterviewFiles,
   }
   const components = { '../components/LanguageSwitcher.vue': stub }
   function evaluate(source, returnName = 'component') {
     const ast = parseJavaScript(source, { sourceType: 'module' })
-    const globals = { AbortController, Date, Intl, console, Blob: class extends Blob { constructor(...args) { super(...args); downloadHooks.blob?.() } }, URL: urlApi, document,
+    const globals = { AbortController, Date, Intl, console, TextEncoder, TextDecoder, Blob: class extends Blob { constructor(...args) { super(...args); downloadHooks.blob?.() } }, URL: urlApi, document,
       setTimeout: () => 0, clearTimeout() {},
       IntersectionObserver: class { observe() {} disconnect() {} } }
     for (const statement of ast.program.body.filter(item => item.type === 'ImportDeclaration').reverse()) {

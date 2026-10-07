@@ -2,10 +2,11 @@ const bytes = value => new TextEncoder().encode(value).length
 
 // JSON.parse silently overwrites duplicate keys. This bounded parser rejects them,
 // including escaped aliases, before schema admission. Depth is capped before recursion.
-export function parseBoundedJson(source, maximumBytes, maximumDepth, invalid, strictValues = false) {
+export function parseBoundedJson(source, maximumBytes, maximumDepth, invalid, strictValues = false, maximumValues = Infinity) {
   try {
     if (typeof source !== 'string' || bytes(source) > maximumBytes) return invalid()
-    let cursor = 0
+    if (maximumValues !== Infinity && (!Number.isSafeInteger(maximumValues) || maximumValues < 1)) return invalid()
+    let cursor = 0, values = 0
     const whitespace = () => { while (/[\t\n\r ]/.test(source[cursor] ?? '\0')) cursor++ }
     function string() {
       const start = cursor++
@@ -21,7 +22,7 @@ export function parseBoundedJson(source, maximumBytes, maximumDepth, invalid, st
       return invalid()
     }
     function value(depth) {
-      if (depth > maximumDepth) return invalid()
+      if (depth > maximumDepth || ++values > maximumValues) return invalid()
       whitespace()
       if (source[cursor] === '"') return string()
       if (source[cursor] === '{' || source[cursor] === '[') {

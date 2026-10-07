@@ -2053,6 +2053,46 @@ and saved-question grouping with stale request/view/download ownership.
 Native browser layout, download dialogs,
 Windows behavior and live model interaction are not verified by these tests.
 
+### Open interview files
+
+Choose **Open interview file** from History or Saved interviews, or open
+`/interview-files` directly. Select a **Download observation JSON** file from
+the saved-interview reader. Inspect the filename, stored simulation ID, filters,
+observation time, record counts and source coverage, then choose **Open this
+file**. Selecting a new file previews it separately from the accepted
+observation; **Cancel pending file** discards that pending selection, and
+**Clear accepted file** removes the accepted file.
+
+The reader works in the already loaded or locally served frontend without a
+backend request. It does not write interview data to browser or server storage,
+start a simulation, ask a model or verify the file's claimed origin. Source
+status, limits, filters and times are historical assertions from the file.
+They do not establish the current database state or include records that were
+outside the original query or its bounded result. Leaving or reloading the page
+discards the in-memory observation; keep the downloaded file to reopen it.
+
+Use **All records** or **Review by saved question** as in the saved-interview
+reader. Exact complete prompts retain their original case, whitespace and
+context; missing or truncated prompts remain in All records. Paging and question
+selection do not fetch further records. Download exports the entire accepted
+observation, including rows outside the visible page or selected question.
+The parsed content is preserved; JSON whitespace can change on download.
+
+Only the existing bare version-1 observation format is accepted. The input is
+bounded to 8 MiB, with strict UTF-8 decoding, duplicate-key rejection and bounded
+JSON nesting and value counts. Its declared selection, record identity/order,
+source counts, warning codes, coverage and response limits must agree. Unknown
+fields and unsupported formats are refused. Escaped Unicode in stored text is
+retained, including payload text already preserved by the backend. Validation
+checks consistency, not authenticity.
+
+File selections, explicit Open/Cancel/Clear and route changes retire older read
+and download callbacks. A failed file read leaves the earlier accepted
+observation available. The existing language preference is separate from
+interview data. Local compiled Vue/router and SQLite-to-download round-trip tests
+exercise the reader; native file dialogs, rendering and downloads remain
+unverified.
+
 ### Read-only interview history
 
 The interview-history API and public runner reader validate the simulation ID and

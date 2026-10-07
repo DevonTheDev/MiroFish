@@ -21,6 +21,11 @@ import RunCaptureFilesView from '../views/RunCaptureFilesView.vue'
 
 const routes = [
   {
+    path: '/interview-files',
+    name: 'SavedInterviewFiles',
+    component: SavedInterviewsView
+  },
+  {
     path: '/capture-files',
     name: 'RunCaptureFiles',
     component: RunCaptureFilesView

@@ -2107,5 +2107,57 @@
       "interviews_unavailable": "无法读取已保存访谈。请刷新重试。",
       "response_too_large": "观察结果超过响应大小限制。请缩小平台或精确智能体 ID 范围并应用筛选。"
     }
+  },
+  "savedInterviewFiles": {
+    "title": "打开已保存访谈文件",
+    "entry": "打开访谈文件",
+    "openTitle": "选择已保存访谈观察结果",
+    "file": "访谈观察结果 JSON",
+    "scope": "在此浏览器中重新打开之前下载的访谈观察结果。本页面不会发送后端请求。",
+    "sessionNote": "访谈数据仅保留在当前页面的内存中。离开此路由即清除文件，不会持久保存访谈数据。",
+    "fileHint": "请选择一个已有观察结果 JSON，大小不超过 {limit} MiB。打开前请先预览文件记录的设置。",
+    "loading": "正在读取本地访谈文件…",
+    "invalid": "无法安全打开此文件。请选择一个有效且未超过大小限制的访谈观察结果 JSON。已接受的观察结果仍然保留。",
+    "preview": "预览历史观察结果",
+    "unverified": "未经核实的历史文件。验证只检查结构，不能证明真实性、当前来源状态或完整性。记录的覆盖范围仅描述已保存的观察结果。",
+    "filename": "文件",
+    "simulation": "记录的模拟标识符",
+    "filters": "记录的筛选条件：平台 {platform}；精确智能体 ID {agent}",
+    "observedAt": "记录的观察时间：{time}",
+    "recordCount": "已保存记录：{count}",
+    "availability": "记录的覆盖范围：{status}",
+    "limitsNote": "记录的限制：每个平台最多 {count} 条匹配记录，总共最多 {total} 条。这些限制不能证明来源完整，也不代表总记录数。",
+    "open": "打开此文件",
+    "cancel": "取消待打开文件",
+    "clear": "清除已接受文件",
+    "resultsTitle": "历史已保存访谈",
+    "returned": "记录的返回行数：{count}",
+    "moreAvailable": "文件记载在观察时还有匹配记录未被包含，无法据此确定那些记录现在是否仍然可用。",
+    "unknownMore": "文件记载在观察时无法确定此来源是否还有其他匹配记录。",
+    "empty": "文件记载在当时读取的筛选范围中，没有匹配的访谈。",
+    "statuses": {
+      "available": "记录的状态：来源读取成功",
+      "missing": "记录的状态：数据库缺失",
+      "unreadable": "记录的状态：数据库无法读取",
+      "too_large": "记录的状态：数据库或 WAL 超过读取限制",
+      "query_limited": "记录的状态：已达到读取预算",
+      "not_requested": "记录的状态：未请求"
+    },
+    "coverage": {
+      "complete": "记录的筛选覆盖范围：完整",
+      "partial": "记录的筛选覆盖范围：不完整",
+      "unavailable": "记录的筛选覆盖范围：不可用",
+      "not_requested": "记录的平台筛选排除了此来源"
+    },
+    "warnings": {
+      "source_missing": "记录的警告：当时平台数据库缺失。",
+      "source_unreadable": "记录的警告：当时未能完整读取来源。",
+      "database_too_large": "记录的警告：当时数据库超过 160 MiB 读取限制。",
+      "wal_too_large": "记录的警告：当时 WAL 超过 64 MiB 读取限制。",
+      "query_limited": "记录的警告：当时 SQLite 查询达到执行预算。",
+      "row_limit": "记录的警告：当时达到每个平台的行数限制。",
+      "response_limit": "记录的警告：当时响应大小限制导致部分记录未返回。",
+      "record_warnings": "记录的警告：部分返回记录的已保存字段缺失、无效或被截断。"
+    }
   }
 }
