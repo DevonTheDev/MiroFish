@@ -6,6 +6,7 @@ import { parse, compileScript, compileTemplate } from '@vue/compiler-sfc'
 import * as Vue from 'vue'
 import * as Router from 'vue-router'
 import { createI18n, useI18n } from 'vue-i18n'
+import * as savedInterviewQuestions from '../../src/utils/savedInterviewQuestions.js'
 
 export const ok = data => ({ success: true, data })
 export async function flush() {
@@ -85,6 +86,7 @@ export async function mountSavedInterviews({ api, initialPath = '/simulation/sim
     vue: { ...Vue, Transition: passThrough },
     'vue-router': { ...Router, createWebHistory: Router.createMemoryHistory },
     'vue-i18n': { useI18n },
+    '../utils/savedInterviewQuestions': savedInterviewQuestions,
   }
   const components = { '../components/LanguageSwitcher.vue': stub }
   function evaluate(source, returnName = 'component') {

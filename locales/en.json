@@ -2020,6 +2020,17 @@
     }
   },
   "savedInterviews": {
+    "reviewMode": "Review saved interviews",
+    "recordsMode": "All records",
+    "questionsMode": "Review by saved question",
+    "selectQuestion": "Exact saved prompt",
+    "questionOption": "{number}. {prompt} · Twitter: {twitter}, Reddit: {reddit}",
+    "questionNote": "Groups use the exact complete stored prompt, including context and whitespace. Counts are observed records, including missing replies and repeated answers, not respondents or survey batches. Zero observed records from a missing, limited or unhealthy source does not establish that no answer exists.",
+    "ungrouped": "{count} ungrouped records have missing, raw or incomplete prompts. Choose All records to inspect them.",
+    "fullQuestion": "Complete stored prompt",
+    "emptyQuestion": "Empty saved prompt",
+    "noQuestions": "No complete saved prompts in this observation. Choose All records to inspect saved payloads and warnings.",
+    "questionCount": "Selected question: {count} observed records in this source",
     "title": "Saved interviews",
     "historyEntry": "Saved interviews",
     "scope": "Review interviews in the current platform databases. Restart can replace these files; this is not an archive of previous runs.",

@@ -2003,9 +2003,25 @@ platform; this is not a reconstructed conversation or a timestamp chronology.
 Stored prompts may already include earlier context. No historical agent names,
 model versions or batch boundaries are inferred.
 
-The page shows 25 accepted records at a time. **Download observation JSON**
+Choose **Review by saved question**, then select an **Exact saved prompt** to
+inspect its records across both platforms. Grouping uses the full accepted
+observation and exact complete stored text, preserving case, whitespace, Unicode
+and any earlier context or interview prefix. Empty saved prompts have their own
+group. Missing, raw and payload-truncated prompts remain available under **All
+records**; a truncated timestamp alone does not exclude a complete prompt.
+Groups follow their first observed record, and repeated answers from the same
+agent remain separate. The selected question's counts describe observed records,
+including missing replies, not unique respondents or survey batches. Source
+coverage and limits remain visible: zero observed records from a missing, limited
+or unhealthy source cannot establish that no answer exists.
+
+Both views show 25 records at a time. Mode, question and page changes are local
+to the accepted observation and do not fetch more records or change storage.
+Filter edits, refresh, route changes and replacement observations reset the view
+to **All records**. **Download observation JSON**
 exports every accepted record and its source/limit metadata, including records
-on other local pages, without reading storage again. Editing a filter, changing
+outside the selected question and on other local pages, without reading storage
+again. Editing a filter, changing
 the selected simulation or refreshing retires the previous result and download.
 A download failure preserves the accepted observation for another attempt; check
 existing downloads first because a file may already have been saved.
@@ -2033,7 +2049,8 @@ existing contract.
 
 Local verification uses real SQLite, Flask, production Axios and compiled Vue
 templates/router, including WAL refresh, partial sources, bounds, exact exports
-and stale request/download ownership. Native browser layout, download dialogs,
+and saved-question grouping with stale request/view/download ownership.
+Native browser layout, download dialogs,
 Windows behavior and live model interaction are not verified by these tests.
 
 ### Read-only interview history

@@ -142,7 +142,11 @@ stored prompts and replies, including separate Twitter and Reddit answers.
 Filter by platform or exact agent ID, browse the accepted records, refresh after
 new replies, and download the complete accepted observation as JSON. Missing,
 damaged and limited sources stay visibly distinct from a successfully empty
-result. This reads the current platform databases without starting a simulation
+result. **Review by saved question** groups the exact complete stored prompts
+across both platforms, with all observed answers and per-platform record counts.
+Repeated answers remain separate; **All records** also includes incomplete
+prompts. These groups do not establish survey batches or participant completeness.
+This reads the current platform databases without starting a simulation
 or asking a model; it is not an archive of previous runs. See the
 [saved interviews guide](docs/LOCAL_MODE.md#reopen-saved-interviews).
 

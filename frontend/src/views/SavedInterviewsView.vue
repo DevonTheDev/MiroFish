@@ -18,12 +18,27 @@
       <section v-if="accepted" data-testid="interviews-results" :aria-label="t('savedInterviews.resultsTitle')">
         <div class="summary-heading"><h2>{{ t('savedInterviews.resultsTitle') }}</h2><span class="availability" :class="result.availability" data-testid="interviews-availability">{{ t(`comparison.availability.${result.availability}`) }}</span></div>
         <p class="note">{{ t('savedActivity.observedAt', { time: result.observed_at }) }}</p><p class="note">{{ t('savedInterviews.limitsNote', { count: result.limits.rows_per_platform, total: result.limits.rows_total }) }}</p>
+        <div class="actions" role="group" :aria-label="t('savedInterviews.reviewMode')">
+          <button type="button" data-testid="interviews-records-mode" :aria-pressed="presentation.mode === 'records'" :onClick="modeHandler(result, presentation, 'records')">{{ t('savedInterviews.recordsMode') }}</button>
+          <button type="button" data-testid="interviews-questions-mode" :aria-pressed="presentation.mode === 'questions'" :onClick="modeHandler(result, presentation, 'questions')">{{ t('savedInterviews.questionsMode') }}</button>
+        </div>
+        <section v-if="presentation.mode === 'questions'" class="panel question-review" :aria-label="t('savedInterviews.questionsMode')">
+          <label for="interviews-question-select">{{ t('savedInterviews.selectQuestion') }}</label>
+          <select id="interviews-question-select" data-testid="interviews-question-select" :value="presentation.key" :disabled="!questionIndex.groups.length" :onChange="questionHandler(result, presentation)">
+            <option v-for="(group, index) in questionIndex.groups" :key="group.key" :value="group.key">{{ t('savedInterviews.questionOption', { number: index + 1, prompt: questionPreview(group.prompt), twitter: group.counts.twitter, reddit: group.counts.reddit }) }}</option>
+          </select>
+          <p class="note">{{ t('savedInterviews.questionNote') }}</p>
+          <p v-if="questionIndex.ungroupedRecords.length" data-testid="interviews-question-ungrouped" class="notice">{{ t('savedInterviews.ungrouped', { count: questionIndex.ungroupedRecords.length }) }}</p>
+          <template v-if="selectedQuestion"><h3>{{ t('savedInterviews.fullQuestion') }}</h3><pre data-testid="interviews-question-prompt">{{ selectedQuestion.prompt }}</pre><p v-if="selectedQuestion.prompt === ''" class="note">{{ t('savedInterviews.emptyQuestion') }}</p></template>
+          <p v-else>{{ t('savedInterviews.noQuestions') }}</p>
+        </section>
         <section v-for="platform in platforms" :key="platform" class="source-section" :data-testid="`interviews-source-${platform}`" :aria-label="t(`comparison.platforms.${platform}`)">
           <div class="panel source-summary"><h2>{{ t(`comparison.platforms.${platform}`) }}</h2><p>{{ t(`savedInterviews.statuses.${result.sources[platform].status}`) }} · {{ t(`savedInterviews.coverage.${result.sources[platform].coverage}`) }}</p><p>{{ t('savedInterviews.returned', { count: result.sources[platform].returned_count }) }}</p>
             <p v-if="result.sources[platform].has_more === true" class="notice">{{ t('savedInterviews.moreAvailable') }}</p><p v-else-if="result.sources[platform].has_more === null && result.sources[platform].status !== 'not_requested'" class="note">{{ t('savedInterviews.unknownMore') }}</p>
             <p v-if="result.sources[platform].status === 'available' && result.sources[platform].returned_count === 0 && result.sources[platform].has_more === false">{{ t('savedInterviews.empty') }}</p>
             <ul v-if="result.sources[platform].warnings.length" class="warnings"><li v-for="warning in result.sources[platform].warnings" :key="warning">{{ t(`savedInterviews.warnings.${warning}`) }}</li></ul>
           </div>
+          <p v-if="presentation.mode === 'questions' && selectedQuestion" :data-testid="`interviews-question-counts-${platform}`" class="note">{{ t('savedInterviews.questionCount', { count: selectedQuestion.counts[platform] }) }}</p>
           <article v-for="row in pageRows.filter(row => row.platform === platform)" :key="row.record_id" class="panel interview" :data-testid="`interview-row-${row.record_id}`">
             <h3>{{ row.agent_id === null ? t('savedInterviews.unknownAgent') : t('savedInterviews.agent', { id: row.agent_id }) }}</h3><p class="note record-id">{{ t('savedInterviews.row', { id: row.row_id }) }} · {{ row.timestamp === null ? t('savedInterviews.missingTimestamp') : row.timestamp === '' ? t('savedInterviews.emptyText') : row.timestamp }}</p>
             <template v-if="row.payload_kind === 'structured'"><h4>{{ t('savedInterviews.prompt') }}</h4><pre v-if="row.prompt !== null && row.prompt !== ''">{{ row.prompt }}</pre><p v-else class="note">{{ t(row.prompt === null ? 'savedInterviews.missingText' : 'savedInterviews.emptyText') }}</p><h4>{{ t('savedInterviews.response') }}</h4><pre v-if="row.response !== null && row.response !== ''">{{ row.response }}</pre><p v-else class="note">{{ t(row.response === null ? 'savedInterviews.missingText' : 'savedInterviews.emptyText') }}</p></template>
@@ -32,7 +47,7 @@
           </article>
         </section>
       </section>
-      <nav class="actions pagination" :aria-label="t('savedInterviews.pagination')"><button type="button" data-testid="interviews-first" :disabled="!canPrevious" @click="goPage(0)">{{ t('savedActivity.first') }}</button><button type="button" data-testid="interviews-previous" :disabled="!canPrevious" @click="goPage(pageIndex - 1)">{{ t('savedActivity.previous') }}</button><button type="button" data-testid="interviews-next" :disabled="!canNext" @click="goPage(pageIndex + 1)">{{ t('savedActivity.next') }}</button><p v-if="accepted" class="note">{{ t('savedInterviews.pagePosition', { page: pageIndex + 1, pages: Math.max(1, Math.ceil(result.records.length / pageSize)) }) }}</p></nav>
+      <nav class="actions pagination" :aria-label="t('savedInterviews.pagination')"><button type="button" data-testid="interviews-first" :disabled="!canPrevious" :onClick="pageHandler(result, presentation, 0)">{{ t('savedActivity.first') }}</button><button type="button" data-testid="interviews-previous" :disabled="!canPrevious" :onClick="pageHandler(result, presentation, pageIndex - 1)">{{ t('savedActivity.previous') }}</button><button type="button" data-testid="interviews-next" :disabled="!canNext" :onClick="pageHandler(result, presentation, pageIndex + 1)">{{ t('savedActivity.next') }}</button><p v-if="accepted" class="note">{{ t('savedInterviews.pagePosition', { page: pageIndex + 1, pages: pageCount }) }}</p></nav>
     </main>
   </div>
 </template>
@@ -43,6 +58,7 @@ import { useRoute, useRouter, RouterLink } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import LanguageSwitcher from '../components/LanguageSwitcher.vue'
 import { getSavedInterviews } from '../api/savedInterviews'
+import { buildSavedInterviewQuestions } from '../utils/savedInterviewQuestions'
 
 const { t } = useI18n(), route = useRoute(), router = useRouter()
 const platforms = ['twitter', 'reddit'], filterKeys = ['platform', 'agent_id'], pageSize = 25
@@ -50,7 +66,8 @@ const limits = { rows_per_platform: 100, rows_total: 200, database_bytes: 167772
 const sourceWarnings = ['source_missing', 'source_unreadable', 'database_too_large', 'wal_too_large', 'query_limited', 'row_limit', 'response_limit', 'record_warnings']
 const recordWarnings = ['invalid_agent_id', 'missing_timestamp', 'invalid_timestamp', 'timestamp_truncated', 'missing_payload', 'invalid_payload_type', 'invalid_utf8', 'invalid_json', 'invalid_payload_shape', 'invalid_payload_fields', 'missing_prompt', 'missing_response', 'payload_truncated']
 const errorCodes = ['invalid_selection', 'invalid_filters', 'unsafe_path', 'interviews_unavailable', 'response_too_large']
-const result = shallowRef(null), loading = ref(false), error = ref(''), dirty = ref(false), pageIndex = ref(0)
+const result = shallowRef(null), loading = ref(false), error = ref(''), dirty = ref(false)
+const presentation = shallowRef({ mode: 'records', key: null, page: 0 })
 const draft = ref({ platform: '', agent_id: '' })
 const simulationId = computed(() => typeof route.params.simulationId === 'string' ? route.params.simulationId : '')
 let disposed = false, activeRequest = null, pendingNavigation = null, activeDownload = null, downloadGeneration = 0
@@ -84,7 +101,8 @@ function revokeDownload() { downloadGeneration++; disposeDownload(activeDownload
 function retire() {
   if (pendingNavigation) pendingNavigation.retired = true
   activeRequest?.controller.abort(); activeRequest = null
-  revokeDownload(); result.value = null; loading.value = false; error.value = ''; pageIndex.value = 0
+  revokeDownload(); result.value = null; loading.value = false; error.value = ''
+  presentation.value = { mode: 'records', key: null, page: 0 }
 }
 function owns(request) { return !disposed && activeRequest === request && !request.controller.signal.aborted && !dirty.value && route.fullPath === request.path }
 const accepted = computed(() => !!result.value && !loading.value && !dirty.value && !!activeRequest && owns(activeRequest))
@@ -188,10 +206,47 @@ function refresh() {
   try { return navigateSelected(selection()) }
   catch (cause) { retire(); error.value = cause.selectionCode ?? 'invalid_selection' }
 }
-const pageRows = computed(() => result.value?.records.slice(pageIndex.value * pageSize, (pageIndex.value + 1) * pageSize) ?? [])
+const questionIndex = computed(() => accepted.value ? buildSavedInterviewQuestions(result.value) : { groups: [], ungroupedRecords: [] })
+const selectedQuestion = computed(() => questionIndex.value.groups.find(group => group.key === presentation.value.key) ?? null)
+const visibleRows = computed(() => !accepted.value ? [] : presentation.value.mode === 'questions' ? selectedQuestion.value?.records ?? [] : result.value.records)
+const pageIndex = computed(() => presentation.value.page)
+const pageCount = computed(() => Math.max(1, Math.ceil(visibleRows.value.length / pageSize)))
+const pageRows = computed(() => visibleRows.value.slice(pageIndex.value * pageSize, (pageIndex.value + 1) * pageSize))
 const canPrevious = computed(() => accepted.value && pageIndex.value > 0)
-const canNext = computed(() => accepted.value && (pageIndex.value + 1) * pageSize < result.value.records.length)
-function goPage(index) { if (accepted.value && Number.isInteger(index) && index >= 0 && index < Math.max(1, Math.ceil(result.value.records.length / pageSize))) pageIndex.value = index }
+const canNext = computed(() => accepted.value && pageIndex.value + 1 < pageCount.value)
+function questionPreview(prompt) {
+  if (prompt === '') return t('savedInterviews.emptyQuestion')
+  const characters = [...prompt]
+  return characters.slice(0, 80).join('') + (characters.length > 80 ? '…' : '')
+}
+// A rendered handler owns the precise observation, request and presentation.
+// Replacing the view even on local page/group changes retires retained handlers;
+// an old group key must never address a newer observation's same-index group.
+function viewOwner(saved, view) {
+  const request = activeRequest
+  return () => !!saved && result.value === saved && accepted.value && activeRequest === request && owns(request) && presentation.value === view
+}
+function modeHandler(saved, view, mode) {
+  const current = viewOwner(saved, view)
+  return () => {
+    if (!current() || !['records', 'questions'].includes(mode)) return
+    presentation.value = { mode, key: mode === 'questions' ? questionIndex.value.groups[0]?.key ?? null : null, page: 0 }
+  }
+}
+function questionHandler(saved, view) {
+  const current = viewOwner(saved, view)
+  return event => {
+    if (!current() || view.mode !== 'questions') return
+    const key = event.target.value
+    if (questionIndex.value.groups.some(group => group.key === key)) presentation.value = { mode: 'questions', key, page: 0 }
+  }
+}
+function pageHandler(saved, view, index) {
+  const current = viewOwner(saved, view)
+  return () => {
+    if (current() && Number.isInteger(index) && index >= 0 && index < pageCount.value) presentation.value = { ...view, page: index }
+  }
+}
 function downloadHandler(saved) {
   const request = activeRequest
   const ownsSaved = () => !!saved && result.value === saved && accepted.value && activeRequest === request && owns(request)
@@ -239,6 +294,6 @@ onBeforeUnmount(() => { disposed = true; retire(); pendingNavigation = null })
 main { max-width: 1060px; margin: 0 auto; padding: 36px 24px 60px; }.page-heading { max-width: 900px; margin-bottom: 26px; }.eyebrow { text-transform: uppercase; letter-spacing: 2px; font-size: 12px; color: #68707c; }h1 { font-size: clamp(26px, 4vw, 36px); margin: 12px 0; }h2 { font-size: 19px; margin: 0; }h3 { font-size: 17px; margin: 0; overflow-wrap: anywhere; }h4 { font-size: 14px; margin-bottom: 10px; }p { line-height: 1.6; }.simulation-id, .record-id { font-family: monospace; overflow-wrap: anywhere; }
 .panel { background: #fff; border: 1px solid #e1e5eb; border-radius: 12px; padding: 22px; }.filter-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }label { display: block; font-size: 13px; font-weight: 600; margin-bottom: 8px; }input, select { box-sizing: border-box; width: 100%; min-height: 44px; border: 1px solid #c8cfd9; border-radius: 6px; padding: 10px; font: inherit; background: #fff; color: #202329; }
 .actions { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 18px; }button { cursor: pointer; border: 1px solid #c8cfd9; background: #fff; color: #28323f; border-radius: 7px; padding: 10px 16px; font: inherit; font-size: 14px; min-height: 44px; }button.primary { background: #222b38; color: #fff; }button:disabled { opacity: .45; cursor: not-allowed; }button:hover:enabled { background: #edf1f6; }button.primary:hover:enabled { background: #3b495e; }button:focus-visible, input:focus-visible, select:focus-visible, a:focus-visible { outline: 3px solid #5b8bc9; outline-offset: 3px; }
-.note { color: #68707c; font-size: 13px; }.notice { background: #edf1f6; border-radius: 8px; padding: 14px 16px; }.notice.error { background: #fff0ed; color: #9a3527; }.summary-heading { display: flex; justify-content: space-between; align-items: center; gap: 12px; margin-top: 28px; }.availability { border-radius: 20px; padding: 5px 10px; background: #eff2f5; font-size: 12px; }.availability.partial, .warnings { background: #fff3d9; color: #805518; }.source-section { margin-top: 24px; }.source-summary { border-left: 4px solid #b6c5d8; }.interview { margin-top: 14px; }.warnings { padding: 14px 14px 14px 32px; font-size: 13px; border-radius: 7px; line-height: 1.7; }pre { white-space: pre-wrap; overflow-wrap: anywhere; font: 13px/1.65 monospace; max-height: 420px; overflow-y: auto; }.pagination { margin-top: 24px; }
+.note { color: #68707c; font-size: 13px; }.notice { background: #edf1f6; border-radius: 8px; padding: 14px 16px; }.notice.error { background: #fff0ed; color: #9a3527; }.summary-heading { display: flex; justify-content: space-between; align-items: center; gap: 12px; margin-top: 28px; }.availability { border-radius: 20px; padding: 5px 10px; background: #eff2f5; font-size: 12px; }.availability.partial, .warnings { background: #fff3d9; color: #805518; }.source-section { margin-top: 24px; }.source-summary { border-left: 4px solid #b6c5d8; }.interview { margin-top: 14px; }.warnings { padding: 14px 14px 14px 32px; font-size: 13px; border-radius: 7px; line-height: 1.7; }pre { white-space: pre-wrap; overflow-wrap: anywhere; font: 13px/1.65 monospace; max-height: 420px; overflow-y: auto; }.pagination { margin-top: 24px; }.question-review { margin-top: 18px; }button[aria-pressed="true"] { background: #e0e9f5; border-color: #5b7a9f; }
 @media (max-width: 540px) { .app-header { padding: 14px 18px; flex-wrap: wrap; }.header-actions { gap: 14px; }main { padding: 24px 14px; }.filter-grid { grid-template-columns: 1fr; }.panel { padding: 16px; }.summary-heading { align-items: flex-start; flex-direction: column; } }
 </style>

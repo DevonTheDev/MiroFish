@@ -61,7 +61,7 @@ def inventory(root):
     }
 
 
-def run_workflow(storage, monkeypatch, mode, before_request=None):
+def run_workflow(storage, monkeypatch, mode, before_request=None, *, helper="saved-interviews-backend-check.mjs"):
     repo = Path(__file__).resolve().parents[2]
     node = shutil.which("node")
     if node is None or not (repo / "frontend/node_modules/vue/package.json").is_file():
@@ -125,7 +125,7 @@ def run_workflow(storage, monkeypatch, mode, before_request=None):
     thread.start()
     try:
         run = subprocess.run([
-            node, str(repo / "frontend/tests/helpers/saved-interviews-backend-check.mjs"),
+            node, str(repo / "frontend/tests/helpers" / helper),
             f"http://127.0.0.1:{server.server_port}", mode,
         ], cwd=repo / "frontend", capture_output=True, text=True, timeout=45,
             env={**os.environ, "NPM_CONFIG_OFFLINE": "true", "NPM_CONFIG_UPDATE_NOTIFIER": "false"})
@@ -233,4 +233,58 @@ def test_saved_interviews_response_budget_keeps_both_sources_and_exports_coverag
     for path in (storage.twitter, storage.reddit):
         trace_database(path, [(0, "interview", b"\x80" * 16384, f"saved-{i}") for i in range(40)])
     observed = run_workflow(storage, monkeypatch, "budget")
+    assert len(observed) == 1
+
+
+def test_saved_questions_exact_prompt_preserves_physical_records_and_full_download(storage, monkeypatch):
+    prompt = '<script>Question & literal</script>\nCafé 雪 🐟'
+    rows = [
+        interview(9007199254740993, prompt=prompt, response="Repeated Twitter reply", timestamp=f"repeat-{i}")
+        for i in range(30)
+    ]
+    rows.extend([
+        (9007199254740993, "interview", json.dumps({"prompt": prompt}), "missing-response"),
+        interview(9007199254740993, prompt=prompt, response="", timestamp="empty-response"),
+        interview(2**63 - 1, prompt=prompt, response="Timestamp-only truncation reply", timestamp="T" * 300),
+        interview(0, prompt=prompt.lower(), response="case difference"),
+        interview(0, prompt=prompt + " ", response="space difference"),
+        interview(0, prompt="Interview instruction: " + prompt, response="prefix difference"),
+        interview(0, prompt=prompt.replace("é", "e\u0301"), response="Unicode difference"),
+        interview(0, prompt="", response="empty prompt Twitter reply"),
+        (0, "interview", json.dumps({"response": "Prompt absent"}), "missing-prompt"),
+        (0, "interview", '<img src=x onerror=alert(1)>{broken', "raw-literal"),
+        interview(0, prompt=prompt, response="X" * 20000, timestamp="incomplete-payload"),
+        (0, "interview", None, "missing-payload"),
+    ])
+    trace_database(storage.twitter, rows)
+    trace_database(storage.reddit, [
+        interview(9007199254740993, prompt=prompt, response="Repeated Reddit reply", timestamp="reddit-first"),
+        interview(9007199254740993, prompt=prompt, response="Repeated Reddit reply", timestamp="reddit-second"),
+        (9007199254740993, "interview", json.dumps({"prompt": prompt}), "reddit-missing-response"),
+        interview(0, prompt="", response="empty prompt Reddit reply"),
+        interview(2**63 - 1, prompt="Reddit-only question beyond first page", response="Later platform reply"),
+    ])
+    connection = sqlite3.connect(storage.twitter)
+    try:
+        connection.execute("UPDATE trace SET rowid = ? WHERE rowid = 1", (-2**63,))
+        connection.execute("UPDATE trace SET rowid = ? WHERE rowid = 2", (2**63 - 1,))
+        connection.commit()
+    finally:
+        connection.close()
+    observed = run_workflow(storage, monkeypatch, "questions", helper="saved-question-backend-check.mjs")
+    assert len(observed) == 1
+
+
+@pytest.mark.parametrize("unhealthy", ["missing", "unreadable"])
+def test_saved_questions_keep_limited_source_context_without_inferring_completeness(storage, monkeypatch, unhealthy):
+    trace_database(storage.twitter, [
+        interview(0, prompt="Outside the bounded observation", response="older", timestamp=f"old-{i}")
+        for i in range(10)
+    ] + [
+        interview(9007199254740993, prompt="Limited repeated question", response=f"Observed reply {i}", timestamp=f"saved-{i}")
+        for i in range(100)
+    ])
+    if unhealthy == "unreadable":
+        storage.reddit.write_bytes(b"PRIVATE_CORRUPT_DATABASE_CONTENT")
+    observed = run_workflow(storage, monkeypatch, "questions-" + unhealthy, helper="saved-question-backend-check.mjs")
     assert len(observed) == 1

@@ -2020,6 +2020,17 @@
     }
   },
   "savedInterviews": {
+    "reviewMode": "查看已保存访谈",
+    "recordsMode": "全部记录",
+    "questionsMode": "按已保存问题查看",
+    "selectQuestion": "完全一致的已保存提示词",
+    "questionOption": "{number}. {prompt} · Twitter：{twitter}，Reddit：{reddit}",
+    "questionNote": "按完整已保存提示词精确分组，包括上下文和空白字符。计数表示已观测记录，包括缺失回复和重复回答，不代表受访者人数或问卷批次。来源缺失、受限或异常时，未观测到记录不代表不存在回答。",
+    "ungrouped": "{count} 条未分组记录的提示词缺失、为原始预览或不完整。选择“全部记录”查看。",
+    "fullQuestion": "完整已保存提示词",
+    "emptyQuestion": "已保存的空提示词",
+    "noQuestions": "本次观测没有完整已保存提示词。选择“全部记录”查看已保存内容和警告。",
+    "questionCount": "所选问题：此来源中已观测到 {count} 条记录",
     "title": "已保存访谈",
     "historyEntry": "已保存访谈",
     "scope": "查看当前平台数据库中的访谈。重新启动可能替换这些文件；这里不是历次运行的归档。",
