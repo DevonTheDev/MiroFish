@@ -54,6 +54,14 @@
           <template v-if="selectedQuestion"><h3>{{ t('savedInterviews.fullQuestion') }}</h3><pre data-testid="interviews-question-prompt">{{ selectedQuestion.prompt }}</pre><p v-if="selectedQuestion.prompt === ''" class="note">{{ t('savedInterviews.emptyQuestion') }}</p></template>
           <p v-else>{{ t('savedInterviews.noQuestions') }}</p>
         </section>
+        <section class="panel question-review" :aria-label="t('savedInterviews.search')">
+          <label for="interviews-search">{{ t('savedInterviews.search') }}</label>
+          <input id="interviews-search" data-testid="interviews-search" type="search" :value="presentation.query" aria-describedby="interviews-search-note interviews-search-count" :onInput="searchHandler(result, presentation)">
+          <p id="interviews-search-note" data-testid="interviews-search-note" class="note">{{ t('savedInterviews.searchNote') }}</p>
+          <div class="actions"><button type="button" data-testid="interviews-search-clear" :disabled="presentation.query === ''" :onClick="clearSearchHandler(result, presentation)">{{ t('savedInterviews.clearSearch') }}</button></div>
+          <p id="interviews-search-count" data-testid="interviews-search-count" role="status" aria-live="polite" aria-atomic="true">{{ t('savedInterviews.searchCount', { count: matchingRows.length, total: visibleRows.length }) }}</p>
+          <p v-if="presentation.query !== '' && !matchingRows.length" data-testid="interviews-search-empty" class="notice">{{ t('savedInterviews.searchEmpty') }}</p>
+        </section>
         <section v-for="platform in platforms" :key="platform" class="source-section" :data-testid="`interviews-source-${platform}`" :aria-label="t(`comparison.platforms.${platform}`)">
           <div class="panel source-summary"><h2>{{ t(`comparison.platforms.${platform}`) }}</h2><p>{{ t(`${fileMode ? 'savedInterviewFiles' : 'savedInterviews'}.statuses.${result.sources[platform].status}`) }} · {{ t(`${fileMode ? 'savedInterviewFiles' : 'savedInterviews'}.coverage.${result.sources[platform].coverage}`) }}</p><p>{{ t(fileMode ? 'savedInterviewFiles.returned' : 'savedInterviews.returned', { count: result.sources[platform].returned_count }) }}</p>
             <p v-if="result.sources[platform].has_more === true" class="notice">{{ t(fileMode ? 'savedInterviewFiles.moreAvailable' : 'savedInterviews.moreAvailable') }}</p><p v-else-if="result.sources[platform].has_more === null && result.sources[platform].status !== 'not_requested'" class="note">{{ t(fileMode ? 'savedInterviewFiles.unknownMore' : 'savedInterviews.unknownMore') }}</p>
@@ -81,6 +89,7 @@ import { useI18n } from 'vue-i18n'
 import LanguageSwitcher from '../components/LanguageSwitcher.vue'
 import { getSavedInterviews } from '../api/savedInterviews'
 import { buildSavedInterviewQuestions } from '../utils/savedInterviewQuestions'
+import { filterSavedInterviewRecords } from '../utils/savedInterviewSearch.js'
 import { validSavedInterviewObservation as validResponse, validSavedInterviewDecimal as validDecimal, savedInterviewExactKeys as exactKeys } from '../utils/savedInterviewObservation.js'
 import { SAVED_INTERVIEW_FILE_MAX_BYTES, readSavedInterviewFile } from '../utils/savedInterviewFiles.js'
 
@@ -88,7 +97,8 @@ const { t } = useI18n(), route = useRoute(), router = useRouter()
 const platforms = ['twitter', 'reddit'], filterKeys = ['platform', 'agent_id'], pageSize = 25
 const errorCodes = ['invalid_selection', 'invalid_filters', 'unsafe_path', 'interviews_unavailable', 'response_too_large']
 const result = shallowRef(null), loading = ref(false), error = ref(''), dirty = ref(false)
-const presentation = shallowRef({ mode: 'records', key: null, page: 0 })
+const emptyPresentation = () => ({ mode: 'records', key: null, page: 0, query: '' })
+const presentation = shallowRef(emptyPresentation())
 const draft = ref({ platform: '', agent_id: '' })
 const fileMode = computed(() => route.name === 'SavedInterviewFiles')
 const revision = shallowRef({}), acceptedFile = shallowRef(null)
@@ -129,7 +139,7 @@ function retire() {
   if (pendingNavigation) pendingNavigation.retired = true
   activeRequest?.controller.abort(); activeRequest = null
   result.value = null; loading.value = false; error.value = ''
-  presentation.value = { mode: 'records', key: null, page: 0 }
+  presentation.value = emptyPresentation()
   return retired
 }
 function owns(request) { return !!request && !disposed && !fileMode.value && request.revision === revision.value && activeRequest === request && !request.controller.signal.aborted && !dirty.value && route.fullPath === request.path }
@@ -229,13 +239,13 @@ const fileHandlers = computed(() => {
       if (!ownsFile(owned) || !pending.preview || fileState.value !== pending) return
       if (!updateFile(owned, emptyPending())) return
       acceptedFile.value = { filename: pending.filename, data: pending.preview }; result.value = pending.preview
-      presentation.value = { mode: 'records', key: null, page: 0 }
+      presentation.value = emptyPresentation()
     },
     clear: () => {
       if (!ownsFile(owned)) return
       if (!updateFile(owned, emptyPending())) return
       acceptedFile.value = null; result.value = null
-      presentation.value = { mode: 'records', key: null, page: 0 }
+      presentation.value = emptyPresentation()
     },
   }
 })
@@ -245,9 +255,10 @@ function recordedFilters(data) {
 const questionIndex = computed(() => accepted.value ? buildSavedInterviewQuestions(result.value) : { groups: [], ungroupedRecords: [] })
 const selectedQuestion = computed(() => questionIndex.value.groups.find(group => group.key === presentation.value.key) ?? null)
 const visibleRows = computed(() => !accepted.value ? [] : presentation.value.mode === 'questions' ? selectedQuestion.value?.records ?? [] : result.value.records)
+const matchingRows = computed(() => filterSavedInterviewRecords(visibleRows.value, presentation.value.query))
 const pageIndex = computed(() => presentation.value.page)
-const pageCount = computed(() => Math.max(1, Math.ceil(visibleRows.value.length / pageSize)))
-const pageRows = computed(() => visibleRows.value.slice(pageIndex.value * pageSize, (pageIndex.value + 1) * pageSize))
+const pageCount = computed(() => Math.max(1, Math.ceil(matchingRows.value.length / pageSize)))
+const pageRows = computed(() => matchingRows.value.slice(pageIndex.value * pageSize, (pageIndex.value + 1) * pageSize))
 const canPrevious = computed(() => accepted.value && pageIndex.value > 0)
 const canNext = computed(() => accepted.value && pageIndex.value + 1 < pageCount.value)
 function questionPreview(prompt) {
@@ -270,7 +281,7 @@ function modeHandler(saved, view, mode) {
   const current = viewOwner(saved, view)
   return () => {
     if (!current() || !['records', 'questions'].includes(mode)) return
-    presentation.value = { mode, key: mode === 'questions' ? questionIndex.value.groups[0]?.key ?? null : null, page: 0 }
+    presentation.value = { ...view, mode, key: mode === 'questions' ? questionIndex.value.groups[0]?.key ?? null : null, page: 0 }
   }
 }
 function questionHandler(saved, view) {
@@ -278,7 +289,23 @@ function questionHandler(saved, view) {
   return event => {
     if (!current() || view.mode !== 'questions') return
     const key = event.target.value
-    if (questionIndex.value.groups.some(group => group.key === key)) presentation.value = { mode: 'questions', key, page: 0 }
+    if (!current()) return
+    if (questionIndex.value.groups.some(group => group.key === key)) presentation.value = { ...view, mode: 'questions', key, page: 0 }
+  }
+}
+function searchHandler(saved, view) {
+  const current = viewOwner(saved, view)
+  return event => {
+    if (!current()) return
+    const query = event.target.value
+    if (typeof query !== 'string' || !current()) return
+    presentation.value = { ...view, query, page: 0 }
+  }
+}
+function clearSearchHandler(saved, view) {
+  const current = viewOwner(saved, view)
+  return () => {
+    if (current()) presentation.value = { ...view, query: '', page: 0 }
   }
 }
 function pageHandler(saved, view, index) {

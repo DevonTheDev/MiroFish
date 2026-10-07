@@ -7,6 +7,7 @@ import * as Vue from 'vue'
 import * as Router from 'vue-router'
 import { createI18n, useI18n } from 'vue-i18n'
 import * as savedInterviewQuestions from '../../src/utils/savedInterviewQuestions.js'
+import * as savedInterviewSearch from '../../src/utils/savedInterviewSearch.js'
 import * as savedInterviewObservation from '../../src/utils/savedInterviewObservation.js'
 import * as savedInterviewFiles from '../../src/utils/savedInterviewFiles.js'
 
@@ -89,6 +90,7 @@ export async function mountSavedInterviews({ api, initialPath = '/simulation/sim
     'vue-router': { ...Router, createWebHistory: Router.createMemoryHistory },
     'vue-i18n': { useI18n },
     '../utils/savedInterviewQuestions': savedInterviewQuestions,
+    '../utils/savedInterviewSearch.js': savedInterviewSearch,
     '../utils/savedInterviewObservation.js': savedInterviewObservation,
     '../utils/savedInterviewFiles.js': savedInterviewFiles,
   }

@@ -150,10 +150,17 @@ This reads the current platform databases without starting a simulation
 or asking a model; it is not an archive of previous runs. See the
 [saved interviews guide](docs/LOCAL_MODE.md#reopen-saved-interviews).
 
+Use **Find saved text** to search accepted prompts, replies and raw previews
+across all local pages of the current records or selected-question view. Matching
+is literal and case-insensitive. Source coverage and warnings stay visible;
+missing or truncated text may hide a match. Search is local, and downloads still
+contain the complete accepted observation.
+
 Choose **Open interview file** to reopen an earlier observation JSON in the
 browser. Review the file's saved context before opening its records and exact
 questions, including when the original databases are unavailable. File content
-is historical and is not checked against the current backend. See
+is historical and is not checked against the current backend. The same local
+text search works on an opened file. See
 [opening interview files](docs/LOCAL_MODE.md#open-interview-files).
 
 ## Compare saved simulations

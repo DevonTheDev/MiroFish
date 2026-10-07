@@ -2017,10 +2017,23 @@ or unhealthy source cannot establish that no answer exists.
 
 Both views show 25 records at a time. Mode, question and page changes are local
 to the accepted observation and do not fetch more records or change storage.
+Use **Find saved text** to find a phrase in saved prompts, replies or raw previews
+within the current view, including records on later pages. Matching ignores case
+and treats punctuation and spaces literally; it does not interpret a regular
+expression, join separate fields or normalize Unicode. Each matching record
+keeps its original text, order and warnings. **Clear search** restores all records
+in the current view.
+
+The matching count is separate from the original source and question counts.
+It covers only accepted text and previews: a missing or truncated field may hide
+a match, and searching does not retrieve additional rows. Changing the text starts
+at the first matching page; switching view or question keeps it. New observations,
+refreshes and route changes clear it. No query is stored or sent to the backend.
+
 Filter edits, refresh, route changes and replacement observations reset the view
 to **All records**. **Download observation JSON**
 exports every accepted record and its source/limit metadata, including records
-outside the selected question and on other local pages, without reading storage
+outside the selected question, local text search and visible page, without reading storage
 again. Editing a filter, changing
 the selected simulation or refreshing retires the previous result and download.
 A download failure preserves the accepted observation for another attempt; check
@@ -2074,8 +2087,11 @@ discards the in-memory observation; keep the downloaded file to reopen it.
 Use **All records** or **Review by saved question** as in the saved-interview
 reader. Exact complete prompts retain their original case, whitespace and
 context; missing or truncated prompts remain in All records. Paging and question
-selection do not fetch further records. Download exports the entire accepted
-observation, including rows outside the visible page or selected question.
+selection do not fetch further records. **Find saved text** also searches the
+opened observation locally. A pending, failed or cancelled file preview keeps
+the prior accepted file and its search; opening a new file or clearing the
+accepted file resets the search. Download exports the entire accepted
+observation, including rows outside the visible page, selected question or search.
 The parsed content is preserved; JSON whitespace can change on download.
 
 Only the existing bare version-1 observation format is accepted. The input is
