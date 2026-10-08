@@ -184,6 +184,14 @@ is historical and is not checked against the current backend. The same local
 text search works on an opened file. See
 [opening interview files](docs/LOCAL_MODE.md#open-interview-files).
 
+Choose **Compare interview files** to keep two saved observations open together.
+Questions align only when their complete stored prompt text is identical. Inspect
+each side's replies, local search and pages independently, with its recorded
+filters, source coverage and observation time visible. Matching prompts do not
+establish matching people or survey batches; a question missing from one file
+may have been outside that observation's captured records. Full downloads retain
+all original records. See [comparing interview files](docs/LOCAL_MODE.md#compare-interview-files).
+
 ## Compare saved simulations
 
 Open **Compare simulations** in the home history section, or choose a saved

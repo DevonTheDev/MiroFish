@@ -3,6 +3,7 @@
     <header class="app-header"><RouterLink class="brand" to="/">MIROFISH</RouterLink><div class="header-actions"><RouterLink to="/">{{ t('comparison.backHome') }}</RouterLink><LanguageSwitcher /></div></header>
     <main>
       <header class="page-heading"><p class="eyebrow">{{ t('comparison.eyebrow') }}</p><h1>{{ t(fileMode ? 'savedInterviewFiles.title' : 'savedInterviews.title') }}</h1><p v-if="!fileMode" class="simulation-id">{{ simulationId }}</p><p>{{ t(fileMode ? 'savedInterviewFiles.scope' : 'savedInterviews.scope') }}</p><p v-if="fileMode" class="note">{{ t('savedInterviewFiles.sessionNote') }}</p><RouterLink v-else to="/interview-files" data-testid="interviews-files-link">{{ t('savedInterviewFiles.entry') }}</RouterLink><p class="note">{{ t('savedInterviews.contextNote') }}</p></header>
+      <RouterLink to="/interview-files/compare" data-testid="interviews-compare-link">{{ t('savedInterviewComparison.entry') }}</RouterLink>
       <form v-if="!fileMode" class="panel" data-testid="interviews-form" :aria-label="t('savedInterviews.filtersTitle')" :onSubmit="liveHandlers.apply">
         <div class="filter-grid">
           <div><label for="interviews-platform">{{ t('savedActivity.platform') }}</label><select id="interviews-platform" data-testid="interviews-platform" :value="draft.platform" :onChange="liveHandlers.platform"><option value="">{{ t('savedActivity.allPlatforms') }}</option><option v-for="platform in platforms" :key="platform" :value="platform">{{ t(`comparison.platforms.${platform}`) }}</option></select></div>

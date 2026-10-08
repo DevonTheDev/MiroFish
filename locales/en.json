@@ -2167,6 +2167,43 @@
       "record_warnings": "Recorded warning: some returned records have missing, invalid or truncated saved fields."
     }
   },
+  "savedInterviewComparison": {
+    "entry": "Compare interview files",
+    "title": "Compare two saved interview observations",
+    "scope": "Retain two saved observation files and review their independently recorded replies by exact complete prompt. Counts describe observed records in each admitted file.",
+    "sessionNote": "Files stay in memory for this page only. Leaving or reloading clears both files and pending reads. The frontend must already be loaded or served locally; no interview data is uploaded or persisted.",
+    "identityNote": "Exact prompts align; agent identities do not. Repeated replies remain separate records. These files cannot establish matched people, unique respondents, survey batches, model quality or causal changes.",
+    "fileHint": "Choose one existing version-1 observation JSON, at most {limit} MiB. Preview it, then accept or replace either side. At most two accepted observations and one pending preview are retained.",
+    "invalid": "This file could not be opened safely. Choose one valid saved-interview observation JSON within the size limit. Both accepted observations are retained.",
+    "left": "Left observation",
+    "right": "Right observation",
+    "acceptSide": "Accept as {side}",
+    "replaceSide": "Replace {side}",
+    "clearSide": "Clear {side}",
+    "clearBoth": "Clear both and pending file",
+    "swap": "Swap sides",
+    "emptySide": "No accepted file for {side}. Choose a file and accept its preview.",
+    "questions": "Exact complete saved prompts",
+    "questionOption": "{number}. {prompt}",
+    "questionNote": "The union lists left prompts first, then unseen right prompts, preserving case, whitespace, Unicode and prior context. Each side reports observed records separately by platform; repeated agents and missing replies still count.",
+    "noQuestions": "Neither accepted observation has a complete saved prompt to align. Ungrouped reasons and full observation downloads remain available.",
+    "replies": "Recorded replies for selected prompt",
+    "counts": "Observed records for this prompt · Twitter: {twitter}; Reddit: {reddit}",
+    "absent": "No qualifying record for this exact complete prompt in this admitted observation. This does not establish that no interview exists in the original run.",
+    "hasMore": "File reports additional records: {value}",
+    "yes": "Yes",
+    "no": "No",
+    "language": "Language",
+    "unknown": "Unknown",
+    "ungrouped": "Ungrouped records: {count}",
+    "ungroupedNote": "Missing, raw and payload-truncated prompts cannot align. The original records remain in the full side download and can be inspected in Open interview file. Timestamp-only truncation can still align.",
+    "reasons": {
+      "missing": "Complete prompt not saved",
+      "raw": "Raw payload cannot establish a complete prompt",
+      "incomplete": "Payload preview is truncated"
+    },
+    "downloadNote": "Download this same bare version-1 observation with every original record and field. Selection, search and paging do not change the file. Open it in the single-file reader to inspect all records."
+  },
   "savedActivityFiles": {
     "entry": "Open activity file",
     "eyebrow": "Browser-local saved evidence",

@@ -2211,6 +2211,57 @@ interview data. Local compiled Vue/router and SQLite-to-download round-trip test
 exercise the reader; native file dialogs, rendering and downloads remain
 unverified.
 
+### Compare interview files
+
+Choose **Compare interview files** from the saved-interview reader or open
+`/interview-files/compare`. Select an observation JSON, inspect its pending
+preview, then accept it on the left or right. Repeat for the other side. You can
+replace either accepted file, clear one or both sides, or swap the sides.
+A pending, cancelled or invalid file selection leaves accepted observations
+available. This comparison keeps two accepted files and one pending preview in
+page state; it does not create a saved comparison bundle or browser library.
+
+Choose a question to inspect its full literal prompt and each side's observed
+replies. Matching uses the exact complete stored prompt, including case,
+whitespace, Unicode representation and any saved context or prefixes. Similar
+wording and each file's local question number do not establish a match.
+Repeated answers remain separate, including answers carrying the same agent ID.
+Source and agent identifiers are scoped to their recorded observation; this view
+does not pair people across runs or calculate respondent changes.
+
+Each side retains its own filename, stored simulation ID, observation time,
+filters, source status, coverage, limits and warnings. Counts describe admitted
+records, not all interviews in a run or unique respondents. A question appearing
+on only one side means no qualifying record was observed in the other file;
+missing, filtered, limited or damaged source data cannot establish absence from
+the original database. Missing, raw and payload-truncated prompts cannot align
+and remain counted separately. Timestamp-only truncation does not by itself make
+an otherwise complete prompt unavailable.
+
+Reply pages contain 25 records per side. Local text search and paging operate
+independently; they do not fetch additional rows. Each side's download exports
+the complete original observation, including records outside the selected
+question, search or page. Use the existing single-file reader to inspect all
+records, including those that cannot join a question group. Parsed field values
+are preserved on download; JSON whitespace may change.
+
+The same strict bare version-1 admission applies to each file: at most 8 MiB and
+200 recorded rows, with consistency checks for selection, identity, order,
+counts, limits and coverage. Two admitted files produce at most 400 exact
+question groups. These bounds are not guarantees of provenance or a complete
+historical archive. Neither source files nor their recorded filters are altered.
+
+File review runs in an already loaded or locally served frontend. Comparing,
+searching, swapping and downloading do not request the backend, run a model or
+write interview data to storage. Leaving or reloading discards session state and
+retires pending callbacks. Keep the original files for later review.
+
+Local tests exercise strict parsing, exact grouping and the compiled Vue
+export-to-file-to-comparison flow with synthetic transport. This pass does not
+rerun a real Flask/SQLite export integration: those Python dependencies are
+unavailable in the current validation environment. Native file dialogs, browser
+layout/focus and download completion remain unverified.
+
 ### Read-only interview history
 
 The interview-history API and public runner reader validate the simulation ID and
