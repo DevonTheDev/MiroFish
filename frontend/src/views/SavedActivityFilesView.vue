@@ -68,13 +68,33 @@
             <button type="button" class="primary" data-testid="open-file" @click="view.open">{{ t('savedActivityFiles.open') }}</button>
           </template>
           <template v-else>
+            <section class="local-focus" aria-labelledby="focus-heading" aria-describedby="focus-scope">
+              <h3 id="focus-heading">{{ t('savedActivityFiles.focusTitle') }}</h3>
+              <p id="focus-scope" data-testid="focus-scope" class="note">{{ t('savedActivityFiles.focusScope') }}</p>
+              <div class="focus-controls">
+                <div><label for="focus-platform">{{ t('savedActivity.platform') }}</label>
+                  <select id="focus-platform" data-testid="focus-platform" :value="view.focus.platform" @change="view.focus.setPlatform">
+                    <option value="all">{{ t('savedActivity.allPlatforms') }}</option>
+                    <option v-for="platform in platforms" :key="platform" :value="platform">{{ t(`comparison.platforms.${platform}`) }}</option>
+                  </select>
+                </div>
+                <div><label for="focus-outcome">{{ t('savedActivity.outcome') }}</label>
+                  <select id="focus-outcome" data-testid="focus-outcome" :value="view.focus.outcome" @change="view.focus.setOutcome">
+                    <option value="all">{{ t('savedActivity.allOutcomes') }}</option>
+                    <option v-for="outcome in outcomes" :key="outcome" :value="outcome">{{ t(`savedActivity.outcomes.${outcome}`) }}</option>
+                  </select>
+                </div>
+                <button type="button" data-testid="focus-reset" @click="view.focus.reset">{{ t('savedActivityFiles.focusReset') }}</button>
+              </div>
+              <p data-testid="focus-count" role="status" aria-live="polite">{{ t('savedActivityFiles.focusCount', { count: view.focus.actions.length, total: entry.page.actions.length }) }}</p>
+            </section>
             <h3>{{ t('savedActivity.resultsTitle') }}</h3>
             <p class="note">{{ t('savedActivity.orderNote') }} {{ t('savedActivity.attemptNote') }} {{ t('savedActivity.outcomeNote') }}</p>
-            <div v-if="entry.page.actions.length" class="table-scroll" tabindex="0" :aria-label="t('savedActivity.resultsTitle')">
+            <div v-if="view.focus.actions.length" class="table-scroll" tabindex="0" :aria-label="t('savedActivity.resultsTitle')">
               <table data-testid="activity-file-table">
                 <caption>{{ t('savedActivityFiles.tableCaption') }}</caption>
                 <thead><tr><th v-for="field in columns" :key="field" scope="col">{{ t(`savedActivity.columns.${field}`) }}</th></tr></thead>
-                <tbody><tr v-for="action in entry.page.actions" :key="action.record_id" :data-testid="`action-row-${action.record_id}`">
+                <tbody><tr v-for="action in view.focus.actions" :key="action.record_id" :data-testid="`action-row-${action.record_id}`">
                   <td>{{ t(`comparison.platforms.${action.platform}`) }}</td><td>{{ action.round_num }}</td>
                   <td><span>{{ action.agent_id }}</span><span v-if="action.agent_name !== null" class="agent-name literal">{{ action.agent_name }}</span></td>
                   <td class="literal">{{ action.action_type }}</td><td class="literal">{{ action.timestamp ?? t('savedActivityFiles.unknown') }}</td>
@@ -83,6 +103,7 @@
                 </tr></tbody>
               </table>
             </div>
+            <p v-else-if="entry.page.actions.length" data-testid="focus-empty" class="notice">{{ t('savedActivityFiles.focusEmpty') }}</p>
             <p v-else data-testid="empty-state" class="notice">{{ t(`savedActivityFiles.${entry.page.matched_count === null ? 'unavailable' : entry.page.matched_count === 0 ? 'noMatches' : 'outOfRange'}`) }}</p>
           </template>
         </section>
@@ -97,15 +118,19 @@ import { computed, shallowRef, watch, onBeforeUnmount } from 'vue'
 import { RouterLink, useRoute } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { SAVED_ACTIVITY_FILE_MAX_BYTES, readSavedActivityFile } from '../utils/savedActivityFiles.js'
+import { focusSavedActivity } from '../utils/savedActivityReview.js'
 
 const { t, locale } = useI18n(), route = useRoute()
 const fileLimitMiB = SAVED_ACTIVITY_FILE_MAX_BYTES / (1024 * 1024)
 const platforms = ['twitter', 'reddit']
+const outcomes = ['success', 'failed', 'unknown']
 const contextFields = ['created_at', 'updated_at', 'started_at', 'completed_at', 'requested_rounds', 'last_saved_round']
 const columns = ['platform', 'round', 'agent', 'actionType', 'timestamp', 'outcome', 'details']
 const filterFields = [{ key: 'platform', label: 'platform' }, { key: 'agent_id', label: 'agentId' }, { key: 'round_num', label: 'round' }, { key: 'action_type', label: 'actionType' }, { key: 'q', label: 'phrase' }, { key: 'case_sensitive', label: 'caseSensitive' }, { key: 'outcome', label: 'outcome' }]
 const emptyPending = { loading: false, preview: null, filename: '', error: null }
 const state = shallowRef({ accepted: null, ...emptyPending })
+const allFocus = { platform: 'all', outcome: 'all' }
+const focus = shallowRef({ ...allFocus })
 let disposed = false, downloadUrl = null
 function owns(owned) { return !disposed && state.value === owned }
 function revokeDownload() { if (downloadUrl) { URL.revokeObjectURL(downloadUrl); downloadUrl = null } }
@@ -113,7 +138,14 @@ function update(owned, changes) {
   if (!owns(owned)) return null
   revokeDownload()
   state.value = { ...owned, ...changes }
+  if (Object.hasOwn(changes, 'accepted')) focus.value = { ...allFocus }
   return state.value
+}
+function changeFocus(accepted, owned, changes) {
+  if (disposed || !accepted || state.value.accepted !== accepted || focus.value !== owned) return
+  const next = { ...owned, ...changes }
+  if (!['all', ...platforms].includes(next.platform) || !['all', ...outcomes].includes(next.outcome)) return
+  focus.value = next
 }
 async function selectFile(owned, event) {
   if (!owns(owned)) return
@@ -143,14 +175,19 @@ function download(owned) {
   } catch { update(owned, { ...emptyPending, error: 'download' }) }
   finally { link?.remove() }
 }
-// Each rendered handler owns its exact immutable state revision. Old controls
-// and late reads cannot adopt, clear or export a newer page, even after unmount.
+// File handlers and reads own a file-state revision. Local controls separately
+// own the accepted page and focus revision, so filtering cannot retire a read.
 const views = computed(() => {
-  const owned = state.value
+  const owned = state.value, ownedFocus = focus.value, accepted = owned.accepted
   const evidence = []
   if (owned.preview) evidence.push({ kind: 'preview', page: owned.preview, filename: owned.filename })
   if (owned.accepted) evidence.push({ kind: 'accepted', ...owned.accepted })
-  return [{ ...owned, evidence,
+  return [{ ...owned, evidence, focus: {
+    ...ownedFocus, actions: accepted ? focusSavedActivity(accepted.page.actions, ownedFocus.platform, ownedFocus.outcome) : [],
+    setPlatform: event => changeFocus(accepted, ownedFocus, { platform: event.target.value }),
+    setOutcome: event => changeFocus(accepted, ownedFocus, { outcome: event.target.value }),
+    reset: () => changeFocus(accepted, ownedFocus, allFocus),
+  },
     select: event => selectFile(owned, event), open: () => openFile(owned),
     cancel: () => update(owned, emptyPending), clear: () => update(owned, { accepted: null, ...emptyPending }),
     download: () => download(owned),
@@ -169,7 +206,7 @@ function warningLabel(warning) {
 }
 function setLanguage(value) { if (!disposed && ['en', 'zh'].includes(value)) locale.value = value }
 watch(() => route.fullPath, () => { update(state.value, { accepted: null, ...emptyPending }) }, { flush: 'sync' })
-onBeforeUnmount(() => { disposed = true; revokeDownload(); state.value = { accepted: null, ...emptyPending } })
+onBeforeUnmount(() => { disposed = true; revokeDownload(); state.value = { accepted: null, ...emptyPending }; focus.value = { ...allFocus } })
 </script>
 
 <style scoped>
@@ -177,6 +214,7 @@ onBeforeUnmount(() => { disposed = true; revokeDownload(); state.value = { accep
 .app-header { min-height: 72px; padding: 0 36px; background: #fff; border-bottom: 1px solid #e5e7eb; display: flex; align-items: center; justify-content: space-between; gap: 20px; }.brand { font-weight: 800; letter-spacing: 2px; font-size: 22px; text-decoration: none; }.header-actions, .language-choice { display: flex; align-items: center; gap: 16px; font-size: 14px; }a { color: #394555; }
 main { max-width: 1180px; margin: auto; padding: 38px 24px 60px; }.page-heading { max-width: 880px; margin-bottom: 26px; }.eyebrow { text-transform: uppercase; letter-spacing: 2px; font-size: 12px; color: #68707c; }h1 { font-size: clamp(26px, 4vw, 36px); margin: 12px 0; }h2 { font-size: 21px; margin: 0 0 14px; }h3 { font-size: 17px; margin-top: 26px; }p { line-height: 1.6; }.page-heading > p { color: #59616d; font-size: 14px; }
 .panel { min-width: 0; background: #fff; border: 1px solid #e1e5eb; border-radius: 12px; padding: 24px; }.evidence { margin-top: 26px; }label { display: block; font-size: 13px; font-weight: 600; margin-bottom: 8px; }input, select { box-sizing: border-box; max-width: 100%; min-height: 44px; border: 1px solid #c8cfd9; border-radius: 7px; padding: 10px; font: inherit; font-size: 14px; background: #fff; color: #202329; }input { width: 100%; }.language-choice { margin: 0; }.actions { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 16px; }button { cursor: pointer; border: 1px solid #c8cfd9; background: #fff; color: #28323f; border-radius: 7px; padding: 10px 16px; font: inherit; font-size: 14px; min-height: 44px; }button.primary { background: #222b38; color: #fff; }button:disabled { opacity: .5; cursor: not-allowed; }button:hover:enabled { background: #edf1f6; }button.primary:hover:enabled { background: #3b495e; }button:focus-visible, input:focus-visible, select:focus-visible, a:focus-visible, summary:focus-visible, .table-scroll:focus-visible { outline: 3px solid #5b8bc9; outline-offset: 3px; }
+.focus-controls { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 14px; }.focus-controls > div { flex: 1 1 200px; min-width: 0; }.focus-controls select { width: 100%; }.local-focus { margin-top: 26px; padding-top: 1px; border-top: 1px solid #e1e5eb; }
 .note { color: #68707c; font-size: 12px; }.notice { background: #edf1f6; border-radius: 8px; padding: 14px 16px; font-size: 13px; }.notice.error { background: #fff0ed; color: #9a3527; }.literal, pre { white-space: pre-wrap; overflow-wrap: anywhere; }.provenance { color: #496557; font-size: 13px; font-weight: 600; }.section-heading { display: flex; align-items: center; justify-content: space-between; gap: 16px; }.metadata { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 2fr); gap: 10px; font-size: 13px; }dt { color: #68707c; }dd { margin: 0; overflow-wrap: anywhere; }.warnings { font-size: 13px; padding-left: 20px; }.warnings li { margin-bottom: 12px; }.warnings code { display: block; margin-top: 5px; color: #68707c; }.table-scroll { overflow-x: auto; }table { border-collapse: collapse; width: 100%; min-width: 880px; table-layout: fixed; font-size: 13px; text-align: left; }caption { text-align: left; color: #68707c; padding: 8px 0 16px; font-size: 12px; }th, td { border-bottom: 1px solid #e6e9ee; padding: 14px 10px; overflow-wrap: anywhere; vertical-align: top; }th:last-child { width: 30%; }thead { color: #68707c; font-size: 12px; }.agent-name { display: block; margin-top: 6px; color: #68707c; }summary { cursor: pointer; padding: 6px 0; }pre { font-size: 12px; }.record-id { color: #68707c; font-size: 12px; }
 @media (max-width: 720px) { .app-header { padding: 14px 18px; flex-wrap: wrap; }.header-actions { gap: 14px; flex-wrap: wrap; }main { padding: 26px 16px; }.panel { padding: 18px; }.section-heading { flex-direction: column; align-items: flex-start; }.metadata { grid-template-columns: minmax(0, 1fr); gap: 6px; }dd { margin-bottom: 10px; } }
 </style>

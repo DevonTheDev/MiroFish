@@ -136,6 +136,11 @@ counts and historical coverage visible; a complete source observation does not
 mean the file contains every matching action. See
 [opening activity files](docs/LOCAL_MODE.md#open-activity-page-files).
 
+Use **Focus this captured page** to narrow opened records by platform and saved
+outcome. The local shown count stays separate from the original page counts and
+filters. Downloads still contain the complete accepted page, including hidden
+rows; the focus cannot retrieve missing records or independently verify outcomes.
+
 From an accepted saved-activity view, open **Activity by round** to see where
 recorded attempts and saved failures occur. Select a platform and round range,
 then open a round's total or outcome count to inspect its exact records at the

@@ -1453,10 +1453,22 @@ current backend or starting a simulation or model.
 3. Inspect the included records and expand their original JSON details as literal
    text. IDs remain decimal strings, including values larger than JavaScript's
    exact numeric range. Repeated attempts remain separate records.
-4. Download the complete accepted page observation again or use **Clear session**
-   to remove it from the
-   current view. Re-export preserves its saved fields and exact string values;
-   it does not reproduce incidental whitespace from the imported JSON file.
+4. Use **Focus this captured page** to show one platform, one saved outcome or
+   their intersection. **Showing X of Y captured records** describes only this
+   local view; original query filters, page counts and coverage stay visible.
+   Failed means the recorded flag is false, while Unknown means it is null.
+   A local zero-match result says nothing about attempts outside this file.
+   **Show all captured records** restores every included row in source order.
+5. Download the complete accepted page observation again, including any rows
+   hidden by local focus, or use **Clear session** to remove it from the current
+   view. Re-export preserves its saved fields and exact string values; it does
+   not reproduce incidental whitespace from the imported JSON file.
+
+Focus stays with the accepted page while a replacement loads or is previewed,
+rejected or cancelled. Explicitly opening the replacement resets focus to all
+its rows. Clear, route navigation and closing the view discard local focus.
+Changing focus does not cancel a pending replacement read. These selectors do
+not rerun the original content query or change the captured observation.
 
 This is an **unverified historical file containing one filtered page**, not an
 archive of the full run. Recorded source coverage of “complete” does not imply

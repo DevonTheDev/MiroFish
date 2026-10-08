@@ -7,6 +7,7 @@ import * as Vue from 'vue'
 import * as Router from 'vue-router'
 import { createI18n, useI18n } from 'vue-i18n'
 import * as activityFiles from '../../src/utils/savedActivityFiles.js'
+import * as activityReview from '../../src/utils/savedActivityReview.js'
 
 export const ok = data => ({ success: true, data })
 export async function flush() {
@@ -87,6 +88,7 @@ export async function mountActivityFiles({ api, initialPath = '/activity-files',
     'vue-router': { ...Router, createWebHistory: Router.createMemoryHistory },
     'vue-i18n': { useI18n },
     '../utils/savedActivityFiles.js': activityFiles,
+    '../utils/savedActivityReview.js': activityReview,
   }
   const components = { '../components/LanguageSwitcher.vue': stub }
   function evaluate(source, returnName = 'component') {
