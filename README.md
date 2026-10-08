@@ -129,6 +129,13 @@ It distinguishes missing or partial logs from a complete zero-match result and
 requires Refresh if files change between pages. See the
 [saved activity guide](docs/LOCAL_MODE.md#explore-latest-saved-activity).
 
+Choose **Open activity file** from Home or Saved activity to reopen a downloaded
+page in the browser. Preview its recorded context, then open the captured rows
+even when the original logs are unavailable. The view keeps the page's filters,
+counts and historical coverage visible; a complete source observation does not
+mean the file contains every matching action. See
+[opening activity files](docs/LOCAL_MODE.md#open-activity-page-files).
+
 From an accepted saved-activity view, open **Activity by round** to see where
 recorded attempts and saved failures occur. Select a platform and round range,
 then open a round's total or outcome count to inspect its exact records at the

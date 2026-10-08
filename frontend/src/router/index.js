@@ -7,6 +7,7 @@ import ReportView from '../views/ReportView.vue'
 import InteractionView from '../views/InteractionView.vue'
 import SavedInterviewsView from '../views/SavedInterviewsView.vue'
 import SavedActivityView from '../views/SavedActivityView.vue'
+import SavedActivityFilesView from '../views/SavedActivityFilesView.vue'
 import SavedActivityRoundsView from '../views/SavedActivityRoundsView.vue'
 import SimulationComparisonView from '../views/SimulationComparisonView.vue'
 import RuntimeStatusView from '../views/RuntimeStatusView.vue'
@@ -20,6 +21,11 @@ import RunCapturesView from '../views/RunCapturesView.vue'
 import RunCaptureFilesView from '../views/RunCaptureFilesView.vue'
 
 const routes = [
+  {
+    path: '/activity-files',
+    name: 'SavedActivityFiles',
+    component: SavedActivityFilesView
+  },
   {
     path: '/interview-files',
     name: 'SavedInterviewFiles',

@@ -2,7 +2,7 @@
   <div class="activity-page">
     <header class="app-header">
       <RouterLink class="brand" to="/">MIROFISH</RouterLink>
-      <div class="header-actions"><RouterLink to="/">{{ t('comparison.backHome') }}</RouterLink><LanguageSwitcher /></div>
+      <div class="header-actions"><RouterLink to="/activity-files" data-testid="open-activity-files">{{ t('savedActivityFiles.entry') }}</RouterLink><RouterLink to="/">{{ t('comparison.backHome') }}</RouterLink><LanguageSwitcher /></div>
     </header>
     <main>
       <header class="page-heading">

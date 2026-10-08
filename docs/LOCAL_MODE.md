@@ -1433,6 +1433,52 @@ templates and routing; native browser layout/download dialogs and Windows storag
 behavior remain separate platform checks. No model weights or paid services are
 used.
 
+## Open activity page files
+
+Choose **Open activity file** from Home or Saved activity, or visit
+`/activity-files`, to review an earlier **Download this page JSON** export.
+The frontend must already be loaded or served. Reading the file, opening its
+records and downloading it again use browser memory without requesting the
+current backend or starting a simulation or model.
+
+1. Select one JSON file, up to 8 MiB. The reader accepts the current version-1
+   activity-page export, including all recorded search filters and row excerpts.
+   Raw logs, API envelopes, round overviews, interview/capture files and unknown
+   or incomplete export shapes are refused. Older version-1 shapes have not
+   been verified and are not silently filled with assumed values.
+2. Review the file's name, recorded simulation, observation time, source revision,
+   filters, coverage, warnings and page position. Choose **Open captured page**
+   to accept it. Selecting a replacement first opens a preview; a failed or
+   cancelled replacement leaves the previously accepted page identified.
+3. Inspect the included records and expand their original JSON details as literal
+   text. IDs remain decimal strings, including values larger than JavaScript's
+   exact numeric range. Repeated attempts remain separate records.
+4. Download the complete accepted page observation again or use **Clear session**
+   to remove it from the
+   current view. Re-export preserves its saved fields and exact string values;
+   it does not reproduce incidental whitespace from the imported JSON file.
+
+This is an **unverified historical file containing one filtered page**, not an
+archive of the full run. Recorded source coverage of “complete” does not imply
+that all matching rows were exported. The recorded matching count, page offset,
+included count and later-record flag remain separate. An unknown count stays
+unknown; partial, unavailable, empty and beyond-offset pages are distinct. The
+view cannot fetch missing pages or verify that the original source still exists,
+matches its recorded revision or has the same coverage.
+
+Validation checks the bounded file structure and internal consistency, not its
+authenticity. Original backend text matching is not rerun against a page subset.
+File contents and names remain literal text, and details are not parsed again.
+Clear, navigation or closing the view discards the in-memory selection; the app
+does not upload the file or save its contents in browser storage.
+
+Local tests pass observations from the production saved-log reader through the
+compiled live page's actual download and reopen those File bytes in the new
+compiled Vue view. They cover both languages, incomplete and empty sources,
+page boundaries, exact values, stale controls and download failures. This is
+renderer and local-data validation; native browser layout, file-picker/download
+dialogs and Windows behavior remain separate checks.
+
 ## Inspect activity by round
 
 Open **Activity by round** from an accepted **Saved activity** result. The

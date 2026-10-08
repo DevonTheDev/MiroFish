@@ -1,0 +1,50 @@
+{
+  "format_version": 1,
+  "simulation_id": "sim_audit",
+  "source_revision": "bd244a39f38faa32cb8904cc1b54e54731ac5100a5aec7174fa3834cb4a7f61a",
+  "observed_at": "2026-10-08T04:05:49.203221+00:00",
+  "context": {
+    "status": "completed",
+    "created_at": null,
+    "updated_at": null,
+    "started_at": null,
+    "completed_at": null,
+    "requested_rounds": "3",
+    "last_saved_round": "3"
+  },
+  "availability": "complete",
+  "platform_availability": {
+    "twitter": "complete",
+    "reddit": "complete"
+  },
+  "warnings": [],
+  "filters": {
+    "platform": null,
+    "agent_id": null,
+    "round_num": null,
+    "action_type": null,
+    "q": null,
+    "case_sensitive": false,
+    "outcome": null
+  },
+  "order": "source_record",
+  "offset": 1,
+  "limit": 1,
+  "returned_count": 1,
+  "matched_count": 3,
+  "has_more": true,
+  "actions": [
+    {
+      "record_id": "twitter:2",
+      "platform": "twitter",
+      "agent_id": "9007199254740993",
+      "round_num": "1",
+      "agent_name": null,
+      "timestamp": null,
+      "action_type": "CREATE_POST",
+      "success": false,
+      "match_preview": null,
+      "details_json": "{\"action_args\":{\"text\":\"Original literal <tag> action 1\"},\"action_type\":\"CREATE_POST\",\"agent_id\":9007199254740993,\"round\":1,\"success\":false}"
+    }
+  ]
+}
