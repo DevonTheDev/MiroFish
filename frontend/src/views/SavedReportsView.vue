@@ -2,7 +2,7 @@
   <div class="reports-page">
     <header class="app-header">
       <RouterLink to="/" class="brand">MIROFISH</RouterLink>
-      <div class="header-actions"><RouterLink to="/">{{ t('savedReports.home') }}</RouterLink><LanguageSwitcher /></div>
+      <div class="header-actions"><RouterLink to="/report-files" data-testid="open-report-files">{{ t('savedReportFiles.entry') }}</RouterLink><RouterLink to="/">{{ t('savedReports.home') }}</RouterLink><LanguageSwitcher /></div>
     </header>
     <main>
       <div class="page-heading"><p class="eyebrow">{{ t('savedReports.eyebrow') }}</p><h1>{{ t('savedReports.title') }}</h1><p>{{ t('savedReports.scope') }}</p></div>
@@ -36,8 +36,9 @@
       </section>
       <nav class="actions pagination" :aria-label="t('savedReports.pagination')"><button type="button" data-testid="first" :disabled="!canPrevious" @click="goPage(0)">{{ t('savedReports.first') }}</button><button type="button" data-testid="previous" :disabled="!canPrevious" @click="goPage(Math.max(0, result.offset - result.limit))">{{ t('savedReports.previous') }}</button><button type="button" data-testid="next" :disabled="!canNext" @click="goPage(result.offset + result.limit)">{{ t('savedReports.next') }}</button></nav>
       <section class="reader-section" :aria-label="t('savedReports.readerTitle')">
-        <div class="reader-heading"><h2>{{ t('savedReports.readerTitle') }}</h2><div class="actions"><button type="button" data-testid="download" :disabled="!canDownload" @click="downloadReport">{{ t('savedReports.download') }}</button><button v-if="selectedReportId" type="button" data-testid="close-reader" @click="closeReader">{{ t('savedReports.close') }}</button></div></div>
+        <div class="reader-heading"><h2>{{ t('savedReports.readerTitle') }}</h2><div class="actions"><button type="button" data-testid="download" :disabled="!canDownload" :onClick="downloadActions.markdown">{{ t('savedReports.download') }}</button><button type="button" data-testid="download-observation" :disabled="!savedReport || detailLoading || dirty" :onClick="downloadActions.json">{{ t('savedReportFiles.download') }}</button><button v-if="selectedReportId" type="button" data-testid="close-reader" @click="closeReader">{{ t('savedReports.close') }}</button></div></div>
         <p class="note">{{ t('savedReports.readerNote') }}</p>
+        <p v-if="downloadError" role="alert" class="notice error" data-testid="download-error">{{ t('savedReportFiles.downloadError') }}</p>
         <p v-if="detailLoading" role="status" data-testid="detail-loading">{{ t('savedReports.reading') }}</p>
         <p v-if="detailError" role="alert" class="notice error" data-testid="detail-error">{{ t(`savedReports.errors.${detailError}`) }}</p>
         <article v-if="savedReport" class="panel" data-testid="reader">
@@ -61,6 +62,8 @@ import LanguageSwitcher from '../components/LanguageSwitcher.vue'
 import SavedReportComparison from '../components/SavedReportComparison.vue'
 import SavedReportReader from '../components/SavedReportReader.vue'
 import { getSavedReports, getSavedReport } from '../api/report'
+import { validSavedReportSummary, validSavedReportObservation } from '../utils/savedReportObservation.js'
+import { createSavedReportFile } from '../utils/savedReportFiles.js'
 
 const { t } = useI18n()
 const route = useRoute(), router = useRouter()
@@ -70,11 +73,12 @@ const errorCodes = ['invalid_query', 'invalid_report_id', 'report_not_found', 'm
 const reasonCodes = ['metadata_unreadable', 'metadata_too_large', 'identity_mismatch', 'unsafe_path']
 const revisionPattern = /^[a-f0-9]{64}$/, idPattern = /^[A-Za-z0-9_-]{1,128}$/
 const result = ref(null), savedReport = ref(null), loading = ref(false), detailLoading = ref(false)
+const downloadError = ref(false)
 const error = ref(''), detailError = ref(''), dirty = ref(false), selectedReportId = ref(null)
 const draft = ref({ q: '', status: '', limit: '20' })
 const pageSizes = computed(() => [...new Set([1, 10, 20, 50, Number(draft.value.limit)].filter(value => Number.isInteger(value) && value >= 1 && value <= 50))].sort((a, b) => a - b))
 let disposed = false, activeList = null, activeDetail = null, currentListKey = null, currentDetailKey = null
-let pendingNavigation = null, downloadUrl = null
+let pendingNavigation = null, downloadResource = null
 
 function invalid() { throw { selectionCode: 'invalid_query' } }
 function pageNumber(value, fallback, min, max) {
@@ -107,30 +111,28 @@ function listParams(selected) {
 function listKey(selected) { return JSON.stringify(listParams(selected)) }
 function detailKey(selected) { return JSON.stringify([selected.report_id, selected.metadata_revision]) }
 function queryFor(selected) { return { ...listParams(selected), ...(selected.report_id ? { report_id: selected.report_id } : {}), ...(selected.metadata_revision ? { metadata_revision: selected.metadata_revision } : {}) } }
-function revokeDownload() { if (downloadUrl) URL.revokeObjectURL(downloadUrl); downloadUrl = null }
+function revokeDownload(current = downloadResource) {
+  if (!current) return
+  if (downloadResource === current) downloadResource = null
+  const link = current.link, url = current.url
+  current.link = null; current.url = null
+  try { link?.remove() } catch { /* Still release this operation's URL. */ }
+  try { if (url) URL.revokeObjectURL(url) } catch { /* Never disturb a newer owner. */ }
+}
 function retireList() { activeList?.controller.abort(); activeList = null; result.value = null; loading.value = false; error.value = '' }
-function retireDetail() { activeDetail?.controller.abort(); activeDetail = null; savedReport.value = null; detailLoading.value = false; detailError.value = ''; revokeDownload() }
+function retireDetail() { activeDetail?.controller.abort(); activeDetail = null; savedReport.value = null; detailLoading.value = false; detailError.value = ''; downloadError.value = false; revokeDownload() }
 function retireAll() { if (pendingNavigation) pendingNavigation.retired = true; retireList(); retireDetail() }
 function ownsList(request) { return !disposed && !dirty.value && activeList === request && !request.controller.signal.aborted }
 function ownsDetail(request) { return !disposed && !dirty.value && activeDetail === request && !request.controller.signal.aborted }
 function errorCode(cause) { const code = cause?.response?.data?.error_code; return errorCodes.includes(code) ? code : 'generic' }
 const bounded = (value, max) => Number.isSafeInteger(value) && value >= 0 && value <= max
-const optionalText = value => value === null || typeof value === 'string'
-function validSummary(data) {
-  return !!data && typeof data.report_id === 'string' && idPattern.test(data.report_id) && optionalText(data.simulation_id) && typeof data.title === 'string' && [...data.title].length <= 300 && ['summary_preview', 'requirement_preview'].every(key => typeof data[key] === 'string' && [...data[key]].length <= 500) && [...statuses, 'unknown'].includes(data.status) && optionalText(data.created_at) && optionalText(data.completed_at) && ['modern', 'legacy'].includes(data.source) && typeof data.metadata_revision === 'string' && revisionPattern.test(data.metadata_revision)
-}
 function validCatalogue(data, selected) {
   if (!data || typeof data.source_revision !== 'string' || !revisionPattern.test(data.source_revision) || (selected.revision && data.source_revision !== selected.revision) || typeof data.observed_at !== 'string' || data.offset !== selected.offset || data.limit !== selected.limit) return false
   if (!data.filters || Object.keys(data.filters).length !== 2 || data.filters.q !== selected.filters.q || data.filters.status !== selected.filters.status) return false
   if (!Array.isArray(data.reports) || !bounded(data.matched_count, 2000) || !bounded(data.returned_count, selected.limit) || data.returned_count !== data.reports.length || data.returned_count > Math.max(0, data.matched_count - data.offset) || data.has_more !== (data.offset + data.returned_count < data.matched_count)) return false
   if (!bounded(data.unavailable_count, 2000) || !Array.isArray(data.unavailable_reasons) || data.unavailable_reasons.some(reason => !reasonCodes.includes(reason?.code) || !bounded(reason.count, 2000) || !reason.count) || new Set(data.unavailable_reasons.map(reason => reason.code)).size !== data.unavailable_reasons.length || data.unavailable_reasons.reduce((sum, reason) => sum + reason.count, 0) !== data.unavailable_count) return false
   const ids = new Set()
-  return data.reports.every(report => { if (!validSummary(report) || ids.has(report.report_id) || (selected.filters.status && report.status !== selected.filters.status)) return false; ids.add(report.report_id); return true })
-}
-function validDetail(data, selected) {
-  if (!validSummary(data) || data.report_id !== selected.report_id || (selected.metadata_revision && data.metadata_revision !== selected.metadata_revision) || typeof data.observed_at !== 'string' || typeof data.content_available !== 'boolean') return false
-  if (data.content_available) return ['full_report.md', 'legacy_markdown', 'metadata'].includes(data.content_source) && typeof data.markdown_content === 'string' && bounded(data.content_bytes, 8 * 1024 * 1024) && new Blob([data.markdown_content]).size === data.content_bytes && typeof data.content_revision === 'string' && revisionPattern.test(data.content_revision) && data.content_error === null
-  return data.markdown_content === null && data.content_bytes === null && data.content_revision === null && (data.content_source === null || ['full_report.md', 'legacy_markdown', 'metadata'].includes(data.content_source)) && ['not_saved', 'unreadable', 'too_large'].includes(data.content_error)
+  return data.reports.every(report => { if (!validSavedReportSummary(report) || ids.has(report.report_id) || (selected.filters.status && report.status !== selected.filters.status)) return false; ids.add(report.report_id); return true })
 }
 async function loadList(selected) {
   retireList()
@@ -154,7 +156,7 @@ async function loadDetail(selected) {
     const response = await getSavedReport(selected.report_id, selected.metadata_revision ? { revision: selected.metadata_revision } : {}, request.controller.signal)
     if (!ownsDetail(request)) return
     if (!response?.success) throw { response: { data: response } }
-    if (!validDetail(response.data, selected)) throw new Error('Invalid saved report content')
+    if (!validSavedReportObservation(response.data, selected)) throw new Error('Invalid saved report content')
     savedReport.value = JSON.parse(JSON.stringify(response.data))
   } catch (cause) { if (ownsDetail(request)) { savedReport.value = null; detailError.value = errorCode(cause) } }
   finally { if (ownsDetail(request)) detailLoading.value = false }
@@ -211,14 +213,33 @@ function closeReader() {
 }
 function isCurrentComparisonSource(source) { return source === savedReport.value && !!activeDetail && ownsDetail(activeDetail) && !detailLoading.value }
 const canDownload = computed(() => !!savedReport.value?.content_available && !dirty.value && !detailLoading.value)
-function downloadReport() {
-  if (!canDownload.value || !activeDetail || !ownsDetail(activeDetail)) return
-  revokeDownload()
-  const saved = savedReport.value
-  downloadUrl = URL.createObjectURL(new Blob([saved.markdown_content], { type: 'text/markdown;charset=utf-8' }))
-  const link = document.createElement('a'); link.href = downloadUrl; link.download = `${saved.report_id}.md`
-  document.body.appendChild(link); link.click(); link.remove()
+function downloadReport(saved, request, markdown) {
+  const owns = () => saved && savedReport.value === saved && activeDetail === request && ownsDetail(request) && !detailLoading.value
+  if (!owns() || (markdown && !saved.content_available)) return
+  const previous = downloadResource, current = { url: null, link: null }
+  downloadResource = current; revokeDownload(previous)
+  const currentOwner = () => owns() && downloadResource === current
+  try {
+    if (!currentOwner()) return
+    downloadError.value = false
+    const body = markdown ? saved.markdown_content : createSavedReportFile(saved)
+    current.url = URL.createObjectURL(new Blob([body], { type: markdown ? 'text/markdown;charset=utf-8' : 'application/json;charset=utf-8' }))
+    if (!currentOwner()) return
+    current.link = document.createElement('a')
+    if (!currentOwner()) return
+    current.link.href = current.url; current.link.download = markdown ? `${saved.report_id}.md` : `${saved.report_id}.observation.json`
+    document.body.appendChild(current.link)
+    if (!currentOwner()) return
+    current.link.click()
+    if (!currentOwner()) return
+    const link = current.link; current.link = null; link.remove()
+  } catch { if (currentOwner()) downloadError.value = true; revokeDownload(current) }
+  finally { if (!currentOwner()) revokeDownload(current) }
 }
+const downloadActions = computed(() => {
+  const saved = savedReport.value, request = activeDetail
+  return { markdown: () => downloadReport(saved, request, true), json: () => downloadReport(saved, request, false) }
+})
 watch(() => route.fullPath, () => {
   const navigation = pendingNavigation; pendingNavigation = null
   if (navigation?.path === route.fullPath && navigation.retired) return

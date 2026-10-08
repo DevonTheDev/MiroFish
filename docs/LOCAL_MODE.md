@@ -422,6 +422,50 @@ these accepted snapshots make no additional server reads, inference requests or
 report writes. Report HTML and links remain literal text. This is textual review,
 with no model-quality score or causal interpretation of the differences.
 
+### Open report files
+
+Use **Download observation JSON** in the saved-report reader to retain its
+accepted text together with report identity, recorded status, observation time,
+content source and revisions. The existing Markdown download still keeps only
+the exact captured text. An available empty body and an unavailable body remain
+different observations, and both can be saved as observation JSON.
+
+Choose **Open report files** from Home or the report library, or open
+`/report-files`. After choosing one file, inspect its recorded provenance and
+explicitly open the preview. The currently accepted reader stays usable while a
+replacement loads or waits for confirmation. Cancelling or rejecting that
+replacement leaves the accepted content and comparison captures intact. Opening
+a replacement resets the current reader's search; already captured left/right
+observations remain independent, including two versions with the same report ID.
+
+Use the existing literal-text search and comparison controls on accepted file
+observations. **Clear current file** clears the current reader and pending file;
+comparison slots have their own Clear controls. Leaving the file page discards
+all of this temporary state. Download the accepted observation JSON again to
+retain its recorded values, or download its exact available Markdown. File-open
+time never replaces the recorded observation time.
+
+File review uses only the selected file after the frontend has loaded or been
+served. It does not read current server reports, start or resume generation,
+recreate a simulation, or write imported data to backend storage. Recorded
+status, timestamps and hashes are unverified historical metadata. Hash-shaped
+fields do not authenticate the file or establish its author or current backend
+state. Text and links remain literal, including HTML-looking content.
+
+The version-1 format is a JSON object with exactly `format`, `version`, and
+`observation`; `format` is `mirofish-saved-report-observation`. The observation
+contains the defined saved-report detail fields, preserving exact strings,
+Unicode and line endings. Legacy Markdown-only downloads do not contain this
+context and cannot be reopened as observation files.
+
+Files are limited to 16 MiB plus 256 bytes, including JSON wrapping and escaping.
+This accommodates the existing compact 16 MiB API-detail budget plus the fixed
+file wrapper; available Markdown remains limited to 8 MiB. Invalid UTF-8,
+duplicate JSON fields, unsupported formats, inconsistent body lengths, missing
+or extra fields, and excessive nesting or size are refused before acceptance.
+The reader and comparison retain their existing search, preview and diff limits;
+a limited comparison does not imply the original file was truncated.
+
 ## Monitor local runtime activity
 
 Choose **Runtime monitor** on Home, or open `/runtime`. The English/Chinese page

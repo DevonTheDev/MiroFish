@@ -53,6 +53,15 @@ download the exact displayed snapshot. Modern and legacy report files are
 supported. This view reads local saved files without calling models or starting
 new work. See the [saved report library guide](docs/LOCAL_MODE.md#revisit-saved-reports).
 
+Use **Download observation JSON** to retain a report's exact accepted text and
+recorded context, then choose **Open report files** from Home or the report
+library to reopen it locally. Preview the file before opening it, search its
+literal text, and capture two observations for comparison. A replacement file
+does not replace the current reader until you explicitly open it. The frontend
+must already be loaded or served; file review makes no report or model requests.
+Recorded dates, status and hashes are historical metadata, unverified against
+the current backend. See [opening report files](docs/LOCAL_MODE.md#open-report-files).
+
 Capture opened reports into left/right slots to compare their literal text and
 bounded line changes while browsing the library. Each side retains its own
 observed source and exact text download. See [captured report comparison](docs/LOCAL_MODE.md#compare-captured-report-text).

@@ -6,6 +6,7 @@
     </div></div>
     <p class="note">{{ t('savedReportComparison.scope') }}</p>
     <p class="note">{{ t('savedReportComparison.instructions') }}</p>
+    <p v-if="downloadError" role="alert" class="notice" data-testid="comparison-download-error">{{ t('savedReportComparison.downloadError') }}</p>
     <div class="panes">
       <article v-for="slot in slots" :key="slot.side" class="pane" :data-testid="`comparison-${slot.side}`">
         <div class="heading"><h3>{{ t(`savedReportComparison.${slot.side}`) }}</h3><button type="button" :data-testid="`capture-${slot.side}`" :disabled="!source" @click="slot.capture">{{ t(`savedReportComparison.${slot.saved ? 'replace' : 'capture'}`) }}</button></div>
@@ -50,20 +51,27 @@ import { computed, shallowRef, onBeforeUnmount } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { compareCapturedText, previewCapturedText } from '../utils/savedReportComparison.js'
 
-const props = defineProps({ source: { type: Object, default: null }, isCurrent: { type: Function, required: true } })
+const props = defineProps({ source: { type: Object, default: null }, isCurrent: { type: Function, required: true }, isActive: { type: Function, default: null } })
 const { t } = useI18n()
 const pair = shallowRef(Object.freeze({ left: null, right: null }))
+const downloadError = shallowRef(false)
 let disposed = false
 const downloads = new Map()
-function revoke(side) {
-  const current = downloads.get(side)
+function revoke(side, current = downloads.get(side)) {
   if (!current) return
-  clearTimeout(current.timer); URL.revokeObjectURL(current.url); downloads.delete(side)
+  if (downloads.get(side) === current) downloads.delete(side)
+  const timer = current.timer, link = current.link, url = current.url
+  current.timer = null; current.link = null; current.url = null
+  if (timer !== null) clearTimeout(timer)
+  try { link?.remove() } catch { /* Still release this download's URL. */ }
+  try { if (url) URL.revokeObjectURL(url) } catch { /* A newer owner stays independent. */ }
 }
-function owns(snapshot) { return !disposed && pair.value === snapshot }
+function owns(snapshot) { return !disposed && pair.value === snapshot && (!props.isActive || props.isActive()) }
 function replace(snapshot, next) {
   if (!owns(snapshot)) return
-  revoke('left'); revoke('right'); pair.value = Object.freeze(next)
+  const previous = [...downloads.entries()]
+  pair.value = Object.freeze(next); downloadError.value = false
+  previous.forEach(([side, current]) => revoke(side, current))
 }
 function capture(snapshot, source, side) {
   // isCurrent also checks the parent synchronously, before Vue propagates a
@@ -74,18 +82,26 @@ function capture(snapshot, source, side) {
 function download(snapshot, side) {
   const saved = snapshot[side]
   if (!owns(snapshot) || !saved?.content_available) return
-  revoke(side)
-  let link, current
+  const previous = downloads.get(side) ?? null, current = { url: null, link: null, timer: null }
+  downloads.set(side, current); revoke(side, previous)
+  const currentOwner = () => owns(snapshot) && downloads.get(side) === current
   try {
-    current = { url: URL.createObjectURL(new Blob([saved.markdown_content], { type: 'text/markdown;charset=utf-8' })), timer: null }
-    downloads.set(side, current)
-    link = document.createElement('a'); link.href = current.url; link.download = `${saved.report_id}-${side}-${saved.content_revision.slice(0, 12)}.md`
-    document.body.appendChild(link); link.click()
-    current.timer = setTimeout(() => { if (downloads.get(side) === current) revoke(side) }, 1000)
-  } finally {
-    link?.remove()
-    if (current && current.timer === null) revoke(side)
-  }
+    if (!currentOwner()) return
+    downloadError.value = false
+    current.url = URL.createObjectURL(new Blob([saved.markdown_content], { type: 'text/markdown;charset=utf-8' }))
+    if (!currentOwner()) return
+    current.link = document.createElement('a')
+    if (!currentOwner()) return
+    current.link.href = current.url; current.link.download = `${saved.report_id}-${side}-${saved.content_revision.slice(0, 12)}.md`
+    document.body.appendChild(current.link)
+    if (!currentOwner()) return
+    current.link.click()
+    if (!currentOwner()) return
+    const link = current.link; current.link = null; link.remove()
+    if (!currentOwner()) return
+    current.timer = setTimeout(() => { if (downloads.get(side) === current) revoke(side, current) }, 1000)
+  } catch { if (currentOwner()) downloadError.value = true; revoke(side, current) }
+  finally { if (!currentOwner()) revoke(side, current) }
 }
 // Bind handlers to exactly the pair and reader that produced this render.
 // A retired DOM callback must never operate on a replacement with the same ID.

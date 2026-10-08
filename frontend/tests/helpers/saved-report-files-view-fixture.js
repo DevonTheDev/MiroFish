@@ -1,15 +1,19 @@
 import assert from 'node:assert/strict'
-import { readFileSync } from 'node:fs'
+import { readFileSync, existsSync } from 'node:fs'
 import vm from 'node:vm'
 import { parse as parseJavaScript } from '@babel/parser'
 import { parse, compileScript, compileTemplate } from '@vue/compiler-sfc'
 import * as Vue from 'vue'
 import * as Router from 'vue-router'
 import { createI18n, useI18n } from 'vue-i18n'
+import { pathToFileURL } from 'node:url'
 import * as savedReportComparison from '../../src/utils/savedReportComparison.js'
 import * as savedReportSearch from '../../src/utils/savedReportSearch.js'
-import * as savedReportObservation from '../../src/utils/savedReportObservation.js'
-import * as savedReportFiles from '../../src/utils/savedReportFiles.js'
+
+const sourceRoot = process.env.MIRO_REPORT_FILES_SOURCE_ROOT ? pathToFileURL(process.env.MIRO_REPORT_FILES_SOURCE_ROOT + '/frontend/') : new URL('../../', import.meta.url)
+const sourceUrl = path => new URL(path, sourceRoot)
+const reportFiles = existsSync(sourceUrl('src/utils/savedReportFiles.js')) ? await import(sourceUrl('src/utils/savedReportFiles.js')) : {}
+const reportObservation = existsSync(sourceUrl('src/utils/savedReportObservation.js')) ? await import(sourceUrl('src/utils/savedReportObservation.js')) : {}
 
 export const ok = data => ({ success: true, data })
 export async function flush() {
@@ -65,22 +69,24 @@ function renderer(scrollCalls) {
   return { host, root, body }
 }
 
-export async function mountReportLibrary({ api, initialPath = '/reports', locale = 'en', timers = fakeTimers(), deferredScrolls = null, onSearchIndex = null } = {}) {
+export async function mountReportFiles({ api, initialPath = '/report-files', locale = 'en', timers = fakeTimers(), deferredScrolls = null, onSearchIndex = null, cacheHandlers, downloadHooks = {} } = {}) {
   const requests = api ? null : deferredApi()
   api ??= requests.api
-  const warnings = [], downloads = [], revokedUrls = [], scrollCalls = []
+  const warnings = [], downloads = [], revokedUrls = [], scrollCalls = [], storageWrites = [], networkCalls = [], anchors = []
+  const storage = { getItem: () => null, setItem: (...args) => storageWrites.push(args), removeItem: (...args) => storageWrites.push(args), clear: () => storageWrites.push(['clear']) }
   const blobs = new Map()
   let urlIndex = 0
   const urlApi = {
-    createObjectURL(blob) { const url = `blob:report-library-${++urlIndex}`; blobs.set(url, blob); return url },
-    revokeObjectURL(url) { revokedUrls.push(url); blobs.delete(url) },
+    createObjectURL(blob) { const url = `blob:report-files-${++urlIndex}`; downloadHooks.beforeCreate?.(blob); blobs.set(url, blob); downloadHooks.create?.(url, blob); return url },
+    revokeObjectURL(url) { revokedUrls.push(url); blobs.delete(url); downloadHooks.revoke?.(url) },
   }
   const document = {
     createElement(type) {
       assert.equal(type, 'a')
-      return { click() { downloads.push({ blob: blobs.get(this.href), filename: this.download, url: this.href }) }, remove() {} }
+      downloadHooks.beforeAnchor?.()
+      const anchor = { attached: false, removed: false, click() { downloadHooks.click?.(this); downloads.push({ blob: blobs.get(this.href), filename: this.download, url: this.href }) }, remove() { this.attached = false; this.removed = true; downloadHooks.remove?.(this) } }; anchors.push(anchor); downloadHooks.anchor?.(anchor); return anchor
     },
-    body: { appendChild() {} },
+    body: { appendChild(anchor) { anchor.attached = true; downloadHooks.append?.(anchor) } },
   }
   const { host, root, body } = renderer(scrollCalls)
   const stub = { render: () => Vue.h('fixture-boundary') }
@@ -94,8 +100,8 @@ export async function mountReportLibrary({ api, initialPath = '/reports', locale
     'vue-router': { ...Router, createWebHistory: Router.createMemoryHistory },
     'vue-i18n': { useI18n },
     '../utils/savedReportComparison.js': savedReportComparison,
-    '../utils/savedReportObservation.js': savedReportObservation,
-    '../utils/savedReportFiles.js': savedReportFiles,
+    '../utils/savedReportObservation.js': reportObservation,
+    '../utils/savedReportFiles.js': reportFiles,
     '../utils/savedReportSearch.js': { ...savedReportSearch,
       createReportSearchIndex: text => {
         const index = savedReportSearch.createReportSearchIndex(text)
@@ -107,7 +113,7 @@ export async function mountReportLibrary({ api, initialPath = '/reports', locale
   const components = { '../components/LanguageSwitcher.vue': stub }
   function evaluate(source, returnName = 'component') {
     const ast = parseJavaScript(source, { sourceType: 'module' })
-    const globals = { AbortController, Date, Intl, console, Blob, URL: urlApi, document,
+    const globals = { AbortController, Date, Intl, console, Blob, TextEncoder, TextDecoder, URL: urlApi, document, localStorage: storage, sessionStorage: storage, indexedDB: { open: (...args) => { storageWrites.push(args); throw Error('Persistence forbidden') } }, fetch: (...args) => { networkCalls.push(args); throw Error('Network forbidden') },
       setTimeout: timers.setTimeout, clearTimeout: timers.clearTimeout,
       IntersectionObserver: class { observe() {} disconnect() {} } }
     for (const statement of ast.program.body.filter(item => item.type === 'ImportDeclaration').reverse()) {
@@ -123,10 +129,10 @@ export async function mountReportLibrary({ api, initialPath = '/reports', locale
       .replace('export function render', 'function render') + '\n;' + returnName, globals)
   }
   function component(path) {
-    const { descriptor } = parse(readFileSync(new URL('../../src/' + path, import.meta.url), 'utf8'), { filename: path })
+    const { descriptor } = parse(readFileSync(sourceUrl('src/' + path), 'utf8'), { filename: path })
     const script = compileScript(descriptor, { id: path })
     const template = compileTemplate({ source: descriptor.template.content, filename: path, id: path, transformAssetUrls: false,
-      compilerOptions: { bindingMetadata: script.bindings, hoistStatic: false } })
+      compilerOptions: { bindingMetadata: script.bindings, hoistStatic: false, ...(cacheHandlers === undefined ? {} : { cacheHandlers }) } })
     assert.deepEqual(template.errors, [])
     const value = evaluate(script.content)
     value.render = evaluate(template.code, 'render')
@@ -135,10 +141,11 @@ export async function mountReportLibrary({ api, initialPath = '/reports', locale
   components['../components/SavedReportComparison.vue'] = component('components/SavedReportComparison.vue')
   components['../components/SavedReportReader.vue'] = component('components/SavedReportReader.vue')
   components['../views/SavedReportsView.vue'] = component('views/SavedReportsView.vue')
+  if (existsSync(sourceUrl('src/views/SavedReportFilesView.vue'))) components['../views/SavedReportFilesView.vue'] = component('views/SavedReportFilesView.vue')
   components['../views/Home.vue'] = component('views/Home.vue')
-  const router = evaluate(readFileSync(new URL('../../src/router/index.js', import.meta.url), 'utf8'))
+  const router = evaluate(readFileSync(sourceUrl('src/router/index.js'), 'utf8'))
   const messages = Object.fromEntries(['en', 'zh'].map(key => [key,
-    JSON.parse(readFileSync(new URL('../../../locales/' + key + '.json', import.meta.url), 'utf8'))]))
+    JSON.parse(readFileSync(sourceUrl('../locales/' + key + '.json'), 'utf8'))]))
   const i18n = createI18n({ legacy: false, locale, fallbackLocale: 'en', messages })
   const app = host.createApp({ render: () => Vue.h(Router.RouterView) })
   app.use(router); app.use(i18n)
@@ -152,7 +159,7 @@ export async function mountReportLibrary({ api, initialPath = '/reports', locale
   const find = predicate => all(predicate)[0]
   const byId = id => find(node => node.props['data-testid'] === id)
   const text = (target = root) => (target.type === '#comment' ? '' : target.text ?? '') + (target.children ?? []).map(text).join(' ')
-  return { root, body, router, i18n, warnings, requests, flush, waitFor, all, find, byId, text, downloads, revokedUrls, timers, scrollCalls,
+  return { root, body, router, i18n, warnings, requests, flush, waitFor, all, find, byId, text, downloads, revokedUrls, timers, scrollCalls, blobs, anchors, storageWrites, networkCalls, downloadHooks,
     async click(id) {
       const target = byId(id); assert.ok(target, `missing clickable control ${id}`)
       assert.ok(!target.props.disabled, `disabled control ${id}`)
@@ -205,9 +212,18 @@ export function fakeTimers() {
   }
 }
 
-// The actual application client and GET wrappers, with only HTTP supplied.
-export function reportLibraryApi(service) {
-  const source = readFileSync(new URL('../../src/api/report.js', import.meta.url), 'utf8')
-    .replace(/^import .*$/gm, '').replaceAll('export const ', 'const ')
-  return new Function('service', source + '\nreturn { getSavedReports, getSavedReport };')(service)
+export function syntheticReport(id = 'report_A', content = 'Needle\r\nneedle 😀\n<script>literal</script>\n') {
+  return { report_id: id, simulation_id: 'sim_A', title: 'Saved report', summary_preview: 'Summary', requirement_preview: 'Requirement', status: 'completed', created_at: 'recorded creation', completed_at: null, source: 'modern', metadata_revision: 'a'.repeat(64), observed_at: 'recorded observation', content_available: true, content_source: 'full_report.md', markdown_content: content, content_bytes: new TextEncoder().encode(content).length, content_revision: 'b'.repeat(64), content_error: null }
 }
+export function file(value, name = 'report.json', overrides = {}) {
+  const text = typeof value === 'string' ? value : JSON.stringify({ format: 'mirofish-saved-report-observation', version: 1, observation: value }) + '\n'
+  const bytes = new TextEncoder().encode(text)
+  return { name, size: bytes.byteLength, arrayBuffer: async () => bytes.buffer, ...overrides }
+}
+export async function chooseFile(view, chosen) {
+  const input = view.byId('report-file'); assert.ok(input, 'The saved report file picker is missing')
+  const target = { files: chosen === null ? [] : Array.isArray(chosen) ? chosen : [chosen], value: 'chosen.json' }
+  const pending = input.props.onChange({ target }); await flush(); return { pending, target }
+}
+export async function previewFile(view, value, name) { const { pending } = await chooseFile(view, file(value, name)); await pending; await flush() }
+export async function acceptFile(view, value, name) { await previewFile(view, value, name); await view.click('open-file') }

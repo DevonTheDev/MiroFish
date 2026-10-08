@@ -16,11 +16,17 @@ import PromptSuitesView from '../views/PromptSuitesView.vue'
 import PromptSuiteComparisonView from '../views/PromptSuiteComparisonView.vue'
 import PromptExamplesView from '../views/PromptExamplesView.vue'
 import SavedReportsView from '../views/SavedReportsView.vue'
+import SavedReportFilesView from '../views/SavedReportFilesView.vue'
 
 import RunCapturesView from '../views/RunCapturesView.vue'
 import RunCaptureFilesView from '../views/RunCaptureFilesView.vue'
 
 const routes = [
+  {
+    path: '/report-files',
+    name: 'SavedReportFiles',
+    component: SavedReportFilesView
+  },
   {
     path: '/activity-files',
     name: 'SavedActivityFiles',

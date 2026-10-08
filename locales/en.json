@@ -1075,7 +1075,8 @@
       "response_too_large": "The saved response exceeds the safe reading limit.",
       "library_unavailable": "The saved report library is unavailable. Try Refresh again.",
       "generic": "Saved reports could not be read. Try Refresh again."
-    }
+    },
+    "completedAt": "Completed at"
   },
   "readiness": {
     "title": "Check local setup",
@@ -1981,7 +1982,8 @@
       "CRLF": "CRLF",
       "CR": "CR",
       "NONE": "No line ending"
-    }
+    },
+    "downloadError": "The download could not be prepared. Your comparison captures remain available; try again."
   },
   "savedActivityRounds": {
     "title": "Activity by round",
@@ -2219,5 +2221,29 @@
       "invalid": "This file could not be opened. Choose one supported version-1 activity page JSON within the size limit. The opened page is unchanged.",
       "download": "The JSON download could not be created. The opened page is still available; try again."
     }
+  },
+  "savedReportFiles": {
+    "entry": "Open report files",
+    "eyebrow": "Local report observations",
+    "title": "Open saved report files",
+    "language": "Language",
+    "scope": "Open one saved report observation JSON on this device. After the frontend is loaded or served, this page reads files locally without contacting the backend.",
+    "session": "Files and comparison captures stay only in this page session. Leaving the page discards them. This does not upload, import, generate or resume reports, recreate simulations, or reopen old Markdown downloads.",
+    "choose": "Choose one observation JSON file",
+    "fileNote": "Choose exactly one version 1 MiroFish saved report observation JSON, at most {bytes} bytes. Review the preview, then choose Open. Your current report stays available until you open its replacement.",
+    "cancel": "Cancel replacement",
+    "clear": "Clear current file",
+    "clearNote": "Clear current file removes the current observation and pending replacement. Pinned comparison slots remain until you use their own Clear controls or leave this page.",
+    "loading": "Reading the selected local file…",
+    "invalid": "This file is invalid, unsupported, or exceeds the reading limit. Choose a saved report observation JSON.",
+    "downloadError": "The download could not be prepared. Your accepted observation remains available; try again.",
+    "preview": "Preview selected file",
+    "accepted": "Opened observation",
+    "open": "Open",
+    "filename": "Local filename",
+    "reportTitle": "Recorded title",
+    "provenance": "Historical local observation. Recorded status, times and revisions are unverified against the current backend. Revision hashes are copied metadata, not proof of authorship.",
+    "download": "Download observation JSON",
+    "empty": "Choose a file, review its recorded metadata, and select Open to read and compare it."
   }
 }
