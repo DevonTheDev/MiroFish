@@ -1944,6 +1944,30 @@ Run `npm test --prefix frontend` for rendering regressions, then
 `npm run build --prefix frontend` for the local production build. This content boundary is separate from
 the model-server trust boundary and is not a general browser/network sandbox.
 
+### Retry a report request
+
+If **Generate report** reports a connection error, the backend may already be
+working. An explicit retry for the same simulation reuses that process's active
+report and returns its original report and task IDs. The existing Report page
+then observes that job. This also applies when `force_regenerate` is `true`:
+force bypasses a completed saved report, but does not replace or duplicate a
+worker that is still active.
+
+The API returns `status: "generating"`, `already_generated: false` and
+`already_running: true` for active reuse. Active work takes precedence over an
+older completed report. Current simulation, project and graph readiness checks
+still apply; a conflicting graph is rejected rather than reusing unrelated work.
+Once the worker has finished its success or failure cleanup, a later forced
+request can start a fresh report. Closing the page only stops browser observation.
+
+Ownership is process-local. It does not survive backend restarts or coordinate
+multiple backend processes, and it does not deduplicate a forced retry that
+arrives after the original worker has finished. Existing graph-reader protection
+against graph deletion and graph-memory-enabled starts remains in effect; this
+is not an immutable snapshot of all simulation inputs or a new cancellation
+mechanism. Saved-report and imported-file views continue to read observations
+without starting report work.
+
 ### Report-generation log polling
 
 The Step 4 report-generation view keeps at most one pending request per log

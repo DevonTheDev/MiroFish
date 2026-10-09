@@ -282,6 +282,27 @@ test('report failure releases only the current request for explicit retry', asyn
   } finally { h.close() }
 })
 
+test('explicit retry after a lost report response opens the server-owned active job', async () => {
+  const h = harness(); try {
+    await running(h); await completed(h); h.state.handleNextStep(); await settle()
+    h.requests.generateReport[0].reject(new Error('response lost after server admission')); await settle()
+    assert.equal(h.state.isGeneratingReport.value, false)
+    assert.equal(h.routes.length, 0)
+    h.state.handleNextStep(); h.state.handleNextStep(); await settle()
+    assert.equal(h.requests.generateReport.length, 2)
+    assert.equal(h.requests.generateReport[1].args[0].force_regenerate, true)
+    h.requests.generateReport[1].resolve({ success: true, data: {
+      simulation_id: 'A', report_id: 'original-active-report', task_id: 'original-task',
+      status: 'generating', already_generated: false, already_running: true
+    } }); await settle()
+    assert.equal(h.routes.length, 1)
+    assert.equal(h.routes[0].name, 'Report')
+    assert.equal(h.routes[0].params.reportId, 'original-active-report')
+    h.state.handleNextStep(); await settle()
+    assert.equal(h.requests.generateReport.length, 2)
+  } finally { h.close() }
+})
+
 test('explicit same-ID restart retires old report and detail ownership', async () => {
   const h = harness(); try {
     await running(h); await completed(h); h.state.handleNextStep(); await settle()

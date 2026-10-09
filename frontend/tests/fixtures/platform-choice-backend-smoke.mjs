@@ -26,10 +26,15 @@ try {
   const loaded = await loadConfigFromFile({ command: 'serve', mode: 'test' }, path.join(root, 'vite.config.js'), root)
   assert.ok(loaded?.config.server.proxy['/api'])
   proxy = await createServer({ ...loaded.config, configFile: false, root, cacheDir, logLevel: 'silent',
+    // SFCs run in the compiled harness; this server handles only API proxy
+    // traffic. Avoid an unused optimizer writing its cache during teardown.
+    optimizeDeps: { noDiscovery: true, include: [] },
     server: { ...loaded.config.server, host: '127.0.0.1', port: 0, open: false,
       proxy: { ...loaded.config.server.proxy, '/api': { ...loaded.config.server.proxy['/api'], target: backendURL } } },
   })
   await proxy.listen()
+  assert.equal(proxy.environments.client.depsOptimizer, undefined,
+    'The API-only fixture must not start dependency optimization')
   const baseURL = `http://127.0.0.1:${proxy.httpServer.address().port}`
   const service = productionClient(baseURL), calls = [], responses = []
   service.defaults.headers.common.Origin = baseURL

@@ -66,6 +66,11 @@ Capture opened reports into left/right slots to compare their literal text and
 bounded line changes while browsing the library. Each side retains its own
 observed source and exact text download. See [captured report comparison](docs/LOCAL_MODE.md#compare-captured-report-text).
 
+If a report request loses its response, retrying while that report is still
+running in the same backend process reopens the existing job. A forced
+regeneration also reuses that active job; it can start a new report after the
+worker finishes. See [report request retries](docs/LOCAL_MODE.md#retry-a-report-request).
+
 ## Monitor local runtime activity
 
 Open **Runtime monitor** from Home to see loaded model settings, resource limits,

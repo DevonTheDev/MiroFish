@@ -7,6 +7,7 @@ import os
 import json
 import traceback
 import threading
+from dataclasses import dataclass
 from io import BytesIO
 from flask import current_app, request, jsonify, send_file
 
@@ -36,6 +37,51 @@ from ..utils.zep_lifecycle import (
 )
 
 logger = get_logger('mirofish.api.report')
+
+
+@dataclass(frozen=True)
+class _ActiveReportJob:
+    simulation_id: str
+    graph_id: str
+    task_id: str
+    report_id: str
+
+
+# Process-local ownership, never inferred from saved files or terminal task
+# status. Always acquire graph lifecycle lock before this registry guard.
+_active_report_jobs: dict[str, _ActiveReportJob] = {}
+_active_report_jobs_lock = threading.RLock()
+
+
+def _release_active_report(job):
+    """Release only this exact owner's reader and claim, atomically with admission."""
+    with graph_lifecycle_lock(job.graph_id), _active_report_jobs_lock:
+        if _active_report_jobs.get(job.simulation_id) is job:
+            unregister_graph_reader(job.graph_id, job.report_id)
+            del _active_report_jobs[job.simulation_id]
+
+
+def _fail_report_task(task_manager, task_id, error):
+    """Failure publication is best effort; cleanup must not depend on it."""
+    try:
+        task_manager.fail_task(task_id, str(error))
+    except Exception:
+        logger.exception("Could not publish report task failure")
+
+
+def _generating_report_response(job, *, already_running):
+    return jsonify({
+        "success": True,
+        "data": {
+            "simulation_id": job.simulation_id,
+            "report_id": job.report_id,
+            "task_id": job.task_id,
+            "status": "generating",
+            "message": t('api.reportGenerateStarted'),
+            "already_generated": False,
+            "already_running": already_running,
+        },
+    })
 
 
 @report_bp.before_request
@@ -109,6 +155,9 @@ def generate_report():
     
     这是一个耗时操作，接口会立即返回task_id，
     使用 GET /api/report/generate/status 查询进度
+
+    force_regenerate bypasses completed-report reuse only. A matching active
+    job in this process returns its original IDs with already_running=true.
     
     请求（JSON）：
         {
@@ -121,8 +170,10 @@ def generate_report():
             "success": true,
             "data": {
                 "simulation_id": "sim_xxxx",
+                "report_id": "report_xxxx",
                 "task_id": "task_xxxx",
                 "status": "generating",
+                "already_running": false,
                 "message": "报告生成任务已启动"
             }
         }
@@ -281,107 +332,116 @@ def generate_report():
                     ),
                 }), 409
 
-            # Cached-report reuse is now part of the same atomic barrier, so a
-            # concurrent rerun cannot make the returned report stale between
-            # the status check and response.
-            if not force_regenerate:
-                existing_report = ReportManager.get_report_by_simulation(
-                    simulation_id
+            # Serialize same-simulation claims even if concurrent requests
+            # validated different graphs. Active work takes precedence over
+            # an older completed cache entry, including forced requests.
+            with _active_report_jobs_lock:
+                active_job = _active_report_jobs.get(simulation_id)
+                if active_job is not None:
+                    if active_job.graph_id != graph_id:
+                        return jsonify({
+                            "success": False,
+                            "error": "An active report uses a different graph for this simulation",
+                        }), 409
+                    return _generating_report_response(active_job, already_running=True)
+
+                if not force_regenerate:
+                    existing_report = ReportManager.get_report_by_simulation(
+                        simulation_id
+                    )
+                    if (
+                        existing_report
+                        and existing_report.status == ReportStatus.COMPLETED
+                    ):
+                        return jsonify({
+                            "success": True,
+                            "data": {
+                                "simulation_id": simulation_id,
+                                "report_id": existing_report.report_id,
+                                "status": "completed",
+                                "message": t('api.reportAlreadyExists'),
+                                "already_generated": True
+                            }
+                        })
+
+                # Locale retrieval cannot strand an allocated task if it fails.
+                current_locale = get_locale()
+                task_manager = TaskManager()
+                task_id = task_manager.create_task(
+                    task_type="report_generate",
+                    metadata={
+                        "simulation_id": simulation_id,
+                        "graph_id": graph_id,
+                        "report_id": report_id
+                    }
                 )
-                if (
-                    existing_report
-                    and existing_report.status == ReportStatus.COMPLETED
-                ):
-                    return jsonify({
-                        "success": True,
-                        "data": {
-                            "simulation_id": simulation_id,
-                            "report_id": existing_report.report_id,
-                            "status": "completed",
-                            "message": t('api.reportAlreadyExists'),
-                            "already_generated": True
-                        }
-                    })
+                job = _ActiveReportJob(simulation_id, graph_id, task_id, report_id)
+                _active_report_jobs[simulation_id] = job
 
-            task_manager = TaskManager()
-            task_id = task_manager.create_task(
-                task_type="report_generate",
-                metadata={
-                    "simulation_id": simulation_id,
-                    "graph_id": graph_id,
-                    "report_id": report_id
-                }
-            )
-            current_locale = get_locale()
-            register_graph_reader(graph_id, report_id)
-
-            def run_generate():
-                set_locale(current_locale)
-                try:
-                    task_manager.update_task(
-                        task_id,
-                        status=TaskStatus.PROCESSING,
-                        progress=0,
-                        message=t('api.initReportAgent')
-                    )
-
-                    agent = ReportAgent(
-                        graph_id=graph_id,
-                        simulation_id=simulation_id,
-                        simulation_requirement=simulation_requirement
-                    )
-
-                    def progress_callback(stage, progress, message):
+                def run_generate():
+                    try:
+                        set_locale(current_locale)
                         task_manager.update_task(
                             task_id,
-                            progress=progress,
-                            message=f"[{stage}] {message}"
+                            status=TaskStatus.PROCESSING,
+                            progress=0,
+                            message=t('api.initReportAgent')
                         )
 
-                    report = agent.generate_report(
-                        progress_callback=progress_callback,
-                        report_id=report_id
-                    )
-                    ReportManager.save_report(report)
+                        agent = ReportAgent(
+                            graph_id=graph_id,
+                            simulation_id=simulation_id,
+                            simulation_requirement=simulation_requirement
+                        )
 
-                    if report.status == ReportStatus.COMPLETED:
-                        task_manager.complete_task(
-                            task_id,
-                            result={
-                                "report_id": report.report_id,
-                                "simulation_id": simulation_id,
-                                "status": "completed"
-                            }
+                        def progress_callback(stage, progress, message):
+                            task_manager.update_task(
+                                task_id,
+                                progress=progress,
+                                message=f"[{stage}] {message}"
+                            )
+
+                        report = agent.generate_report(
+                            progress_callback=progress_callback,
+                            report_id=report_id
                         )
-                    else:
-                        task_manager.fail_task(
-                            task_id,
-                            report.error or t('api.reportGenerateFailed')
-                        )
+                        ReportManager.save_report(report)
+
+                        if report.status == ReportStatus.COMPLETED:
+                            task_manager.complete_task(
+                                task_id,
+                                result={
+                                    "report_id": report.report_id,
+                                    "simulation_id": simulation_id,
+                                    "status": "completed"
+                                }
+                            )
+                        else:
+                            task_manager.fail_task(
+                                task_id,
+                                report.error or t('api.reportGenerateFailed')
+                            )
+                    except Exception as e:
+                        _fail_report_task(task_manager, task_id, e)
+                        logger.error(f"报告生成失败: {str(e)}")
+                    finally:
+                        _release_active_report(job)
+
+                try:
+                    register_graph_reader(graph_id, report_id)
+                    # Publish before start and serialize startup rollback with
+                    # retries. The worker holds no lock during inference, and
+                    # admission never waits for worker completion.
+                    thread = threading.Thread(target=run_generate, daemon=True)
+                    thread.start()
                 except Exception as e:
-                    logger.error(f"报告生成失败: {str(e)}")
-                    task_manager.fail_task(task_id, str(e))
-                finally:
-                    unregister_graph_reader(graph_id, report_id)
+                    try:
+                        _fail_report_task(task_manager, task_id, e)
+                    finally:
+                        _release_active_report(job)
+                    raise
 
-            try:
-                thread = threading.Thread(target=run_generate, daemon=True)
-                thread.start()
-            except Exception:
-                unregister_graph_reader(graph_id, report_id)
-                raise
-        
-        return jsonify({
-            "success": True,
-            "data": {
-                "simulation_id": simulation_id,
-                "report_id": report_id,
-                "task_id": task_id,
-                "status": "generating",
-                "message": t('api.reportGenerateStarted'),
-                "already_generated": False
-            }
-        })
+        return _generating_report_response(job, already_running=False)
         
     except Exception as e:
         logger.error(f"启动报告生成任务失败: {str(e)}")
