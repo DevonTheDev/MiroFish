@@ -2541,8 +2541,8 @@ class ReportManager:
         )
     
     @classmethod
-    def _iter_reports(cls):
-        """Read ordinary records and legacy JSON files, skipping unsafe entries."""
+    def _iter_reports(cls, *, skip_unreadable: bool = False):
+        """Read safe modern/legacy records, with opt-in History error tolerance."""
         cls._ensure_reports_dir()
         for item in os.listdir(cls.REPORTS_DIR):
             try:
@@ -2554,23 +2554,49 @@ class ReportManager:
                 else:
                     continue
                 report = cls.get_report(report_id)
+                if report is not None and not isinstance(report.report_id, str):
+                    raise TypeError("Saved report_id must be a string")
             except StoragePathError:
+                continue
+            except (OSError, ValueError, KeyError, TypeError, AttributeError) as error:
+                if not skip_unreadable:
+                    raise
+                logger.warning("Skipping unreadable saved report %s: %s", item, error)
                 continue
             if report:
                 yield report
 
     @classmethod
-    def get_report_by_simulation(cls, simulation_id: str) -> Optional[Report]:
-        """根据模拟ID获取报告"""
-        return next((report for report in cls._iter_reports()
-                     if report.simulation_id == simulation_id), None)
+    def get_report_by_simulation(
+        cls, simulation_id: str, *, skip_unreadable: bool = False,
+    ) -> Optional[Report]:
+        """Select latest regardless of status; only History skips unreadable records."""
+        reports = cls.list_reports(
+            simulation_id=simulation_id, limit=1, skip_unreadable=skip_unreadable,
+        )
+        return reports[0] if reports else None
+
+    @staticmethod
+    def _report_order_key(report: Report) -> tuple[str, str]:
+        """Keep recorded string chronology; the ID only breaks equal-date ties.
+
+        Blank/non-string dates are unavailable. Mixed-offset legacy timestamps
+        retain their existing lexical order rather than implying a timezone.
+        """
+        created_at = report.created_at
+        if not isinstance(created_at, str) or not created_at.strip():
+            created_at = ""
+        return created_at, report.report_id
 
     @classmethod
-    def list_reports(cls, simulation_id: Optional[str] = None, limit: int = 50) -> List[Report]:
+    def list_reports(
+        cls, simulation_id: Optional[str] = None, limit: int = 50,
+        *, skip_unreadable: bool = False,
+    ) -> List[Report]:
         """列出报告"""
-        reports = [report for report in cls._iter_reports()
+        reports = [report for report in cls._iter_reports(skip_unreadable=skip_unreadable)
                    if simulation_id is None or report.simulation_id == simulation_id]
-        reports.sort(key=lambda report: report.created_at, reverse=True)
+        reports.sort(key=cls._report_order_key, reverse=True)
         return reports[:limit]
 
     @classmethod

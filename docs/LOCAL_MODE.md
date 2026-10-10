@@ -1968,6 +1968,29 @@ is not an immutable snapshot of all simulation inputs or a new cancellation
 mechanism. Saved-report and imported-file views continue to read observations
 without starting report work.
 
+### Selecting a saved report after regeneration
+
+Simulation-based report reads, report lists, History and report chat select saved
+records by descending `(created_at, report_id)`. The ID is a stable tie breaker,
+not a creation-time signal. Blank, missing or non-string timestamps sort below
+dated records. Existing date strings retain their lexical ordering; legacy
+timestamps with different UTC offsets are not normalized into absolute chronology.
+Modern report folders and legacy JSON files use the configured report directory
+and the same storage-path checks. History skips individual records that cannot
+be read or reconstructed. Ordinary report selection remains strict: unreadable
+metadata is not silently replaced by an older completed report for generation
+or chat. Direct report-ID reads retain their existing errors.
+
+The latest record remains selected even if it failed or is incomplete. An older
+completed report does not hide that result. A deliberate generation request may
+start new work when the selected report is not completed; completed selections
+are reused unless forced. Direct report-ID reads still open older saved reports.
+Active worker ownership and graph-reader leases keep their existing precedence.
+
+One separate status limitation remains: `/generate/status` checks saved completion
+before an explicit task ID. During regeneration, before the new report is first
+saved, that endpoint can still report the older completed report.
+
 ### Report-generation log polling
 
 The Step 4 report-generation view keeps at most one pending request per log
