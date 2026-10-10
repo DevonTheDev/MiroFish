@@ -317,12 +317,24 @@ const startBuildGraph = async (context) => {
     if (!ownsView(context)) return
     if (res.success) {
       if (res.data.reused && res.data.graph_id) {
-        currentPhase.value = 2
-        buildProgress.value = null
+        // Active builds can already have a graph ID. Reconcile the current
+        // project before choosing its task observer or completed graph.
         const projectRes = await getProject(context.id, context.controller.signal)
         if (!ownsView(context)) return
-        if (projectRes.success) projectData.value = projectRes.data
-        await loadGraph(res.data.graph_id, context)
+        if (!projectRes.success) throw new Error(projectRes.error || 'Failed to load project')
+        const project = projectRes.data
+        projectData.value = project
+        if (project?.status === 'graph_completed' && project.graph_id) {
+          currentPhase.value = 2
+          buildProgress.value = null
+          await loadGraph(project.graph_id, context)
+        } else if (project?.status === 'graph_building' && project.graph_build_task_id) {
+          startPollingTask(project.graph_build_task_id, context)
+        } else {
+          throw new Error(project?.error || (project?.status === 'failed'
+            ? 'Project failed'
+            : 'Unable to resume graph build. Reload the project to check its current state.'))
+        }
         return
       }
 

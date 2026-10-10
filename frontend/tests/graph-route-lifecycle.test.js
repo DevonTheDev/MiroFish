@@ -12,6 +12,11 @@ const state = h => h.state(graphView)
 const createButton = h => h.find(node => node.props?.['data-testid'] === 'create-simulation')
 const refresh = async h => { h.graph().emit('refresh'); await settle() }
 const upload = id => setPendingUpload([new Blob(['synthetic ' + id])], 'synthetic requirement ' + id)
+async function reusedBuild(h, graphId = 'GA') {
+  await h.mount('/process/A')
+  pending(h, 'getProject').resolve(ok(generated('A'))); await settle()
+  pending(h, 'buildGraph').resolve(ok({ project_id: 'A', reused: true, graph_id: graphId, task_id: 'task-A' })); await settle()
+}
 async function loaded(h, id = 'A') {
   pending(h, 'getProject').resolve(ok(completed(id))); await settle()
   pending(h, 'getGraphData').resolve(ok({ nodes: [{ name: id + ' graph' }] })); await settle()
@@ -139,22 +144,132 @@ test('route change during assigned-ID navigation does not start the adopted buil
   } finally { release?.(); h.close(); clearPendingUpload() }
 })
 
-test('current ontology-generated project starts once and reuses a backend-completed graph', async () => {
+test('completed reuse reconciles its current graph without depending on the retained old task', async () => {
   const h = build()
   try {
-    await h.mount('/process/A')
-    pending(h, 'getProject').resolve(ok(generated('A'))); await settle()
+    await reusedBuild(h)
     assert.equal(h.calls('buildGraph').length, 1)
-    pending(h, 'buildGraph').resolve(ok({ reused: true, graph_id: 'GA' })); await settle()
-    await loaded(h)
+    assert.equal(state(h).currentPhase, 1)
+    assert.equal(createButton(h).props.disabled, true)
+    assert.equal(h.calls('getGraphData').length, 0)
+    // Completed projects can retain a task ID whose in-memory task no longer exists.
+    pending(h, 'getProject').resolve(ok({ ...completed('A'), graph_id: 'GA-current', graph_build_task_id: 'missing-old-task' })); await settle()
     assert.equal(h.calls('getTaskStatus').length, 0)
+    assert.equal(h.intervals.size, 0)
+    assert.equal(pending(h, 'getGraphData').args[0], 'GA-current')
+    pending(h, 'getGraphData').resolve(ok({ nodes: [{ name: 'current graph' }] })); await settle()
     assert.equal(state(h).currentPhase, 2); assert.equal(state(h).buildProgress, null)
     assert.equal(createButton(h).props.disabled, false)
+    createButton(h).props.onClick(); await settle()
+    assert.equal(pending(h, 'createSimulation').args[0].graph_id, 'GA-current')
   } finally { h.close() }
 })
 
-for (const response of [{ task_id: 'task-A', reused: true }, { graph_id: 'GA', reused: true }]) {
-  test(`late build reply ${response.task_id ? 'with active task' : 'with completed graph'} cannot continue on route B`, async () => {
+test('both-ID active reuse waits for reconciliation and observes the authoritative task through completion', async () => {
+  const h = build()
+  try {
+    await reusedBuild(h)
+    assert.equal(state(h).currentPhase, 1, 'a graph ID is not proof of completion')
+    assert.equal(state(h).statusText, 'Building Graph')
+    assert.equal(createButton(h).props.disabled, true)
+    createButton(h).props.onClick(); await settle()
+    assert.equal(h.calls('createSimulation').length, 0)
+    assert.equal(h.calls('getGraphData').length, 0)
+    assert.equal(h.calls('getTaskStatus').length, 0)
+    pending(h, 'getProject').resolve(ok({ ...building('A'), graph_id: 'GA-current', graph_build_task_id: 'task-current' })); await settle()
+    assert.equal(state(h).currentPhase, 1)
+    assert.equal(createButton(h).props.disabled, true)
+    createButton(h).props.onClick(); await settle()
+    assert.equal(h.calls('createSimulation').length, 0)
+    assert.equal(pending(h, 'getTaskStatus').args[0], 'task-current')
+    assert.equal(h.intervals.size, 1)
+    assert.equal([...h.intervals.values()][0].ms, 2000)
+    const queuedTick = [...h.intervals.values()][0].callback
+    await h.tick(2000)
+    assert.equal(h.calls('getTaskStatus').length, 1, 'reused work keeps single-flight observation')
+    for (const status of ['pending', 'processing']) {
+      pending(h, 'getTaskStatus').resolve(ok({ status, progress: 12, message: status })); await settle()
+      assert.equal(state(h).currentPhase, 1)
+      assert.equal(state(h).buildProgress.message, status)
+      assert.equal(createButton(h).props.disabled, true)
+      assert.equal(h.calls('getGraphData').length, 0)
+      await h.tick(2000)
+    }
+    assert.equal(h.calls('getTaskStatus').length, 3)
+    pending(h, 'getTaskStatus').resolve(ok({ status: 'completed', progress: 100 })); await settle()
+    queuedTick(); await h.tick(2000)
+    assert.equal(h.intervals.size, 0)
+    assert.equal(h.calls('getTaskStatus').length, 3)
+    assert.equal(h.calls('getProject').length, 3, 'one terminal project read while the final reply is pending')
+    assert.equal(h.calls('getGraphData').length, 0)
+    pending(h, 'getProject').resolve(ok({ ...completed('A'), graph_id: 'GA-final' })); await settle()
+    assert.equal(pending(h, 'getGraphData').args[0], 'GA-final')
+    pending(h, 'getGraphData').resolve(ok({ nodes: [{ name: 'final graph' }] })); await settle()
+    queuedTick(); await h.tick(2000)
+    assert.equal(h.calls('getGraphData').length, 1)
+    assert.equal(h.calls('getProject').length, 3)
+    assert.equal(h.calls('buildGraph').length, 1)
+    assert.equal(state(h).statusText, 'Ready')
+    assert.equal(state(h).graphData.nodes[0].name, 'final graph')
+    assert.equal(createButton(h).props.disabled, false)
+    createButton(h).props.onClick(); await settle()
+    assert.equal(pending(h, 'createSimulation').args[0].graph_id, 'GA-final')
+  } finally { h.close() }
+})
+
+test('active reuse without a graph ID continues to observe its task directly', async () => {
+  const h = build()
+  try {
+    await reusedBuild(h, null)
+    assert.equal(h.calls('getProject').length, 1)
+    assert.equal(h.calls('getTaskStatus').length, 1)
+    assert.equal(pending(h, 'getTaskStatus').args[0], 'task-A')
+    assert.equal(h.intervals.size, 1)
+    assert.equal(state(h).currentPhase, 1)
+    assert.equal(createButton(h).props.disabled, true)
+    assert.equal(h.calls('getGraphData').length, 0)
+  } finally { h.close() }
+})
+
+for (const [name, response, message] of [
+  ['failed project', ok({ ...completed('A'), status: 'failed', error: 'synthetic build failure' }), 'synthetic build failure'],
+  ['failed project without details', ok({ ...completed('A'), status: 'failed' }), 'Project failed'],
+  ['stale ontology', ok(generated('A'))],
+  ['reset project', ok({ project_id: 'A', status: 'created' })],
+  ['unknown status', ok({ ...completed('A'), status: 'unknown' })],
+  ['completed project without graph', ok({ ...completed('A'), graph_id: null })],
+  ['building project without task', ok({ ...building('A'), graph_id: 'GA', graph_build_task_id: null })],
+  ['missing project data', ok(null)],
+  ['missing status', ok({ project_id: 'A', graph_id: 'GA' })],
+  ['unsuccessful read', { success: false, error: 'synthetic project read failure' }, 'synthetic project read failure'],
+  ['unsuccessful read without details', { success: false }, 'Failed to load project'],
+  ['rejected read', new Error('synthetic project read rejection'), 'synthetic project read rejection'],
+]) {
+  test(`both-ID reuse fails visibly for ${name} without rebuilding or exposing Create`, async () => {
+    const h = build()
+    try {
+      await reusedBuild(h)
+      const request = pending(h, 'getProject')
+      if (response instanceof Error) request.reject(response); else request.resolve(response)
+      await settle(); await h.tick(2000); await h.tick(2000)
+      assert.equal(state(h).statusText, 'Error')
+      assert.equal(state(h).currentPhase, 1)
+      assert.ok(state(h).error)
+      if (message) assert.equal(state(h).error, message)
+      assert.equal(createButton(h).props.disabled, true)
+      createButton(h).props.onClick(); await settle()
+      assert.equal(h.calls('createSimulation').length, 0)
+      assert.equal(h.calls('buildGraph').length, 1, 'stale reconciliation must not recursively rebuild')
+      assert.equal(h.calls('getProject').length, 2)
+      assert.equal(h.calls('getTaskStatus').length, 0)
+      assert.equal(h.calls('getGraphData').length, 0)
+      assert.equal(h.intervals.size, 0)
+    } finally { h.close() }
+  })
+}
+
+for (const response of [{ task_id: 'task-A', reused: true }, { graph_id: 'GA', reused: true }, { task_id: 'task-A', graph_id: 'GA', reused: true }]) {
+  test(`late build reply with ${Object.keys(response).join(', ')} cannot continue on route B`, async () => {
     const h = build()
     try {
       await h.mount('/process/A'); pending(h, 'getProject').resolve(ok(generated('A'))); await settle()
@@ -166,6 +281,43 @@ for (const response of [{ task_id: 'task-A', reused: true }, { graph_id: 'GA', r
       assert.equal(state(h).projectData, null); assert.equal(state(h).loading, true)
     } finally { h.close() }
   })
+}
+
+for (const leave of ['A → B', 'A → B → A', 'unmount']) {
+  for (const outcome of ['building', 'completed', 'rejected']) {
+    test(`${leave} retires a both-ID reuse reconciliation that later ${outcome === 'rejected' ? 'rejects' : 'returns ' + outcome}`, async () => {
+      const h = build()
+      try {
+        await reusedBuild(h)
+        const old = pending(h, 'getProject')
+        if (leave === 'unmount') h.close()
+        else {
+          await h.navigate('/process/B')
+          if (leave === 'A → B → A') await h.navigate('/process/A')
+        }
+        assert.equal(old.signal?.aborted, true)
+        const before = { phase: state(h).currentPhase, logs: state(h).systemLogs.length, projectCalls: h.calls('getProject').length }
+        if (outcome === 'rejected') old.reject(new Error('retired reconciliation failure'))
+        else old.resolve(ok(outcome === 'building' ? { ...building('A'), graph_id: 'GA' } : completed('A')))
+        await settle(); await h.tick(2000)
+        assert.equal(state(h).currentPhase, before.phase)
+        assert.equal(state(h).systemLogs.length, before.logs)
+        assert.equal(state(h).projectData, null)
+        assert.equal(state(h).graphData, null)
+        assert.equal(state(h).error, '')
+        assert.equal(h.calls('getProject').length, before.projectCalls)
+        assert.equal(h.calls('buildGraph').length, 1)
+        assert.equal(h.calls('getTaskStatus').length, 0)
+        assert.equal(h.calls('getGraphData').length, 0)
+        assert.equal(h.intervals.size, 0)
+        if (leave !== 'unmount') {
+          assert.equal(createButton(h).props.disabled, true)
+          await loaded(h, leave === 'A → B' ? 'B' : 'A')
+          assert.equal(state(h).statusText, 'Ready')
+        }
+      } finally { h.close() }
+    })
+  }
 }
 
 test('task polling is single-flight and claims completion once before the final reads', async () => {

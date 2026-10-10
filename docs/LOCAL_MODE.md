@@ -27,6 +27,13 @@ accepted by the backend. If a leave is canceled, the selected saved project is
 loaded again. An interrupted upload shows a restart instruction instead of
 silently uploading a second time. These rules apply in local and cloud mode.
 
+A reused build can already have a graph ID while work is still running. Step 1
+checks the current project before showing Ready or enabling simulation creation:
+active work continues observing its current task, and completed work loads its
+current graph without requiring the old task to remain available. If that check
+fails or returns an incomplete or stale state, Step 1 shows an error instead of
+starting another build automatically.
+
 ## Choose a simulation platform
 
 In Step 1, after the graph is ready, select **Info Plaza** (Twitter), **Topic
