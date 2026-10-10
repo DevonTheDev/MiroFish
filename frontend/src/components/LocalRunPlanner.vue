@@ -30,6 +30,10 @@
         <button data-testid="load-cast" type="button" :disabled="!canPrepare" @click="$emit('load')">{{ $t(loadingCast ? 'localPlan.loading' : 'localPlan.load') }}</button>
         <p v-if="limitsValid && !plan.can_prepare && !plan.owner?.busy" class="hint">{{ $t('localPlan.savedError') }}</p>
         <template v-if="catalogLoaded">
+          <label class="cast-search" for="cast-search">{{ $t('localPlan.search') }}</label>
+          <input id="cast-search" data-testid="cast-search" type="search" :maxlength="searchLimit" :value="searchQuery"
+            :disabled="busy" aria-describedby="cast-search-hint cast-visible-count" @input="$emit('search', $event.target.value)">
+          <p id="cast-search-hint" data-testid="cast-search-hint" class="hint">{{ $t('localPlan.searchHint', { limit: searchLimit }) }}</p>
           <div class="cast-toolbar">
             <label>{{ $t('localPlan.filter') }}
               <select data-testid="cast-filter" :value="typeFilter" :disabled="busy" @change="$emit('filter', $event.target.value)">
@@ -37,9 +41,20 @@
                 <option v-for="type in types" :key="type" :value="type">{{ type }}</option>
               </select>
             </label>
+            <label>{{ $t('localPlan.view') }}
+              <select data-testid="cast-view" :value="selectedOnly ? 'selected' : 'all'" :disabled="busy" @change="$emit('view', $event.target.value === 'selected')">
+                <option value="all">{{ $t('localPlan.allCast') }}</option>
+                <option value="selected">{{ $t('localPlan.selectedOnly') }}</option>
+              </select>
+            </label>
+            <button data-testid="cast-clear-filters" type="button" :disabled="busy || !(typeFilter || searchQuery || selectedOnly)" @click="$emit('clear-filters')">{{ $t('localPlan.clearFilters') }}</button>
             <span>{{ $t('localPlan.selected', { count: selectedIds.length, cap: plan.limits.max_selectable_agents }) }}</span>
           </div>
-          <p v-if="!entities.length">{{ $t('localPlan.empty') }}</p>
+          <p id="cast-visible-count" data-testid="cast-visible-count" role="status" aria-live="polite">{{ $t('localPlan.visible', { count: filteredEntities.length, total: entities.length }) }}</p>
+          <p v-if="hiddenSelectedCount" data-testid="cast-hidden-selected" class="hint">{{ $t('localPlan.hiddenSelected', { count: hiddenSelectedCount }) }}</p>
+          <p v-if="!entities.length" data-testid="cast-empty">{{ $t('localPlan.empty') }}</p>
+          <p v-else-if="selectedOnly && !selectedIds.length" data-testid="cast-no-selection">{{ $t('localPlan.noSelection') }}</p>
+          <p v-else-if="!filteredEntities.length" data-testid="cast-no-matches">{{ $t('localPlan.noMatches') }}</p>
           <div class="cast-list">
             <label v-for="entity in filteredEntities" :key="entity.uuid" class="cast-item">
               <input type="checkbox" :data-testid="'entity-' + entity.uuid" :checked="selectedIds.includes(entity.uuid)"
@@ -77,22 +92,34 @@ import { computed } from 'vue'
 const props = defineProps({ plan: Object, checking: Boolean, waiting: Boolean, busy: Boolean, error: String,
   limitsValid: Boolean, canPrepare: Boolean, canReuse: Boolean, loadingCast: Boolean, catalogLoaded: Boolean,
   entities: { type: Array, default: () => [] }, selectedIds: { type: Array, default: () => [] },
+  searchQuery: { type: String, default: '' }, selectedOnly: Boolean, searchLimit: Number,
   typeFilter: String, useLlm: Boolean, maxRounds: Number, roundsValid: Boolean, roundsAction: Function, complete: Boolean, cancellationStatus: String,
   cancellationBlocked: Boolean, showCancel: Boolean, canCancel: Boolean, cancelRetry: Boolean, cancelAction: Function })
-defineEmits(['refresh', 'load', 'select', 'filter', 'profile-mode', 'prepare', 'reuse'])
+defineEmits(['refresh', 'load', 'select', 'filter', 'search', 'view', 'clear-filters', 'profile-mode', 'prepare', 'reuse'])
 const types = computed(() => [...new Set(props.entities.map(entity => entity.entity_type))].sort())
-const filteredEntities = computed(() => props.entities.filter(entity => !props.typeFilter || entity.entity_type === props.typeFilter))
+const filteredEntities = computed(() => {
+  const byId = new Map(props.entities.map(entity => [entity.uuid, entity]))
+  const source = props.selectedOnly ? props.selectedIds.map(id => byId.get(id)).filter(Boolean) : props.entities
+  const query = props.searchQuery.toLowerCase()
+  return source.filter(entity => (!props.typeFilter || entity.entity_type === props.typeFilter)
+    && (!query || [entity.name, entity.uuid, entity.entity_type, entity.summary].some(value => value.toLowerCase().includes(query))))
+})
+const hiddenSelectedCount = computed(() => {
+  const visibleIds = new Set(filteredEntities.value.map(entity => entity.uuid))
+  return props.selectedIds.filter(id => !visibleIds.has(id)).length
+})
 </script>
 
 <style scoped>
 .local-planner { background: white; border: 1px solid #ddd; border-radius: 8px; padding: 20px; color: #222; min-width: 0; }
 .planner-heading, .cast-toolbar { display: flex; gap: 12px; flex-wrap: wrap; align-items: center; justify-content: space-between; }
 h2 { font-size: 18px; margin: 0; } p { font-size: 13px; line-height: 1.6; }
-button, select { border: 1px solid #bbb; border-radius: 5px; background: #fff; padding: 9px 12px; max-width: 100%; font: inherit; }
-button { cursor: pointer; } button:disabled, select:disabled { opacity: .5; cursor: default; }
+button, select, input[type="search"] { border: 1px solid #bbb; border-radius: 5px; background: #fff; padding: 9px 12px; max-width: 100%; font: inherit; }
+button { cursor: pointer; } button:disabled, select:disabled, input:disabled { opacity: .5; cursor: default; }
 button:focus-visible, input:focus-visible, select:focus-visible { outline: 2px solid #ff5722; outline-offset: 3px; }
 .hint { color: #555; } .planner-error { color: #a22; } .limits { background: #f7f7f7; padding: 10px; }
 .cast-toolbar { margin: 16px 0 10px; font-size: 12px; } .cast-list { max-height: 320px; overflow: auto; }
+.cast-search { display: block; margin: 16px 0 6px; font-size: 12px; } input[type="search"] { width: 100%; box-sizing: border-box; }
 .cast-item { display: flex; align-items: flex-start; gap: 10px; padding: 12px 0; border-bottom: 1px solid #eee; }
 .cast-text { min-width: 0; overflow-wrap: anywhere; font-size: 13px; } .entity-id, .entity-summary { display: block; margin-top: 4px; color: #666; }
 .profile-choice { display: flex; gap: 12px; flex-wrap: wrap; align-items: center; margin-top: 20px; font-size: 13px; }

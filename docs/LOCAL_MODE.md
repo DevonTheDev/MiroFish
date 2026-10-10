@@ -101,7 +101,18 @@ cap. The ordinary cloud preparation workflow remains automatic.
    limits, saved-artifact availability and any current owner. An unknown mode,
    failed observation or invalid limit does not start preparation.
 2. Choose **Load cast** to connect to local graph memory and read eligible
-   entities. Select exact entities, using their names and types to find them.
+   entities. Use **Find cast**, the type filter and **Selected only** to find and
+   review exact entities. Search matches each loaded name, ID, type or summary
+   preview literally, ignoring case without normalizing Unicode or joining fields.
+   Spaces and punctuation stay literal. The input allows 256 UTF-16 units
+   (emoji can count as two); shortened previews may hide matches.
+   All cast keeps catalog order; Selected only follows the selected-ID order.
+   Counts show visible, loaded, total selected and hidden selected entities.
+   **Clear filters** restores All cast without changing the selection. Preparing
+   or saving a preset includes every selected ID, including hidden selections.
+   Opening a preset preserves its ID order; applying it leaves view filters intact.
+   These view controls make no requests and persist nothing. An accepted catalog
+   reload or planner reset clears them along with the existing type filter.
    For example, a graph with twenty people can supply a selected two-person cast;
    type filtering alone would still select twenty. Selected IDs remain exact,
    and an empty or over-limit selection cannot start preparation.

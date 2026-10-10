@@ -6,12 +6,14 @@
         :error="planError" :limits-valid="localLimitsValid" :can-prepare="canPrepareLocal" :can-reuse="canReuseLocal"
         :loading-cast="loadingCast" :catalog-loaded="catalogLoaded" :entities="catalog" :selected-ids="selectedEntityIds"
         :type-filter="typeFilter" :use-llm="useLlmProfiles" :complete="phase === 4"
+        :search-query="castSearchQuery" :selected-only="castSelectedOnly" :search-limit="castSearchLimit"
         :max-rounds="localMaxRounds" :rounds-valid="localRoundsValid" :rounds-action="plannerActions.draftRoundsInput"
         :cancellation-status="cancellationStatus" :cancellation-blocked="cancellationBlocked"
         :show-cancel="showCancelPreparation" :can-cancel="canCancelPreparation" :cancel-retry="cancelRetry"
         :cancel-action="cancelPreparationAction"
         @refresh="plannerActions.refresh" @load="plannerActions.load" @select="plannerActions.select"
         @filter="plannerActions.filter" @profile-mode="plannerActions.profileMode"
+        @search="plannerActions.search" @view="plannerActions.view" @clear-filters="plannerActions.clearFilters"
         @prepare="plannerActions.prepare" @reuse="plannerActions.reuse" />
       <LocalCastPresetPanel v-if="runtimeMode === 'local'" :key="'preset-' + plannerGeneration"
         :catalog-ready="presetCatalogReady" :project-id="catalogSnapshot?.project_id" :graph-id="catalogSnapshot?.graph_id"
@@ -720,6 +722,9 @@ const presetApplied = ref(false)
 let presetDownloadUrl = null
 const selectedEntityIds = ref([])
 const typeFilter = ref('')
+const castSearchLimit = 256 // Same UTF-16 unit bound as the native input maxlength.
+const castSearchQuery = ref('')
+const castSelectedOnly = ref(false)
 const useLlmProfiles = ref(false)
 const localMaxRounds = ref(null)
 const plannerActions = ref({})
@@ -860,6 +865,8 @@ const replacePreparation = () => {
   catalogSnapshot.value = null
   selectedEntityIds.value = []
   typeFilter.value = ''
+  castSearchQuery.value = ''
+  castSelectedOnly.value = false
   useLlmProfiles.value = false
   localMaxRounds.value = null
   plannerActions.value = {}
@@ -902,6 +909,16 @@ const replacePreparation = () => {
       else if (checked === false) selectedEntityIds.value = selected.filter(value => value !== id)
     },
     filter: value => { if (isActive(context) && !plannerBusy.value && typeof value === 'string') typeFilter.value = value },
+    search: value => {
+      if (isActive(context) && !plannerBusy.value && typeof value === 'string' && value.length <= castSearchLimit) castSearchQuery.value = value
+    },
+    view: value => { if (isActive(context) && !plannerBusy.value && typeof value === 'boolean') castSelectedOnly.value = value },
+    clearFilters: () => {
+      if (!isActive(context) || plannerBusy.value) return
+      typeFilter.value = ''
+      castSearchQuery.value = ''
+      castSelectedOnly.value = false
+    },
     profileMode: value => { if (isActive(context) && canPrepareLocal.value && typeof value === 'boolean') useLlmProfiles.value = value },
     draftRoundsInput: event => {
       if (!isActive(context) || phase.value !== 0 || !canPrepareLocal.value) return
@@ -1292,6 +1309,8 @@ const loadLocalCast = context => {
       catalogLoaded.value = true
       selectedEntityIds.value = []
       typeFilter.value = ''
+      castSearchQuery.value = ''
+      castSelectedOnly.value = false
     } catch (error) {
       if (isActive(context)) planError.value = planningErrorKey(error)
     } finally {
