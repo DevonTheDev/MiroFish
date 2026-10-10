@@ -61,7 +61,8 @@ def inventory(root):
     }
 
 
-def run_workflow(storage, monkeypatch, mode, before_request=None, *, helper="saved-interviews-backend-check.mjs"):
+def run_workflow(storage, monkeypatch, mode, before_request=None, *, helper="saved-interviews-backend-check.mjs",
+                 expected_statuses=None, after_workflow=None):
     repo = Path(__file__).resolve().parents[2]
     node = shutil.which("node")
     if node is None or not (repo / "frontend/node_modules/vue/package.json").is_file():
@@ -138,11 +139,14 @@ def run_workflow(storage, monkeypatch, mode, before_request=None, *, helper="sav
         server.shutdown()
         server.server_close()
         thread.join(timeout=5)
+        if after_workflow:
+            after_workflow()
     assert not thread.is_alive()
     assert observed
     assert all(method == "GET" and path.endswith("/saved-interviews") and language == "en"
                for method, path, _query, language in observed)
-    assert all(status == 200 and cache_control == "no-store" and size <= 4 * 1024 * 1024
+    assert [status for status, _cache, _size in returned] == (expected_statuses or [200] * len(returned))
+    assert all(cache_control == "no-store" and size <= 4 * 1024 * 1024
                for status, cache_control, size in returned)
     assert len(observed) == len(returned)
     assert connections and all(connection.workflow_closed for connection in connections)
@@ -186,9 +190,9 @@ def test_saved_interviews_reopen_filters_refresh_wal_and_exact_download(storage,
 
         observed = run_workflow(storage, monkeypatch, "reopen", append_at_refresh)
         assert unfiltered_reads == 3
-        assert any(query == "platform=twitter&agent_id=9223372036854775807"
+        assert any(query == "platform=twitter&agent_id=9223372036854775807&window=1"
                    for _method, _path, query, _language in observed)
-        assert any(query == "platform=reddit&agent_id=0"
+        assert any(query == "platform=reddit&agent_id=0&window=1"
                    for _method, _path, query, _language in observed)
     finally:
         writer.close()

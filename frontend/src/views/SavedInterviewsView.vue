@@ -10,7 +10,7 @@
           <div><label for="interviews-agent-id">{{ t('savedActivity.agentId') }}</label><input id="interviews-agent-id" data-testid="interviews-agent-id" inputmode="numeric" :value="draft.agent_id" :placeholder="t('savedActivity.any')" aria-describedby="interviews-filter-note" :onInput="liveHandlers.agent"></div>
         </div>
         <p id="interviews-filter-note" class="note">{{ t('savedInterviews.filterNote') }}</p>
-        <div class="actions"><button type="submit" class="primary" data-testid="interviews-apply" :onClick="liveHandlers.apply">{{ t('savedActivity.apply') }}</button><button type="button" data-testid="interviews-refresh" :onClick="liveHandlers.refresh">{{ t('savedActivity.refresh') }}</button><button type="button" data-testid="interviews-download" :disabled="!accepted" :onClick="downloadHandler(result)">{{ t('savedInterviews.download') }}</button></div>
+        <div class="actions"><button type="submit" class="primary" data-testid="interviews-apply" :onClick="liveHandlers.apply">{{ t('savedActivity.apply') }}</button><button type="button" data-testid="interviews-refresh" :onClick="liveHandlers.refresh">{{ t('savedInterviews.refreshNewest') }}</button><button type="button" data-testid="interviews-download" :disabled="!accepted" :onClick="downloadHandler(result)">{{ t('savedInterviews.download') }}</button></div>
       </form>
       <section v-else class="panel" aria-labelledby="interviews-file-heading">
         <h2 id="interviews-file-heading">{{ t('savedInterviewFiles.openTitle') }}</h2>
@@ -25,7 +25,7 @@
           <p class="notice">{{ t('savedInterviewFiles.unverified') }}</p>
           <p class="literal">{{ t('savedInterviewFiles.filename') }}: {{ fileState.filename }}</p>
           <p class="simulation-id">{{ t('savedInterviewFiles.simulation') }}: {{ fileState.preview.simulation_id }}</p>
-          <p>{{ recordedFilters(fileState.preview) }}</p><p>{{ t('savedInterviewFiles.observedAt', { time: fileState.preview.observed_at }) }}</p>
+          <p>{{ recordedFilters(fileState.preview) }}</p><p v-if="fileState.preview.version === 2" class="note literal" data-testid="interviews-file-window">{{ recordedWindow(fileState.preview) }}</p><p>{{ t('savedInterviewFiles.observedAt', { time: fileState.preview.observed_at }) }}</p>
           <p>{{ t('savedInterviewFiles.recordCount', { count: fileState.preview.records.length }) }} · {{ t('savedInterviewFiles.availability', { status: t(`comparison.availability.${fileState.preview.availability}`) }) }}</p>
           <p>{{ t('savedInterviewFiles.limitsNote', { count: fileState.preview.limits.rows_per_platform, total: fileState.preview.limits.rows_total }) }}</p>
           <p v-for="platform in platforms" :key="platform">{{ t(`comparison.platforms.${platform}`) }}: {{ t(`savedInterviewFiles.statuses.${fileState.preview.sources[platform].status}`) }} · {{ t(`savedInterviewFiles.coverage.${fileState.preview.sources[platform].coverage}`) }} · {{ t('savedInterviewFiles.returned', { count: fileState.preview.sources[platform].returned_count }) }}</p>
@@ -39,6 +39,8 @@
       <p v-if="error" class="notice error" data-testid="interviews-error" role="alert">{{ t(`savedInterviews.errors.${error}`) }}</p>
       <section v-if="accepted" data-testid="interviews-results" :aria-label="t('savedInterviews.resultsTitle')">
         <template v-if="fileMode"><p class="notice">{{ t('savedInterviewFiles.unverified') }}</p><p class="literal" data-testid="interviews-file-name">{{ t('savedInterviewFiles.filename') }}: {{ acceptedFile.filename }}</p><p class="simulation-id">{{ t('savedInterviewFiles.simulation') }}: {{ result.simulation_id }}</p><p>{{ recordedFilters(result) }}</p></template>
+        <p v-if="result.version === 2" class="note literal" data-testid="interviews-window">{{ recordedWindow(result) }}</p><p v-else-if="!fileMode" class="note">{{ t('savedInterviews.selectPlatformWindow') }}</p>
+        <div v-if="!fileMode && result.version === 2" class="actions"><button type="button" data-testid="interviews-older" :disabled="!canReadOlder" :onClick="olderHandler(result)">{{ t('savedInterviews.older') }}</button><p class="note">{{ t('savedInterviews.windowNote') }}</p></div><p v-if="!fileMode && result.version === 2 && !canReadOlder" class="note" data-testid="interviews-older-reason">{{ t(`savedInterviews.${result.sources[result.filters.platform].status !== 'available' ? 'windowUnavailable' : result.sources[result.filters.platform].has_more ? 'windowNoProgress' : 'windowEnd'}`) }}</p>
         <div class="summary-heading"><h2>{{ t(fileMode ? 'savedInterviewFiles.resultsTitle' : 'savedInterviews.resultsTitle') }}</h2><span class="availability" :class="result.availability" data-testid="interviews-availability">{{ fileMode ? t('savedInterviewFiles.availability', { status: t(`comparison.availability.${result.availability}`) }) : t(`comparison.availability.${result.availability}`) }}</span></div>
         <p class="note">{{ t(fileMode ? 'savedInterviewFiles.observedAt' : 'savedActivity.observedAt', { time: result.observed_at }) }}</p><p class="note">{{ t(fileMode ? 'savedInterviewFiles.limitsNote' : 'savedInterviews.limitsNote', { count: result.limits.rows_per_platform, total: result.limits.rows_total }) }}</p>
         <div class="actions" role="group" :aria-label="t('savedInterviews.reviewMode')">
@@ -96,7 +98,7 @@ import { SAVED_INTERVIEW_FILE_MAX_BYTES, readSavedInterviewFile } from '../utils
 
 const { t } = useI18n(), route = useRoute(), router = useRouter()
 const platforms = ['twitter', 'reddit'], filterKeys = ['platform', 'agent_id'], pageSize = 25
-const errorCodes = ['invalid_selection', 'invalid_filters', 'unsafe_path', 'interviews_unavailable', 'response_too_large']
+const errorCodes = ['invalid_selection', 'invalid_filters', 'unsafe_path', 'interviews_unavailable', 'response_too_large', 'source_changed']
 const result = shallowRef(null), loading = ref(false), error = ref(''), dirty = ref(false)
 const emptyPresentation = () => ({ mode: 'records', key: null, page: 0, query: '' })
 const presentation = shallowRef(emptyPresentation())
@@ -117,10 +119,22 @@ function filters(values) {
 }
 function selection() {
   if (!/^[A-Za-z0-9_-]{1,128}$/.test(simulationId.value)) fail('invalid_selection')
-  for (const [key, value] of Object.entries(route.query)) if (!filterKeys.includes(key) || typeof value !== 'string' || value === '') fail('invalid_filters')
-  return { simulation_id: simulationId.value, filters: filters(route.query) }
+  for (const [key, value] of Object.entries(route.query)) if (![...filterKeys, 'window', 'before_row', 'revision'].includes(key) || typeof value !== 'string' || value === '') fail('invalid_filters')
+  const selected = { simulation_id: simulationId.value, filters: filters(route.query) }
+  const { window, before_row, revision: sourceRevision } = route.query
+  if (window !== undefined && (window !== '1' || selected.filters.platform === null)) fail('invalid_filters')
+  if (before_row !== undefined || sourceRevision !== undefined) {
+    if (window !== '1' || !validDecimal(before_row, true) || typeof sourceRevision !== 'string' || !/^[0-9a-f]{64}$/.test(sourceRevision)) fail('invalid_filters')
+    selected.window = { before_row, source_revision: sourceRevision }
+  }
+  return selected
 }
-function requestParams(selected) { return Object.fromEntries(filterKeys.filter(key => selected.filters[key] !== null).map(key => [key, selected.filters[key]])) }
+function requestParams(selected) {
+  const params = Object.fromEntries(filterKeys.filter(key => selected.filters[key] !== null).map(key => [key, selected.filters[key]]))
+  if (selected.filters.platform !== null) params.window = '1'
+  if (selected.window) { params.before_row = selected.window.before_row; params.revision = selected.window.source_revision }
+  return params
+}
 function disposeDownload(attempt) {
   if (!attempt) return
   if (activeDownload === attempt) activeDownload = null
@@ -156,7 +170,11 @@ async function load() {
   try {
     const response = await getSavedInterviews(selected.simulation_id, requestParams(selected), request.controller.signal)
     if (!owns(request)) return
-    if (!exactKeys(response, ['success', 'data']) || response.success !== true || !validResponse(response.data, selected)) throw new Error('Invalid saved interview observation')
+    if (!exactKeys(response, ['success', 'data']) || response.success !== true
+      || !validResponse(response.data, { simulation_id: selected.simulation_id, filters: selected.filters })
+      || response.data.version !== (selected.filters.platform === null ? 1 : 2)
+      || response.data.version === 2 && (response.data.window.before_row !== (selected.window?.before_row ?? null)
+        || selected.window && response.data.window.source_revision !== selected.window.source_revision)) throw new Error('Invalid saved interview observation')
     result.value = response.data
   } catch (cause) {
     if (!owns(request)) return
@@ -193,7 +211,7 @@ function applyFilters() {
 }
 function refresh() {
   if (disposed || fileMode.value) return
-  try { return navigateSelected(selection()) }
+  try { const selected = selection(); return navigateSelected({ simulation_id: selected.simulation_id, filters: selected.filters }) }
   catch (cause) { if (retire()) error.value = cause.selectionCode ?? 'invalid_selection' }
 }
 // Capture the rendered route revision as well as its mode. Hidden controls
@@ -208,6 +226,24 @@ const liveHandlers = computed(() => {
     agent: event => { if (current()) editDraft('agent_id', event.target.value) },
   }
 })
+const canReadOlder = computed(() => {
+  if (!accepted.value || fileMode.value || result.value.version !== 2) return false
+  const saved = result.value, source = saved.sources[saved.filters.platform], last = saved.records.at(-1)
+  return source.status === 'available' && source.has_more === true && !!last
+    && (saved.window.before_row === null || BigInt(last.row_id) < BigInt(saved.window.before_row))
+})
+function olderHandler(saved) {
+  const current = observationOwner(saved)
+  return () => {
+    if (!current() || fileMode.value || !canReadOlder.value) return
+    return navigateSelected({ simulation_id: saved.simulation_id, filters: saved.filters,
+      window: { before_row: saved.records.at(-1).row_id, source_revision: saved.window.source_revision } })
+  }
+}
+function recordedWindow(data) {
+  return t(data.window.before_row === null ? 'savedInterviews.windowNewest' : 'savedInterviews.windowBefore',
+    { row: data.window.before_row, revision: data.window.source_revision })
+}
 function ownsFile(owned) { return !disposed && fileMode.value && revision.value === owned }
 function updateFile(owned, changes) {
   if (!ownsFile(owned)) return null

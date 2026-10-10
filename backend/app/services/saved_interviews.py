@@ -9,7 +9,9 @@ against a local process concurrently replacing paths.
 from contextlib import closing
 from datetime import datetime, timezone
 import codecs
+import hashlib
 import json
+import os
 from pathlib import Path
 import re
 import sqlite3
@@ -35,6 +37,7 @@ _MESSAGES = {
     "unsafe_path": "The saved storage path is not safe to read.",
     "interviews_unavailable": "Saved interviews could not be read.",
     "response_too_large": "The saved interview observation exceeds its response limit.",
+    "source_changed": "The saved interview source changed. Refresh newest to start a new observation.",
 }
 
 
@@ -61,9 +64,50 @@ def _selection(platform, agent_id):
 
 def parse_saved_interviews_query(args):
     """Reject unknown, repeated and noncanonical filters before storage reads."""
-    if any(key not in {"platform", "agent_id"} or len(args.getlist(key)) != 1 for key in args):
+    if any(key not in {"platform", "agent_id", "window", "before_row", "revision"}
+           or len(args.getlist(key)) != 1 for key in args):
         raise SavedInterviewsError("invalid_filters")
-    return _selection(args.get("platform"), args.get("agent_id"))
+    selected = _selection(args.get("platform"), args.get("agent_id"))
+    window, before_row, revision = (args.get(key) for key in ("window", "before_row", "revision"))
+    _window_selection(selected["platform"], window, before_row, revision)
+    return {**selected, **({"window": window, "before_row": before_row, "revision": revision}
+                           if window is not None else {})}
+
+
+def _window_selection(platform, window, before_row, revision):
+    if window is None and before_row is None and revision is None:
+        return
+    if window != "1" or platform not in _PLATFORMS:
+        raise SavedInterviewsError("invalid_filters")
+    if before_row is None and revision is None:
+        return
+    if (not isinstance(before_row, str)
+            or re.fullmatch(r"0|-?[1-9][0-9]{0,18}", before_row) is None
+            or not -2**63 <= int(before_row) <= 2**63 - 1
+            or not isinstance(revision, str) or re.fullmatch(r"[0-9a-f]{64}", revision) is None):
+        raise SavedInterviewsError("invalid_filters")
+
+
+def _source_revision(simulation_id, filters, paths):
+    # Ordinary saved-file identity, not a content-authenticated archive. SHM is
+    # reader bookkeeping and must not invalidate unchanged committed WAL data.
+    fingerprints = []
+    for suffix in ("", "-wal", "-journal"):
+        try:
+            info = os.lstat(paths[suffix])
+            fingerprint = (info.st_dev, info.st_ino, info.st_mode, info.st_size,
+                           info.st_mtime_ns, info.st_ctime_ns)
+            # SQLite may create an empty WAL on a read-only open after the last
+            # writer closed. It carries no frames; bind every nonempty WAL.
+            if suffix == "-wal" and stat.S_ISREG(info.st_mode) and info.st_size == 0:
+                fingerprint = None
+        except FileNotFoundError:
+            fingerprint = None
+        except OSError as error:
+            fingerprint = ("unreadable", error.errno)
+        fingerprints.append((suffix, fingerprint))
+    context = [simulation_id, filters, fingerprints]
+    return hashlib.sha256(json.dumps(context, sort_keys=True, separators=(",", ":")).encode("utf-8")).hexdigest()
 
 
 def encode_response(data):
@@ -210,7 +254,7 @@ def _rowid_name(connection):
     raise sqlite3.DatabaseError("unavailable physical rowid")
 
 
-def _read_platform(platform, paths, agent_id, response_budget):
+def _read_platform(platform, paths, agent_id, response_budget, before_row=None):
     checked = _source_check(paths)
     if checked is not None:
         return checked, []
@@ -241,6 +285,9 @@ def _read_platform(platform, paths, agent_id, response_budget):
                 # text identities; never coerce floats or padded strings to IDs.
                 where += " AND ((typeof(user_id) = 'integer' AND user_id = ?) OR (typeof(user_id) = 'text' AND CAST(user_id AS BLOB) = CAST(? AS BLOB)))"
                 params.extend((int(agent_id), agent_id))
+            if before_row is not None:
+                where += f" AND {rowid} < ?"
+                params.append(int(before_row))
             params.append(MAX_ROWS_PER_PLATFORM + 1)
             cursor = connection.execute(f"""
                 SELECT {rowid},
@@ -286,22 +333,27 @@ def _read_platform(platform, paths, agent_id, response_budget):
     return source, records
 
 
-def read_saved_interviews(run_root, simulation_id, *, platform=None, agent_id=None):
+def read_saved_interviews(run_root, simulation_id, *, platform=None, agent_id=None,
+                          window=None, before_row=None, revision=None):
     """Observe current saved trace rows, without managers, profiles or inference."""
     try:
         validate_record_id(simulation_id)
     except StoragePathError:
         raise SavedInterviewsError("invalid_selection") from None
     filters = _selection(platform, agent_id)
+    _window_selection(platform, window, before_row, revision)
     platforms = (platform,) if platform else _PLATFORMS
     try:
         paths = _paths(run_root, simulation_id, platforms)
     except StoragePathError:
         raise SavedInterviewsError("unsafe_path") from None
+    source_revision = _source_revision(simulation_id, filters, paths[platform]) if window else None
+    if revision is not None and revision != source_revision:
+        raise SavedInterviewsError("source_changed", 409)
     # Reserve each requested source its own share so a large Twitter payload
     # cannot consume the space needed to retain a healthy Reddit observation.
     budget = max(0, (MAX_RESPONSE_BYTES - _ENVELOPE_RESERVE_BYTES) // len(platforms))
-    data = {"version": 1, "simulation_id": simulation_id, "filters": filters,
+    data = {"version": 2 if window else 1, "simulation_id": simulation_id, "filters": filters,
             "observed_at": datetime.now(timezone.utc).isoformat(), "order": "platform_then_row_desc",
             "limits": {"rows_per_platform": MAX_ROWS_PER_PLATFORM, "rows_total": MAX_ROWS_TOTAL,
                 "database_bytes": MAX_DATABASE_BYTES, "wal_bytes": MAX_WAL_BYTES,
@@ -309,8 +361,15 @@ def read_saved_interviews(run_root, simulation_id, *, platform=None, agent_id=No
                 "payload_bytes": MAX_PAYLOAD_BYTES, "timestamp_bytes": MAX_TIMESTAMP_BYTES,
                 "response_bytes": MAX_RESPONSE_BYTES, "response_bytes_per_platform": budget},
             "availability": "unavailable", "sources": {p: _source() for p in _PLATFORMS}, "records": []}
+    if window:
+        data["window"] = {"before_row": before_row, "source_revision": source_revision}
     for name in platforms:
-        source, records = _read_platform(name, paths[name], agent_id, budget)
+        try:
+            source, records = _read_platform(name, paths[name], agent_id, budget, before_row)
+        finally:
+            # Check after the connection closes, including partial/failed reads.
+            if window and _source_revision(simulation_id, filters, paths[name]) != source_revision:
+                raise SavedInterviewsError("source_changed", 409)
         data["sources"][name] = source
         data["records"].extend(records)
     coverage = [data["sources"][name]["coverage"] for name in platforms]

@@ -2117,8 +2117,18 @@
       "invalid_filters": "只允许可选的 Twitter 或 Reddit 平台，以及 0 至 9223372036854775807 之间、不含前导零的精确智能体 ID。",
       "unsafe_path": "无法安全读取此保存记录。请返回历史记录并选择其他模拟。",
       "interviews_unavailable": "无法读取已保存访谈。请刷新重试。",
-      "response_too_large": "观察结果超过响应大小限制。请缩小平台或精确智能体 ID 范围并应用筛选。"
-    }
+      "response_too_large": "观察结果超过响应大小限制。请缩小平台或精确智能体 ID 范围并应用筛选。",
+      "source_changed": "已保存的访谈数据源发生变化。请选择“刷新最新记录”开始新的观测。系统没有自动切换到更新的窗口。"
+    },
+    "refreshNewest": "刷新最新记录",
+    "older": "读取更早的已保存回复",
+    "selectPlatformWindow": "选择 Twitter 或 Reddit，以有界窗口读取更早的已保存回复。",
+    "windowNewest": "最新的已保存窗口。数据源版本：{revision}",
+    "windowBefore": "物理行 {row} 之前的已保存窗口（不含该行）。数据源版本：{revision}",
+    "windowNote": "读取更早的已保存回复会打开一个独立的有界窗口。搜索和翻页仅用于当前窗口。刷新最新记录会重新从最新回复开始。",
+    "windowUnavailable": "该数据源不可用或查询受限，无法安全读取更早的回复。请查看下方的数据源状态和警告。",
+    "windowNoProgress": "此有界响应未能保留任何记录，无法确定更早的边界。请查看下方的响应大小限制警告。",
+    "windowEnd": "此窗口之后没有更早的匹配回复。"
   },
   "savedInterviewFiles": {
     "title": "打开已保存访谈文件",

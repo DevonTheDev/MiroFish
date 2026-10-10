@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { setup, resolve, observation, record, source, flush } from './helpers/saved-interviews-view-fixture.js'
+import { setup, resolve, observation, windowObservation, record, source, flush } from './helpers/saved-interviews-view-fixture.js'
 
 const path = '/simulation/sim_A/interviews'
 const event = value => ({ target: { value }, preventDefault() {}, stopPropagation() {} })
@@ -146,7 +146,7 @@ test('language changes preserve current group and full literal prompt while Back
   const oldSelect = h.byId('interviews-question-select').props.onChange, oldPage = h.byId('interviews-next').props.onClick
   await h.navigate(`${path}?platform=twitter`); await h.back()
   await resolve(calls.getSavedInterviews.at(-1), multipleQuestions()); assert.equal(mode(h), false)
-  await h.forward(); await resolve(calls.getSavedInterviews.at(-1), observation({ filters: { platform: 'twitter', agent_id: null }, records: multipleQuestions().records.filter(row => row.platform === 'twitter') }))
+  await h.forward(); await resolve(calls.getSavedInterviews.at(-1), windowObservation({ filters: { platform: 'twitter', agent_id: null }, records: multipleQuestions().records.filter(row => row.platform === 'twitter') }))
   oldSelect(event('question-1')); oldPage(event()); await flush(); assert.equal(mode(h), false)
   await h.click('interviews-questions-mode'); const currentSelect = h.byId('interviews-question-select').props.onChange
   h.unmount(); currentSelect(event('question-0')); oldPage(event()); await flush()

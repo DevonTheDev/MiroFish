@@ -2117,8 +2117,18 @@
       "invalid_filters": "Use only an optional Twitter or Reddit platform and an exact agent ID from 0 to 9223372036854775807, without leading zeroes.",
       "unsafe_path": "This saved record cannot be safely read. Return to History and choose another simulation.",
       "interviews_unavailable": "Saved interviews could not be read. Refresh to try again.",
-      "response_too_large": "The observation exceeds the response size limit. Narrow the platform or exact agent ID and apply filters."
-    }
+      "response_too_large": "The observation exceeds the response size limit. Narrow the platform or exact agent ID and apply filters.",
+      "source_changed": "The saved interview source changed. Choose Refresh newest to start a new observation. No newer window was substituted."
+    },
+    "refreshNewest": "Refresh newest",
+    "older": "Older saved replies",
+    "selectPlatformWindow": "Select Twitter or Reddit to read older saved replies in bounded windows.",
+    "windowNewest": "Newest saved window. Source revision: {revision}",
+    "windowBefore": "Saved window below physical row {row} (exclusive). Source revision: {revision}",
+    "windowNote": "Older saved replies reads a separate bounded window. Search and page controls only review this window. Refresh newest starts again at the latest replies.",
+    "windowUnavailable": "Older replies cannot be read safely from this unavailable or query-limited source. See the source status and warnings below.",
+    "windowNoProgress": "No row fits in this bounded response, so an older boundary cannot be established. See the response-limit warning below.",
+    "windowEnd": "There are no more matching saved replies below this window."
   },
   "savedInterviewFiles": {
     "title": "Open saved interview file",

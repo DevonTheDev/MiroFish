@@ -2171,8 +2171,8 @@ Twitter and Reddit SQLite interview traces without loading a model, starting a
 runner, or requiring a report, graph, profiles or simulation configuration.
 Choose a platform or enter an exact agent ID, then Apply. Agent zero is valid;
 IDs remain decimal strings so large signed-64-bit identifiers keep their exact
-identity. Refresh observes newly committed replies, including committed WAL
-data from a running environment.
+identity. **Refresh newest** observes newly committed replies, including committed
+WAL data from a running environment, and restarts an older view at newest.
 
 Each platform has its own source status and coverage. A successful empty source
 is different from a missing, unreadable or limited one. Accepted records retain
@@ -2220,11 +2220,43 @@ the selected simulation or refreshing retires the previous result and download.
 A download failure preserves the accepted observation for another attempt; check
 existing downloads first because a file may already have been saved.
 
+Select Twitter or Reddit to acquire a newest single-platform window and its
+source revision. **Older saved replies** requests the next independent window,
+using the last returned physical row in the entire accepted observation, even
+when a question, search or local page hides that row. It does not accumulate an
+archive. Coverage and additional-row availability refer only to the recorded
+selection/window. A complete older window does not cover newer rows. No older
+request is offered when a source is unavailable/query-limited, exhausted, or
+retains no usable row; source warnings and a reason stay visible.
+
+Older boundaries and revisions are carried in the URL. Back/Forward requests
+that exact window against its recorded revision. An ordinary source change
+returns HTTP 409 and clears the old display/download. Choose **Refresh newest**
+to deliberately restart; there is no automatic replacement read. Filter Apply
+also starts at newest and retains only the selected platform and agent filter.
+
 The separate GET endpoint
-`/api/simulation/<simulation_id>/saved-interviews` accepts only optional
-`platform=twitter|reddit` and canonical decimal `agent_id` values from `0` through
-`9223372036854775807`. Unknown, repeated, signed, padded or blank query values
-are rejected. Every response uses `Cache-Control: no-store`. Each requested
+`/api/simulation/<simulation_id>/saved-interviews` retains its version-1 response
+by default, with optional `platform=twitter|reddit` and canonical nonnegative
+`agent_id` values from `0` through `9223372036854775807`. Opt in to version 2 with
+`window=1` and exactly one platform. The initial request has no boundary or
+revision. Continued requests require both canonical signed-64-bit `before_row`
+(`-9223372036854775808` through `9223372036854775807`) and the returned lowercase
+64-hex `revision`. SQL reads physical IDs strictly below that boundary. Unknown,
+repeated, noncanonical or blank query values are rejected before database reads.
+
+Version 2 adds `window: {before_row, source_revision}`; a newest window records
+`before_row: null`. Returned rows must be below the recorded boundary, and full
+JSON downloads preserve this context. Version-1 files remain accepted. Local
+file previews, accepted views and mixed-version comparisons show window context
+without fetching missing records, even after the source databases are removed.
+
+Revisions bind the simulation/platform/agent scope to ordinary main-database,
+nonempty WAL and journal fingerprints checked before and after connection close.
+SQLite reader-created zero-byte WAL and SHM bookkeeping do not invalidate a
+window. Appends, checkpoints, replacements and other content-source changes
+invalidate continuation. These stat fingerprints do not authenticate content
+against hostile same-metadata changes, and no transaction spans requests. Every response uses `Cache-Control: no-store`. Each requested
 platform returns at most 100 rows (200 combined), with a 160 MiB main-database
 limit, 64 MiB WAL limit, two-million-operation SQLite budget and 0.25-second lock
 timeout. Payload previews are limited to 16 KiB and saved timestamps to 256 bytes,

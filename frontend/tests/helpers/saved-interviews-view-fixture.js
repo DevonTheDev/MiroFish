@@ -182,3 +182,8 @@ export async function setup(t, initialPath = '/simulation/sim_A/interviews', loc
   t.after(() => h.unmount()); return { ...d, h }
 }
 export async function resolve(call, data = observation()) { assert.ok(call, 'Saved interviews request must exist'); call.resolve(ok(data)); await flush() }
+
+// Explicit newest-window fixture; version-1 file fixtures remain unchanged.
+export function windowObservation(overrides = {}) {
+  return observation({ version: 2, window: { before_row: null, source_revision: 'a'.repeat(64) }, ...overrides })
+}

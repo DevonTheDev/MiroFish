@@ -11,7 +11,7 @@
         <div v-if="pending.loading || pending.preview || pending.error" class="actions"><button type="button" data-testid="interview-compare-cancel" :onClick="fileHandlers.cancel">{{ t('savedInterviewFiles.cancel') }}</button></div>
         <section v-if="pending.preview" data-testid="interview-compare-preview" class="preview" aria-labelledby="compare-preview-heading">
           <h3 id="compare-preview-heading">{{ t('savedInterviewFiles.preview') }}</h3><p class="notice">{{ t('savedInterviewFiles.unverified') }}</p>
-          <p class="literal">{{ t('savedInterviewFiles.filename') }}: {{ pending.filename }}</p><p class="literal">{{ t('savedInterviewFiles.simulation') }}: {{ pending.preview.simulation_id }}</p><p>{{ recordedFilters(pending.preview) }}</p><p>{{ t('savedInterviewFiles.observedAt', { time: pending.preview.observed_at }) }}</p>
+          <p class="literal">{{ t('savedInterviewFiles.filename') }}: {{ pending.filename }}</p><p class="literal">{{ t('savedInterviewFiles.simulation') }}: {{ pending.preview.simulation_id }}</p><p>{{ recordedFilters(pending.preview) }}</p><p v-if="pending.preview.version === 2" class="note literal" data-testid="interview-compare-preview-window">{{ recordedWindow(pending.preview) }}</p><p>{{ t('savedInterviewFiles.observedAt', { time: pending.preview.observed_at }) }}</p>
           <p>{{ t('savedInterviewFiles.recordCount', { count: pending.preview.records.length }) }} · {{ t('savedInterviewFiles.availability', { status: t(`comparison.availability.${pending.preview.availability}`) }) }}</p><p class="note">{{ t('savedInterviewFiles.limitsNote', { count: pending.preview.limits.rows_per_platform, total: pending.preview.limits.rows_total }) }}</p>
           <p v-for="platform in platforms" :key="platform">{{ t(`comparison.platforms.${platform}`) }}: {{ t(`savedInterviewFiles.statuses.${pending.preview.sources[platform].status}`) }} · {{ t(`savedInterviewFiles.coverage.${pending.preview.sources[platform].coverage}`) }} · {{ t('savedInterviewFiles.returned', { count: pending.preview.sources[platform].returned_count }) }}</p>
           <div class="actions"><button v-for="side in sides" :key="side" type="button" class="primary" :data-testid="`interview-compare-accept-${side}`" :onClick="fileHandlers[side]">{{ t(pair[side] ? 'savedInterviewComparison.replaceSide' : 'savedInterviewComparison.acceptSide', { side: t(`savedInterviewComparison.${side}`) }) }}</button></div>
@@ -28,7 +28,7 @@
         <section v-for="side in sides" :key="side" class="side-column" :data-testid="pair[side] ? `interview-compare-${side}-side` : undefined" :aria-label="t(`savedInterviewComparison.${side}`)">
           <template v-if="pair[side]">
             <div class="panel">
-              <h2>{{ t(`savedInterviewComparison.${side}`) }}</h2><p class="notice">{{ t('savedInterviewFiles.unverified') }}</p><p class="literal">{{ t('savedInterviewFiles.filename') }}: {{ pair[side].filename }}</p><p class="literal">{{ t('savedInterviewFiles.simulation') }}: {{ pair[side].data.simulation_id }}</p><p>{{ recordedFilters(pair[side].data) }}</p><p>{{ t('savedInterviewFiles.observedAt', { time: pair[side].data.observed_at }) }}</p>
+              <h2>{{ t(`savedInterviewComparison.${side}`) }}</h2><p class="notice">{{ t('savedInterviewFiles.unverified') }}</p><p class="literal">{{ t('savedInterviewFiles.filename') }}: {{ pair[side].filename }}</p><p class="literal">{{ t('savedInterviewFiles.simulation') }}: {{ pair[side].data.simulation_id }}</p><p>{{ recordedFilters(pair[side].data) }}</p><p v-if="pair[side].data.version === 2" class="note literal" :data-testid="`interview-compare-${side}-window`">{{ recordedWindow(pair[side].data) }}</p><p>{{ t('savedInterviewFiles.observedAt', { time: pair[side].data.observed_at }) }}</p>
               <p>{{ t('savedInterviewFiles.availability', { status: t(`comparison.availability.${pair[side].data.availability}`) }) }}</p><p class="note">{{ t('savedInterviewFiles.limitsNote', { count: pair[side].data.limits.rows_per_platform, total: pair[side].data.limits.rows_total }) }}</p><p>{{ t('savedInterviewFiles.recordCount', { count: pair[side].data.records.length }) }}</p>
               <section v-for="platform in platforms" :key="platform" class="source-summary" :data-testid="`interview-compare-${side}-source-${platform}`">
                 <h3>{{ t(`comparison.platforms.${platform}`) }}</h3><p>{{ t(`savedInterviewFiles.statuses.${pair[side].data.sources[platform].status}`) }} · {{ t(`savedInterviewFiles.coverage.${pair[side].data.sources[platform].coverage}`) }}</p><p>{{ t('savedInterviewFiles.returned', { count: pair[side].data.sources[platform].returned_count }) }}</p>
@@ -173,6 +173,10 @@ function downloadHandler(saved, view, side) {
       if (report && downloadGeneration === generation && owns()) downloadError.value = true
     } finally { if (!finished) disposeDownload(attempt) }
   }
+}
+function recordedWindow(data) {
+  return t(data.window.before_row === null ? 'savedInterviews.windowNewest' : 'savedInterviews.windowBefore',
+    { row: data.window.before_row, revision: data.window.source_revision })
 }
 function recordedFilters(data) { return t('savedInterviewFiles.filters', { platform: data.filters.platform === null ? t('savedActivity.allPlatforms') : t(`comparison.platforms.${data.filters.platform}`), agent: data.filters.agent_id === null ? t('savedActivity.any') : data.filters.agent_id }) }
 function questionPreview(prompt) { const characters = [...prompt]; return prompt === '' ? t('savedInterviews.emptyQuestion') : characters.slice(0, 80).join('') + (characters.length > 80 ? '…' : '') }

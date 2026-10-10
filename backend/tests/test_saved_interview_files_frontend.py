@@ -65,7 +65,7 @@ def test_interview_file_reopens_filtered_single_platform_with_exact_large_agent_
     trace_database(storage.reddit, [interview(2**63 - 1, response="Unselected Reddit reply")])
     observed = run_workflow(storage, monkeypatch, "files-filtered", helper=HELPER)
     assert len(observed) == 1
-    assert observed[0][2] == "platform=twitter&agent_id=9223372036854775807"
+    assert observed[0][2] == "platform=twitter&agent_id=9223372036854775807&window=1"
 
 
 def test_interview_files_keep_missing_empty_and_corrupt_source_claims_distinct(storage, monkeypatch):

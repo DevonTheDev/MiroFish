@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { setup, mountSavedInterviews, deferredApi, resolve, observation, record, source, flush, ok } from './helpers/saved-interviews-view-fixture.js'
+import { setup, mountSavedInterviews, deferredApi, resolve, observation, windowObservation, record, source, flush, ok } from './helpers/saved-interviews-view-fixture.js'
 
 const path = '/simulation/sim_A/interviews'
 const event = () => ({ preventDefault() {}, stopPropagation() {} })
@@ -34,8 +34,8 @@ for (const locale of ['en', 'zh']) test(`filters, labels and full observation do
   const { h, calls } = await setup(t, path, locale)
   await h.change('interviews-platform', 'reddit'); await h.input('interviews-agent-id', '9223372036854775807'); await h.submit('interviews-form')
   assert.equal(calls.getSavedInterviews[0].signal.aborted, true)
-  assert.deepEqual({ ...calls.getSavedInterviews[1].args[1] }, { platform: 'reddit', agent_id: '9223372036854775807' })
-  const data = observation({ filters: { platform: 'reddit', agent_id: '9223372036854775807' }, records: [record('reddit', '0', { agent_id: '9223372036854775807' })] })
+  assert.deepEqual({ ...calls.getSavedInterviews[1].args[1] }, { platform: 'reddit', agent_id: '9223372036854775807', window: '1' })
+  const data = windowObservation({ filters: { platform: 'reddit', agent_id: '9223372036854775807' }, records: [record('reddit', '0', { agent_id: '9223372036854775807' })] })
   await resolve(calls.getSavedInterviews[1], data); await h.click('interviews-download')
   assert.equal(await h.downloads[0].blob.text(), JSON.stringify(data, null, 2) + '\n')
   assert.match(h.downloads[0].filename, /sim_A.*interviews.*json$/)
@@ -112,8 +112,8 @@ test('newer refresh owns the response and uses applied filters while discarding 
   const { h, calls } = await setup(t, `${path}?platform=twitter&agent_id=0`)
   await h.input('interviews-agent-id', '1'); await h.click('interviews-refresh'); await h.click('interviews-refresh')
   assert.equal(calls.getSavedInterviews.length, 3)
-  assert.deepEqual({ ...calls.getSavedInterviews[2].args[1] }, { platform: 'twitter', agent_id: '0' })
-  const data = observation({ filters: { platform: 'twitter', agent_id: '0' }, records: [record('twitter')] })
+  assert.deepEqual({ ...calls.getSavedInterviews[2].args[1] }, { platform: 'twitter', agent_id: '0', window: '1' })
+  const data = windowObservation({ filters: { platform: 'twitter', agent_id: '0' }, records: [record('twitter')] })
   await resolve(calls.getSavedInterviews[1], data); assert.ok(h.byId('interviews-loading'))
   await resolve(calls.getSavedInterviews[2], data); assert.ok(h.byId('interviews-results')); assert.equal(h.byId('interviews-agent-id').props.value, '0')
 })

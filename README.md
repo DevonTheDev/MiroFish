@@ -183,6 +183,13 @@ This reads the current platform databases without starting a simulation
 or asking a model; it is not an archive of previous runs. See the
 [saved interviews guide](docs/LOCAL_MODE.md#reopen-saved-interviews).
 
+Select one platform to enable **Older saved replies**. Each click reads a separate
+bounded window below the last returned physical row, preserving the exact agent
+filter. **Refresh newest** starts again at the latest replies. A changed database
+requires this explicit refresh; windows are never silently combined or replaced.
+Downloads record the window boundary and source revision and can be reopened or
+compared locally alongside older version-1 files.
+
 Use **Find saved text** to search accepted prompts, replies and raw previews
 across all local pages of the current records or selected-question view. Matching
 is literal and case-insensitive. Source coverage and warnings stay visible;

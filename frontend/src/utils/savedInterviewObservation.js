@@ -26,7 +26,12 @@ export function validSavedInterviewObservation(data, selected) {
   const bounded = (value, max = Number.MAX_SAFE_INTEGER) => Number.isSafeInteger(value) && value >= 0 && value <= max
   const text = (value, max) => value === null || typeof value === 'string' && [...value].length <= max
   const warnings = (value, allowed) => Array.isArray(value) && value.length <= allowed.length && new Set(value).size === value.length && value.every(code => allowed.includes(code))
-  if (!savedInterviewExactKeys(data, ['version', 'simulation_id', 'filters', 'observed_at', 'order', 'limits', 'availability', 'sources', 'records']) || data.version !== 1 || data.simulation_id !== selected.simulation_id || data.order !== 'platform_then_row_desc' || typeof data.observed_at !== 'string' || !data.observed_at || data.observed_at.length > 100) return false
+  const envelopeKeys = ['version', 'simulation_id', 'filters', 'observed_at', 'order', 'limits', 'availability', 'sources', 'records']
+  if (data?.version === 2) envelopeKeys.push('window')
+  if (!savedInterviewExactKeys(data, envelopeKeys) || ![1, 2].includes(data.version) || data.simulation_id !== selected.simulation_id || data.order !== 'platform_then_row_desc' || typeof data.observed_at !== 'string' || !data.observed_at || data.observed_at.length > 100) return false
+  if (data.version === 2 && (selected.filters.platform === null || !savedInterviewExactKeys(data.window, ['before_row', 'source_revision'])
+    || data.window.before_row !== null && !validSavedInterviewDecimal(data.window.before_row, true)
+    || typeof data.window.source_revision !== 'string' || !/^[0-9a-f]{64}$/.test(data.window.source_revision))) return false
   const expectedLimits = { ...limits, response_bytes_per_platform: selected.filters.platform === null ? 2093056 : 4186112 }
   if (!savedInterviewExactKeys(data.filters, filterKeys) || filterKeys.some(key => data.filters[key] !== selected.filters[key]) || !savedInterviewExactKeys(data.limits, Object.keys(expectedLimits)) || Object.keys(expectedLimits).some(key => data.limits[key] !== expectedLimits[key])) return false
   if (!savedInterviewExactKeys(data.sources, platforms) || !Array.isArray(data.records) || data.records.length > limits.rows_total) return false
@@ -36,6 +41,7 @@ export function validSavedInterviewObservation(data, selected) {
     if (!savedInterviewExactKeys(row, ['platform', 'row_id', 'record_id', 'agent_id', 'timestamp', 'prompt', 'response', 'payload_kind', 'raw_preview', 'payload_bytes', 'truncated', 'warnings']) || !platforms.includes(row.platform) || !validSavedInterviewDecimal(row.row_id, true) || row.record_id !== `${row.platform}:${row.row_id}` || row.agent_id !== null && !validSavedInterviewDecimal(row.agent_id)) return false
     if (selected.filters.platform !== null && row.platform !== selected.filters.platform || selected.filters.agent_id !== null && row.agent_id !== selected.filters.agent_id) return false
     const index = platforms.indexOf(row.platform), rowId = BigInt(row.row_id)
+    if (data.version === 2 && data.window.before_row !== null && rowId >= BigInt(data.window.before_row)) return false
     if (index < previousPlatform || index === previousPlatform && rowId >= previousRow) return false
     previousPlatform = index; previousRow = rowId
     if (!text(row.timestamp, limits.timestamp_bytes) || !text(row.prompt, limits.payload_bytes) || !text(row.response, limits.payload_bytes) || !text(row.raw_preview, limits.payload_bytes) || typeof row.truncated !== 'boolean' || !warnings(row.warnings, recordWarnings)) return false
