@@ -2042,6 +2042,14 @@ submissions are blocked while the current survey is pending. Closing or replacin
 the view also rejects late chat/survey results and errors. Aborting an HTTP request
 does not promise cancellation of server-side model inference or interviews.
 
+Each survey sends one batch request and keeps one result card per submitted
+agent, with separate Twitter and Reddit replies when returned. The summary
+counts targets and nonempty text replies separately; empty, missing and invalid
+replies remain distinguishable. Older replies without a recorded platform are
+labeled accordingly. When the response does not declare platform coverage,
+omitted replies have unknown status, with no inferred failure reason. This live
+display does not change saved-interview observations or their JSON downloads.
+
 The local frontend suite executes actual Vue setup scripts with real reactivity,
 deferred HTTP boundaries and a linked parent/child test. It also checks optional
 API signal/body compatibility. Full browser navigation and real model responses

@@ -67,6 +67,30 @@ def make_single_environment(tmp_path, monkeypatch, platform):
     return handler, env, app.test_client()
 
 
+def make_parallel_environment(tmp_path, monkeypatch, failing_platform=None):
+    """Real parallel IPC/SQLite with synthetic, optionally failing environment steps."""
+    twitter, twitter_env, _ = make_single_environment(tmp_path, monkeypatch, "twitter")
+    reddit, reddit_env, client = make_single_environment(tmp_path, monkeypatch, "reddit")
+    script = importlib.import_module("scripts.run_parallel_simulation")
+    environments = {"twitter": twitter_env, "reddit": reddit_env}
+    if failing_platform:
+        failed = environments[failing_platform]
+
+        async def fail_step(actions):
+            failed.actions.append(actions)
+            raise RuntimeError("Synthetic platform step failed")
+
+        monkeypatch.setattr(failed, "step", fail_step)
+    handler = script.ParallelIPCHandler(
+        str(tmp_path / "sim_single"), twitter_env, twitter.agent_graph, reddit_env, reddit.agent_graph,
+    )
+    handler.update_status("alive")
+    monkeypatch.setattr(simulation_ipc, "time", SimpleNamespace(
+        time=time.monotonic, sleep=lambda delay: asyncio.run(handler.process_commands()),
+    ))
+    return handler, environments, client
+
+
 @pytest.mark.parametrize("platform", ["twitter", "reddit"])
 @pytest.mark.parametrize("endpoint", ["batch", "all"])
 def test_actual_single_dispatch_reaches_batch_and_all_api_consumers(tmp_path, monkeypatch, platform, endpoint):
@@ -204,16 +228,8 @@ def test_legacy_report_payload_retains_both_platform_sections(monkeypatch):
 
 @pytest.mark.parametrize("platform", [None, "twitter", "reddit"])
 def test_parallel_dispatch_preserves_existing_platform_routing(tmp_path, monkeypatch, platform):
-    twitter, twitter_env, _ = make_single_environment(tmp_path, monkeypatch, "twitter")
-    reddit, reddit_env, client = make_single_environment(tmp_path, monkeypatch, "reddit")
-    script = importlib.import_module("scripts.run_parallel_simulation")
-    handler = script.ParallelIPCHandler(
-        str(tmp_path / "sim_single"), twitter_env, twitter.agent_graph, reddit_env, reddit.agent_graph,
-    )
-    handler.update_status("alive")
-    monkeypatch.setattr(simulation_ipc, "time", SimpleNamespace(
-        time=time.monotonic, sleep=lambda delay: asyncio.run(handler.process_commands()),
-    ))
+    _, environments, client = make_parallel_environment(tmp_path, monkeypatch)
+    twitter_env, reddit_env = environments["twitter"], environments["reddit"]
     response = client.post("/api/simulation/interview/batch", json={
         "simulation_id": "sim_single", "platform": platform, "timeout": 2,
         "interviews": [{"agent_id": 0, "prompt": "Question"}],

@@ -377,7 +377,7 @@
           <div v-if="surveyResults.length > 0" class="survey-results">
             <div class="results-header">
               <span class="results-title">{{ $t('step5.surveyResults') }}</span>
-              <span class="results-count">{{ $t('step5.surveyResultsCount', { count: surveyResults.length }) }}</span>
+              <span class="results-count">{{ $t('step5.surveyResultsCount', { count: surveyResults.length, replies: surveyTextReplyCount }) }}</span>
             </div>
             <div class="results-list">
               <div 
@@ -400,7 +400,14 @@
                   </svg>
                   <span>{{ result.question }}</span>
                 </div>
-                <div class="result-answer" v-html="renderMarkdown(result.answer)"></div>
+                <div v-for="(reply, replyIndex) in result.replies" :key="replyIndex" class="result-reply">
+                  <div class="result-platform">{{ surveyPlatformNames[reply.platform] || $t('step5.surveyPlatformUnknown') }}</div>
+                  <div v-if="reply.status === 'text'" class="result-answer" v-html="renderMarkdown(reply.answer)"></div>
+                  <div v-else class="result-reply-status">{{ $t(`step5.surveyReply${reply.status}`) }}</div>
+                  <div v-if="reply.error !== null" class="result-reply-error">{{ reply.error }}</div>
+                </div>
+                <div v-if="result.replies.length === 0" class="result-reply-status">{{ $t('step5.surveyReplymissing') }}</div>
+                <div v-if="!result.coverageKnown" class="result-coverage">{{ $t('step5.surveyCoverageUnknown') }}</div>
               </div>
             </div>
           </div>
@@ -448,6 +455,8 @@ const selectedAgents = ref(new Set())
 const surveyQuestion = ref('')
 const surveyResults = ref([])
 const isSurveying = ref(false)
+const surveyTextReplyCount = computed(() => surveyResults.value.reduce((count, result) =>
+  count + result.replies.filter(reply => reply.status === 'text').length, 0))
 
 // Report Data
 const reportOutline = ref(null)
@@ -665,6 +674,43 @@ const scrollToBottom = (context = viewContext()) => {
 }
 
 // Survey Methods
+const surveyPlatformNames = { twitter: 'Twitter', reddit: 'Reddit' }
+const normalizeSurveyReply = (record, platform) => {
+  const isRecord = record !== null && typeof record === 'object' && !Array.isArray(record)
+  // Preserve an explicitly empty/null/invalid response; only absent fields use
+  // the legacy answer alias. Never coerce a structured payload into reply text.
+  const response = isRecord
+    ? (Object.hasOwn(record, 'response') ? record.response : record.answer) : null
+  const status = !isRecord && record != null ? 'invalid'
+    : typeof response === 'string' ? (response.length ? 'text' : 'empty')
+    : response == null ? 'missing' : 'invalid'
+  return { platform, status, answer: typeof response === 'string' ? response : null,
+    error: isRecord && typeof record.error === 'string' ? record.error : null }
+}
+
+const surveyRepliesForAgent = (results, agentId, declaredPlatforms) => {
+  const replies = []
+  if (Array.isArray(results)) {
+    for (const record of results) {
+      if (record?.agent_id !== agentId) continue
+      const platform = typeof record.platform === 'string' && Object.hasOwn(surveyPlatformNames, record.platform)
+        ? record.platform : null
+      replies.push(normalizeSurveyReply(record, platform))
+    }
+  } else if (results && typeof results === 'object') {
+    for (const platform of Object.keys(surveyPlatformNames)) {
+      const key = `${platform}_${agentId}`
+      if (Object.hasOwn(results, key)) replies.push(normalizeSurveyReply(results[key], platform))
+    }
+  }
+  // Only declared coverage can establish an expected platform. Legacy parallel
+  // envelopes omit failed records and their reasons; do not invent either.
+  for (const platform of declaredPlatforms || []) {
+    if (!replies.some(reply => reply.platform === platform)) replies.push(normalizeSurveyReply(null, platform))
+  }
+  return replies
+}
+
 const toggleAgentSelection = (idx) => {
   const newSet = new Set(selectedAgents.value)
   if (newSet.has(idx)) {
@@ -707,47 +753,27 @@ const submitSurvey = async () => {
     if (!isCurrentView(context)) return
 
     if (res.success && res.data) {
-      // 正确的数据路径: res.data.result.results 是一个对象字典
-      // 格式: {"twitter_0": {...}, "reddit_0": {...}, "twitter_1": {...}, ...}
-      const resultData = res.data.result || res.data
-      const resultsDict = resultData.results || resultData
-      
-      // 将对象字典转换为数组格式
-      const surveyResultsList = []
-      
-      for (const interview of interviews) {
+      const resultData = res.data.result ?? res.data
+      const results = resultData.results ?? resultData
+      const reportedPlatforms = Array.isArray(resultData.platforms)
+        ? resultData.platforms : [resultData.platform]
+      const platforms = [...new Set(reportedPlatforms.filter(platform =>
+        typeof platform === 'string' && Object.hasOwn(surveyPlatformNames, platform)))]
+      const declaredPlatforms = platforms.length ? platforms : null
+
+      surveyResults.value = interviews.map(interview => {
         const agentIdx = interview.agent_id
         const agent = submittedProfiles[agentIdx]
-        
-        // 优先使用 reddit 平台回复，其次 twitter
-        let responseContent = t('step5.noResponse')
-
-        if (typeof resultsDict === 'object' && !Array.isArray(resultsDict)) {
-          const redditKey = `reddit_${agentIdx}`
-          const twitterKey = `twitter_${agentIdx}`
-          const agentResult = resultsDict[redditKey] || resultsDict[twitterKey]
-          if (agentResult) {
-            responseContent = agentResult.response || agentResult.answer || t('step5.noResponse')
-          }
-        } else if (Array.isArray(resultsDict)) {
-          // 兼容数组格式
-          const matchedResult = resultsDict.find(r => r.agent_id === agentIdx)
-          if (matchedResult) {
-            responseContent = matchedResult.response || matchedResult.answer || t('step5.noResponse')
-          }
-        }
-        
-        surveyResultsList.push({
+        return {
           agent_id: agentIdx,
           agent_name: agent?.username || `Agent ${agentIdx}`,
           profession: agent?.profession,
           question,
-          answer: responseContent
-        })
-      }
-      
-      surveyResults.value = surveyResultsList
-      addLog(t('log.receivedReplies', { count: surveyResults.value.length }))
+          replies: surveyRepliesForAgent(results, agentIdx, declaredPlatforms),
+          coverageKnown: declaredPlatforms !== null
+        }
+      })
+      addLog(t('log.receivedReplies', { count: surveyTextReplyCount.value, targets: surveyResults.value.length }))
     } else {
       throw new Error(res.error || t('step5.requestFailed'))
     }
@@ -2399,6 +2425,29 @@ watch(() => [props.reportId, props.simulationId], () => {
   font-size: 14px;
   line-height: 1.7;
   color: #374151;
+}
+
+.result-reply + .result-reply {
+  border-top: 1px solid #E5E7EB;
+  margin-top: 12px;
+  padding-top: 12px;
+}
+
+.result-platform {
+  font-size: 13px;
+  font-weight: 600;
+  margin-bottom: 6px;
+}
+
+.result-reply-status, .result-reply-error, .result-coverage {
+  font-size: 12px;
+  color: #6B7280;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.result-coverage, .result-reply-error {
+  margin-top: 8px;
 }
 
 /* Markdown Styles */

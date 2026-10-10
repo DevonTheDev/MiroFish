@@ -14,14 +14,15 @@ import { build as buildCreation, textContent } from '../helpers/simulation-platf
 import { build, settle, setupChild, runChild } from '../helpers/parent-route-fixture.js'
 import { productionClient } from '../helpers/readiness-view-fixture.js'
 import { buildSurvey } from '../helpers/platform-survey-fixture.js'
+import { mountSavedInterviews } from '../helpers/saved-interviews-view-fixture.js'
 
-const [backendURL, platform, scenario = 'workflow'] = process.argv.slice(2)
+const [backendURL, platform, scenario = 'workflow', failingPlatform = ''] = process.argv.slice(2)
 assert.match(backendURL, /^http:\/\/127\.0\.0\.1:[0-9]+$/)
 assert.ok(['twitter', 'reddit', 'parallel'].includes(platform))
 const enabled = platform === 'parallel' ? ['twitter', 'reddit'] : [platform]
 const root = fileURLToPath(new URL('../../', import.meta.url))
 const cacheDir = await mkdtemp(path.join(tmpdir(), 'miro-platform-choice-vite-'))
-let proxy, creation, view
+let proxy, creation, view, savedView
 try {
   const loaded = await loadConfigFromFile({ command: 'serve', mode: 'test' }, path.join(root, 'vite.config.js'), root)
   assert.ok(loaded?.config.server.proxy['/api'])
@@ -66,7 +67,7 @@ try {
   }
   if (scenario === 'survey') {
     // Only report reads are synthetic here. Profile reads and survey submission
-    // use production Axios → Flask → runner → IPC → actual single scripts.
+    // use production Axios → Flask → runner → IPC → actual platform scripts.
     view = buildSurvey({ ...api, getReport: async () => ({ success: true, data: { simulation_id: 'sim_single' } }),
       getAgentLog: async () => ({ success: true, data: { logs: [] } }) })
     await waitFor(() => view.state().profiles.length === 2, 'actual default profiles load into Step5')
@@ -84,21 +85,54 @@ try {
     const submit = view.find(node => node.props.class === 'survey-submit-btn')
     assert.ok(submit && !submit.props.disabled)
     submit.props.onClick(); submit.props.onClick()
-    await waitFor(() => view.state().surveyResults.length === 2, 'actual single-script replies reach survey results')
+    await waitFor(() => view.state().surveyResults.length === 2, 'actual script replies reach survey results')
     assert.equal(count('/api/simulation/interview/batch'), 1)
     assert.deepEqual(calls.find(call => call.url === '/api/simulation/interview/batch').data, {
       simulation_id: 'sim_single', interviews: [0, 1].map(agent_id => ({ agent_id, prompt: 'What happened?' })),
     })
-    assert.deepEqual(Array.from(view.state().surveyResults, item => item.answer), [0, 1].map(id => `${platform} reply from ${id}`))
+    const returned = enabled.filter(name => name !== failingPlatform)
+    assert.equal(view.all(node => node.props.class === 'result-card').length, 2)
+    assert.deepEqual(Array.from(view.state().surveyResults, item => Array.from(item.replies, reply => [reply.platform, reply.answer])),
+      [0, 1].map(id => returned.map(name => [name, `${name} reply from ${id}`])))
     const payload = responses.find(response => response.data?.result?.results).data.result
-    assert.equal(payload.platform, platform)
-    assert.deepEqual(payload.platforms, [platform])
-    assert.deepEqual(Object.keys(payload.results).sort(), [`${platform}_0`, `${platform}_1`])
+    if (platform === 'parallel') {
+      assert.equal(payload.platform, undefined)
+      assert.equal(payload.platforms, undefined, 'parallel coverage remains unknown')
+      assert.ok(textContent(view.host).includes('Platform coverage was not recorded'))
+    } else {
+      assert.equal(payload.platform, platform)
+      assert.deepEqual(payload.platforms, [platform])
+    }
+    assert.deepEqual(Object.keys(payload.results).sort(), returned.flatMap(name => [`${name}_0`, `${name}_1`]).sort())
     const rendered = view.all(node => node.props.class === 'result-answer').map(node => node.props.innerHTML)
-    assert.equal(rendered.length, 2)
-    for (const [index, html] of rendered.entries()) assert.ok(html.includes(`${platform} reply from ${index}`))
+    assert.equal(rendered.length, returned.length * 2)
+    for (const name of returned) for (const id of [0, 1]) assert.ok(rendered.some(html => html.includes(`${name} reply from ${id}`)))
+    assert.deepEqual(view.all(node => node.props.class === 'result-platform').map(textContent),
+      [0, 1].flatMap(() => returned.map(name => name === 'twitter' ? 'Twitter' : 'Reddit')))
+    assert.ok(textContent(view.host).includes(`${returned.length * 2} replies with text`))
+    assert.ok(!textContent(view.host).includes('Synthetic platform step failed'), 'omitted errors are not available to infer')
     assert.deepEqual(view.warnings, [])
-    console.log('actual single platform survey workflow passed')
+
+    // Existing saved observation and exact download contract must stay intact.
+    // These reads observe the SQLite rows already written by that one batch.
+    savedView = await mountSavedInterviews({ api: moduleApi('savedInterviews.js'),
+      initialPath: '/simulation/sim_single/interviews', locale: 'en' })
+    await waitFor(() => savedView.byId('interviews-results'), 'saved rows remain independently browsable')
+    const observation = responses.findLast(response => response.data?.version === 1 && response.data?.records).data
+    assert.deepEqual(observation.records.map(row => [row.platform, row.agent_id, row.response]).sort(),
+      returned.flatMap(name => [0, 1].map(id => [name, String(id), `${name} reply from ${id}`])).sort())
+    for (const name of enabled) {
+      assert.equal(observation.sources[name].coverage, 'complete', 'saved coverage describes current database reads, not batch success')
+      assert.equal(observation.sources[name].returned_count, returned.includes(name) ? 2 : 0)
+    }
+    const callsBeforeDownload = calls.length
+    await savedView.click('interviews-download')
+    assert.equal(savedView.downloads.length, 1)
+    assert.equal(await savedView.downloads[0].blob.text(), JSON.stringify(observation, null, 2) + '\n')
+    assert.equal(calls.length, callsBeforeDownload, 'download performs no additional request')
+    assert.equal(count('/api/simulation/interview/batch'), 1)
+    assert.deepEqual(savedView.warnings, [])
+    console.log('actual platform survey and saved export workflow passed')
   } else {
   creation = buildCreation({ api })
   creation.sourceProps.projectData = { project_id: 'proj_fixture', graph_id: 'graph_fixture' }
@@ -208,6 +242,7 @@ try {
   }
 } finally {
   creation?.close()
+  savedView?.unmount()
   view?.close()
   await proxy?.close()
   await rm(cacheDir, { recursive: true, force: true })

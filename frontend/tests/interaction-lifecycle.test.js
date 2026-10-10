@@ -180,7 +180,7 @@ test('survey records the submitted question and refuses duplicate submissions', 
     h.calls.interviewAgents[0].resolve(ok({ results: { reddit_0: { response: 'Original answer' } } }))
     await pending
     assert.equal(h.state.surveyResults.value[0].question, 'Original question')
-    assert.equal(h.state.surveyResults.value[0].answer, 'Original answer')
+    assert.equal(h.state.surveyResults.value[0].replies[0].answer, 'Original answer')
   } finally { h.close() }
 })
 
@@ -269,7 +269,7 @@ test('an old survey reply cannot replace new results or unlock a newer survey', 
     await currentPending
     assert.equal(h.state.surveyResults.value[0].agent_name, 'B')
     assert.equal(h.state.surveyResults.value[0].question, 'B question')
-    assert.equal(h.state.surveyResults.value[0].answer, 'B answer')
+    assert.equal(h.state.surveyResults.value[0].replies[0].answer, 'B answer')
   } finally { h.close() }
 })
 

@@ -268,40 +268,49 @@ def test_platform_choice_real_flask_axios_vue_and_saved_artifacts(tmp_path, monk
     assert not thread.is_alive()
 
 
-@pytest.mark.parametrize('platform', ['twitter', 'reddit'])
-def test_actual_single_script_interviews_reach_unchanged_vue_survey(tmp_path, monkeypatch, platform):
+@pytest.mark.parametrize('platform,failing_platform', [
+    ('twitter', None), ('reddit', None), ('parallel', None),
+    ('parallel', 'reddit'), ('parallel', 'twitter'),
+])
+def test_actual_script_interviews_reach_vue_survey(tmp_path, monkeypatch, platform, failing_platform):
     """No fabricated response keys: HTTP executes real IPC/script/SQLite code."""
     repo = Path(__file__).resolve().parents[2]
     node = shutil.which('node')
     if node is None or not (repo / 'frontend/node_modules/vue/package.json').is_file():
         pytest.skip('Platform survey requires Node and installed frontend dependencies')
-    from test_single_platform_interviews import make_single_environment
+    from test_single_platform_interviews import make_single_environment, make_parallel_environment
     from app.services.oasis_profile_generator import OasisAgentProfile, OasisProfileGenerator
     from app.services.simulation_manager import SimulationState
 
-    _, environment, client = make_single_environment(tmp_path, monkeypatch, platform)
+    if platform == 'parallel':
+        _, environments, client = make_parallel_environment(tmp_path, monkeypatch, failing_platform)
+    else:
+        _, environment, client = make_single_environment(tmp_path, monkeypatch, platform)
+        environments = {platform: environment}
     monkeypatch.setattr(Config, 'OASIS_SIMULATION_DATA_DIR', str(tmp_path))
     state = SimulationState('sim_single', 'proj_fixture', 'graph_fixture',
-                            enable_twitter=platform == 'twitter', enable_reddit=platform == 'reddit')
+                            enable_twitter=platform != 'reddit', enable_reddit=platform != 'twitter')
     SimulationManager()._save_simulation_state(state)
     profiles = [OasisAgentProfile(index, f'person_{index}', f'Person {index}',
                                   'Synthetic bio', 'Synthetic persona') for index in range(2)]
     # Invoke the actual canonical writer without constructing an inference client.
     writer = object.__new__(OasisProfileGenerator)
-    filename = 'twitter_profiles.csv' if platform == 'twitter' else 'reddit_profiles.json'
-    writer.save_profiles(profiles, str(tmp_path / 'sim_single' / filename), platform=platform)
+    for enabled_platform in environments:
+        filename = 'twitter_profiles.csv' if enabled_platform == 'twitter' else 'reddit_profiles.json'
+        writer.save_profiles(profiles, str(tmp_path / 'sim_single' / filename), platform=enabled_platform)
     server = make_server('127.0.0.1', 0, client.application, threaded=True)
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
     try:
         process = subprocess.run([
             node, str(repo / 'frontend/tests/fixtures/platform-choice-backend-smoke.mjs'),
-            f'http://127.0.0.1:{server.server_port}', platform, 'survey',
+            f'http://127.0.0.1:{server.server_port}', platform, 'survey', failing_platform or '',
         ], cwd=repo / 'frontend', capture_output=True, text=True, timeout=60)
         assert process.returncode == 0, process.stdout + process.stderr
-        assert 'actual single platform survey workflow passed' in process.stdout
-        assert len(environment.actions) == 1
-        assert len(environment.actions[0]) == 2
+        assert 'actual platform survey and saved export workflow passed' in process.stdout
+        for environment in environments.values():
+            assert len(environment.actions) == 1
+            assert len(environment.actions[0]) == 2
     finally:
         server.shutdown()
         server.server_close()

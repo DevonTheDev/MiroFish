@@ -10,7 +10,7 @@ import * as content from '../../src/utils/content.js'
 // Compile the unchanged interaction script AND template. Real Vue reactivity,
 // model bindings, survey controls and answer rendering run in a custom host.
 // Browser geometry/document listeners and unrelated report reads are seams.
-export function buildSurvey(api) {
+export function buildSurvey(api, { locale = 'en' } = {}) {
   const warnings = [], emitted = [], listeners = new Set()
   let instance
   const previousDocument = globalThis.document
@@ -66,8 +66,10 @@ export function buildSurvey(api) {
   })
   const app = renderer.createApp(component, { reportId: 'report_fixture', simulationId: 'sim_single',
     onAddLog: message => emitted.push(message) })
-  const messages = { en: JSON.parse(readFileSync(new URL('../../../locales/en.json', import.meta.url), 'utf8')) }
-  app.use(I18n.createI18n({ legacy: false, locale: 'en', messages }))
+  const messages = Object.fromEntries(['en', 'zh'].map(language => [language,
+    JSON.parse(readFileSync(new URL('../../../locales/' + language + '.json', import.meta.url), 'utf8'))]))
+  const i18n = I18n.createI18n({ legacy: false, locale, fallbackLocale: 'en', messages })
+  app.use(i18n)
   app.config.warnHandler = (...args) => warnings.push(args)
   const host = node('root')
   app.mount(host)
@@ -75,7 +77,7 @@ export function buildSurvey(api) {
     const visit = target => [...(predicate(target) ? [target] : []), ...target.children.flatMap(visit)]
     return visit(host)
   }
-  return { host, warnings, emitted, listeners, all, find: predicate => all(predicate)[0],
+  return { host, warnings, emitted, listeners, all, i18n, find: predicate => all(predicate)[0],
     state: () => instance.setupState, close: () => {
       app.unmount()
       if (previousDocument === undefined) delete globalThis.document
