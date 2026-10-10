@@ -1,12 +1,91 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import { mountReportFiles, syntheticReport as report, ok, flush, file, chooseFile, previewFile, acceptFile } from './helpers/saved-report-files-view-fixture.js'
+import { readSavedReportFile } from '../src/utils/savedReportFiles.js'
 
 const action = (view, id) => { const node = view.byId(id); assert.ok(node, id); return node.props.onClick }
 const invoke = callback => callback({ button: 0, preventDefault() {}, stopPropagation() {} })
 const defer = () => { let resolve, reject; const promise = new Promise((a,b) => { resolve=a; reject=b }); return {promise,resolve,reject} }
 const noEffects = view => { assert.ok(Object.values(view.requests?.calls ?? {}).every(calls => !calls.length)); assert.deepEqual(view.networkCalls, []); assert.deepEqual(view.storageWrites, []) }
 const accepted = (view, id) => assert.equal(view.text(view.byId('accepted-report-id')), id)
+
+for (const cacheHandlers of [true, false]) for (const parent of ['live', 'file']) test(`captured JSON callbacks keep pair ownership through same-ID replacement, swap, clear and departure (${parent}, ${cacheHandlers})`, async () => {
+  const view = await mountReportFiles({ cacheHandlers, initialPath: parent === 'live' ? '/reports?report_id=report_A' : '/report-files' })
+  try {
+    const a = report(), b = { ...report('report_A', 'new body\r\n雪😀'), content_revision: 'c'.repeat(64), observed_at: 'later observation' }
+    const load = async value => {
+      if (parent === 'file') await acceptFile(view, value)
+      else { if (view.byId('reader')) await view.click('close-reader'); await view.navigate(`/reports?report_id=${value.report_id}`); view.requests.calls.getSavedReport.at(-1).resolve(ok(value)); await flush() }
+    }
+    await load(a); await view.click('capture-left')
+    await load(b); await view.click('capture-right')
+    const count = () => Object.values(view.requests.calls).reduce((sum, calls) => sum + calls.length, 0)
+    const before = count()
+    await view.click(parent === 'live' ? 'close-reader' : 'clear-file')
+    for (const [side, expected] of [['left', a], ['right', b]]) {
+      await view.click(`comparison-${side}-download-json`)
+      assert.deepEqual(await readSavedReportFile(view.downloads.at(-1).blob), expected)
+    }
+    const stale = action(view, 'comparison-left-download-json')
+    await view.click('comparison-swap'); invoke(stale); await flush(); assert.equal(view.downloads.length, 2)
+    await view.click('comparison-left-download-json'); assert.deepEqual(await readSavedReportFile(view.downloads.at(-1).blob), b)
+    const staleSwap = action(view, 'comparison-left-download-json')
+    await load(a); await view.click('capture-left'); invoke(staleSwap); await flush(); assert.equal(view.downloads.length, 3)
+    const staleReplace = action(view, 'comparison-left-download-json')
+    await view.click('comparison-left-clear'); await view.click('capture-left'); invoke(staleReplace); await flush(); assert.equal(view.downloads.length, 3)
+    const staleClear = action(view, 'comparison-left-download-json')
+    await view.click('comparison-clear'); invoke(staleClear); await flush(); assert.equal(view.downloads.length, 3)
+    await view.click('capture-left'); const staleRoute = action(view, 'comparison-left-download-json')
+    const { watch } = await import('vue')
+    const stop = watch(() => view.router.currentRoute.value.fullPath, () => invoke(staleRoute), { flush: 'sync' })
+    await view.navigate('/runtime'); stop(); invoke(staleRoute); await flush()
+    assert.equal(view.downloads.length, 3); assert.equal(view.blobs.size, 0); assert.equal(view.timers.pending.size, 0)
+    assert.ok(view.anchors.every(anchor => !anchor.attached)); assert.deepEqual(view.networkCalls, []); assert.deepEqual(view.storageWrites, [])
+    assert.equal(count(), before + (parent === 'live' ? 1 : 0)); assert.deepEqual(view.warnings, [])
+  } finally { view.unmount() }
+})
+
+test('captured file observation uses bounded ID/hash filenames and exact native Blob bytes', async () => {
+  const view = await mountReportFiles()
+  try {
+    const value = { ...report('R'.repeat(128), '\ufeff<img src=x>\r\n雪😀'.repeat(5000)), title: '../title\r\nwith separators', simulation_id: '../arbitrary recorded string' }
+    await acceptFile(view, value, '../unsafe input filename.json'); await view.click('capture-right')
+    await acceptFile(view, report('new')); await view.click('clear-file')
+    await view.click('comparison-right-download-json')
+    const exported = view.downloads.at(-1)
+    assert.equal(exported.filename, `${value.report_id}-right-aaaaaaaaaaaa-bbbbbbbbbbbb.observation.json`)
+    assert.equal(exported.filename.length, 177)
+    assert.deepEqual(await readSavedReportFile(exported.blob), value)
+    assert.deepEqual(new TextEncoder().encode((await readSavedReportFile(exported.blob)).markdown_content), new TextEncoder().encode(value.markdown_content))
+    noEffects(view)
+  } finally { view.unmount() }
+})
+
+test('unrepresentable live captured JSON reports a generic error without changing Markdown or the pair', async () => {
+  const view = await mountReportFiles({ initialPath: '/reports?report_id=report_A' })
+  try {
+    const value = report(); value.title = '\ud800'
+    view.requests.calls.getSavedReport[0].resolve(ok(value)); await flush(); await view.click('capture-left')
+    await view.click('comparison-left-download-json')
+    assert.ok(view.byId('comparison-download-error')); assert.equal(view.downloads.length, 0); assert.equal(view.blobs.size, 0)
+    assert.ok(view.byId('comparison-left-text')); assert.equal(view.timers.pending.size, 0)
+    await view.click('comparison-left-download'); assert.equal(await view.downloads.at(-1).blob.text(), value.markdown_content)
+    assert.equal(view.byId('comparison-download-error'), undefined)
+  } finally { view.unmount() }
+})
+
+for (const downloadId of ['comparison-left-download', 'comparison-left-download-json']) test(`live route commit retires ${downloadId} before queued unmount`, async () => {
+  const { watch } = await import('vue'), view = await mountReportFiles({ initialPath: '/reports?report_id=report_A' })
+  let stop
+  try {
+    view.requests.calls.getSavedReport[0].resolve(ok(report())); await flush(); await view.click('capture-left')
+    const retained = action(view, downloadId)
+    stop = watch(() => view.router.currentRoute.value.fullPath, () => invoke(retained), { flush: 'sync' })
+    await view.navigate('/runtime')
+    assert.equal(view.downloads.length, 0, 'A committed route departure must retire both formats before the comparison unmounts')
+    assert.equal(view.blobs.size, 0); assert.equal(view.timers.pending.size, 0)
+  } finally { stop?.(); view.unmount() }
+})
 
 for (const initialPath of ['/', '/reports']) test(`entry remains available at ${initialPath} even when backend reads fail`, async () => {
   const view = await mountReportFiles({ initialPath })
@@ -104,9 +183,9 @@ for(const actionId of ['cancel-file','clear-file']) for(const resolution of ['re
 for (const route of ['/runtime','/report-files?new=1']) test(`route ${route}, return and unmount retire session state and all retained callbacks`,async()=>{
   const view=await mountReportFiles(), read=defer()
   await acceptFile(view,report()); await view.click('capture-left'); await view.click('download-file')
-  const clear=action(view,'clear-file'), download=action(view,'download-file'), comparisonDownload=action(view,'comparison-left-download')
+  const clear=action(view,'clear-file'), download=action(view,'download-file'), comparisonDownload=action(view,'comparison-left-download'), comparisonJson=action(view,'comparison-left-download-json')
   const {pending}=await chooseFile(view,file(report('late'),'late.json',{arrayBuffer:()=>read.promise}))
-  const cancel=action(view,'cancel-file'); await view.navigate(route); for(const fn of [clear,download,comparisonDownload,cancel])invoke(fn)
+  const cancel=action(view,'cancel-file'); await view.navigate(route); for(const fn of [clear,download,comparisonDownload,comparisonJson,cancel])invoke(fn)
   read.resolve(await file(report('late')).arrayBuffer());await pending;await flush();assert.equal(view.blobs.size,0);assert.equal(view.downloads.length,1)
   await view.back(); assert.equal(view.byId('accepted-file'),undefined); assert.equal(view.byId('comparison-left-text'),undefined);assert.equal(view.byId('file-preview'),undefined)
   await acceptFile(view,report()); const select=view.byId('report-file').props.onChange; view.unmount(); await select({target:{files:[file(report())],value:'x'}});invoke(clear);invoke(download);await flush();assert.equal(view.blobs.size,0);noEffects(view)
@@ -235,31 +314,31 @@ test('file route imports no API or persistence and metadata makes no content-der
   try{const value=report();value.simulation_id='https://private.example';await acceptFile(view,value);assert.ok(view.all(n=>n.type==='a').every(n=>['/','/reports'].includes(n.props.href)));assert.match(view.text(),/historical local observation/i);assert.match(view.text(),/Pinned comparison slots remain/);noEffects(view)}finally{view.unmount()}
 })
 
-for(const mutation of ['comparison-clear','comparison-swap','comparison-left-clear','capture-left','unmount']) for(const stage of ['create','anchor','append','click'])test(`comparison ${mutation} at ${stage} retires exact download resources`,async()=>{
+for(const downloadId of ['comparison-left-download','comparison-left-download-json']) for(const mutation of ['comparison-clear','comparison-swap','comparison-left-clear','capture-left','unmount']) for(const stage of ['create','anchor','append','click'])test(`comparison ${downloadId} ${mutation} at ${stage} retires exact download resources`,async()=>{
   const view=await mountReportFiles()
   try{
     await acceptFile(view,report());await view.click('capture-left');await view.click('capture-right')
     const retire=mutation==='unmount'?()=>view.unmount():action(view,mutation)
-    view.downloadHooks[stage]=()=>{delete view.downloadHooks[stage];invoke(retire)};await view.click('comparison-left-download')
+    view.downloadHooks[stage]=()=>{delete view.downloadHooks[stage];invoke(retire)};await view.click(downloadId)
     assert.equal(view.blobs.size,0);assert.ok(view.anchors.every(a=>!a.attached));assert.equal(view.timers.pending.size,0)
     if(stage!=='click')assert.equal(view.downloads.length,0)
   }finally{if(mutation!=='unmount')view.unmount()}
 })
-for(const stage of ['create','anchor','append','click','remove','revoke'])test(`comparison reentrant ${stage} export retains newer resources until its own cleanup`,async()=>{
+for(const [downloadId,nestedId] of [['comparison-left-download','comparison-left-download-json'],['comparison-left-download-json','comparison-left-download']]) for(const stage of ['create','anchor','append','click','remove','revoke'])test(`comparison mixed ${downloadId} reentrant ${stage} export retains newer resources until its own cleanup`,async()=>{
   const view=await mountReportFiles()
   try{
-    await acceptFile(view,report());await view.click('capture-left');const download=action(view,'comparison-left-download')
-    if(stage==='revoke')await view.click('comparison-left-download')
+    await acceptFile(view,report());await view.click('capture-left');const download=action(view,nestedId)
+    if(stage==='revoke')await view.click(nestedId)
     const oldTimers=[...view.timers.pending.values()].map(t=>t.callback)
-    view.downloadHooks[stage]=()=>{delete view.downloadHooks[stage];invoke(download)};await view.click('comparison-left-download')
+    view.downloadHooks[stage]=()=>{delete view.downloadHooks[stage];invoke(download)};await view.click(downloadId)
     assert.equal(view.blobs.size,1);assert.ok(!view.revokedUrls.includes([...view.blobs.keys()][0]));assert.ok(view.anchors.every(a=>!a.attached))
     oldTimers.forEach(fn=>fn());await flush();assert.equal(view.blobs.size,1)
     await view.timers.advance(1000);assert.equal(view.blobs.size,0);assert.equal(view.timers.pending.size,0)
   }finally{view.unmount()}
 })
-for(const stage of ['beforeCreate','beforeAnchor','append','click','remove'])test(`comparison ${stage} failure keeps captures and cleans resources without leaking the error`,async()=>{
+for(const downloadId of ['comparison-left-download','comparison-left-download-json']) for(const stage of ['beforeCreate','beforeAnchor','append','click','remove'])test(`comparison ${downloadId} ${stage} failure keeps captures and cleans resources without leaking the error`,async()=>{
   const view=await mountReportFiles()
-  try{await acceptFile(view,report());await view.click('capture-left');view.downloadHooks[stage]=()=>{throw Error('private download failure')};await view.click('comparison-left-download');assert.equal(view.blobs.size,0);assert.ok(view.anchors.every(a=>!a.attached));assert.ok(view.byId('comparison-left-text'));assert.deepEqual(view.warnings,[])}finally{view.unmount()}
+  try{await acceptFile(view,report());await view.click('capture-left');view.downloadHooks[stage]=()=>{throw Error('private download failure')};await view.click(downloadId);assert.equal(view.blobs.size,0);assert.ok(view.anchors.every(a=>!a.attached));assert.ok(view.byId('comparison-left-text'));assert.ok(view.byId('comparison-download-error'));assert.doesNotMatch(view.text(),/private download failure/);assert.deepEqual(view.warnings,[])}finally{view.unmount()}
 })
 
 test('opening replacement synchronously retires old reader actions before child props render',async()=>{
@@ -274,11 +353,11 @@ test('opening replacement synchronously retires old reader actions before child 
   }finally{view.unmount()}
 })
 
-test('route commit retires captured comparison callbacks before the next component render',async()=>{
+for(const downloadId of ['comparison-left-download','comparison-left-download-json']) test(`route commit retires captured ${downloadId} before the next component render`,async()=>{
   const {watch}=await import('vue'),view=await mountReportFiles()
   let stop
   try{
-    await acceptFile(view,report());await view.click('capture-left');const download=action(view,'comparison-left-download')
+    await acceptFile(view,report());await view.click('capture-left');const download=action(view,downloadId)
     stop=watch(()=>view.router.currentRoute.value.fullPath,()=>invoke(download),{flush:'sync'})
     await view.navigate('/report-files?departed=1')
     assert.equal(view.downloads.length,0,'A departed comparison must not start a download before its queued unmount')

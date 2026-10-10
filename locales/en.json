@@ -1948,7 +1948,7 @@
   "savedReportComparison": {
     "title": "Compare captured report text",
     "scope": "These are temporary, independent observations of literal saved text. They are not a common atomic snapshot, a version archive, or a semantic quality assessment. Captures stay fixed while you browse; leaving this page clears them. The URL does not save the pair.",
-    "instructions": "Open a report in the reader, then capture it on either side. Open another report or reopen the same ID to capture another observation. Replacing or clearing a capture is explicit.",
+    "instructions": "Open a report in the reader, then capture it on either side. Open another report or reopen the same ID to capture another observation. Replacing or clearing a capture is explicit. Download either side as observation JSON to reopen its full captured text and recorded context in Open report files, even after the reader changes or closes. Unavailable text retains its recorded reason.",
     "left": "Left capture",
     "right": "Right capture",
     "capture": "Capture open report",
@@ -1957,6 +1957,7 @@
     "clear": "Clear pair",
     "clearSide": "Clear side",
     "download": "Download exact source",
+    "downloadJson": "Download observation JSON",
     "unknown": "Unknown",
     "emptySlot": "No report captured on this side.",
     "needPair": "Capture both sides to compare their exact saved text.",

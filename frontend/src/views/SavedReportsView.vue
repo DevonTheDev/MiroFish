@@ -49,7 +49,7 @@
         </article>
         <p v-else-if="!detailLoading && !detailError" class="note">{{ t('savedReports.chooseReport') }}</p>
       </section>
-      <SavedReportComparison :source="savedReport" :is-current="isCurrentComparisonSource" />
+      <SavedReportComparison :source="savedReport" :is-current="isCurrentComparisonSource" :is-active="isActiveComparison" />
     </main>
   </div>
 </template>
@@ -212,6 +212,7 @@ function closeReader() {
   try { return navigateSelected({ ...selection(), report_id: null, metadata_revision: null }, { keepList: true }) } catch { retireDetail() }
 }
 function isCurrentComparisonSource(source) { return source === savedReport.value && !!activeDetail && ownsDetail(activeDetail) && !detailLoading.value }
+function isActiveComparison() { return !disposed && route.name === 'SavedReports' }
 const canDownload = computed(() => !!savedReport.value?.content_available && !dirty.value && !detailLoading.value)
 function downloadReport(saved, request, markdown) {
   const owns = () => saved && savedReport.value === saved && activeDetail === request && ownsDetail(request) && !detailLoading.value

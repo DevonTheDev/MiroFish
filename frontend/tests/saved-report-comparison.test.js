@@ -4,6 +4,8 @@ import { readFileSync } from 'node:fs'
 import { mountReportLibrary, deferredApi, flush, ok } from './helpers/report-library-view-fixture.js'
 
 import * as utility from '../src/utils/savedReportComparison.js'
+import { createSavedReportFile, readSavedReportFile } from '../src/utils/savedReportFiles.js'
+import { REPORT_OBSERVATION_KEYS } from '../src/utils/savedReportObservation.js'
 const revision = 'a'.repeat(64), metadataRevision = 'b'.repeat(64), contentRevision = 'c'.repeat(64)
 const summary = (id = 'report_A', overrides = {}) => ({ report_id: id, simulation_id: 'sim_saved', title: `Saved ${id}`, summary_preview: '', requirement_preview: '', status: 'completed', created_at: null, completed_at: null, source: 'modern', metadata_revision: metadataRevision, ...overrides })
 const detail = (text = 'A\n', id = 'report_A', overrides = {}) => ({ ...summary(id), observed_at: '2026-10-05T12:00:01Z', content_source: 'full_report.md', content_revision: contentRevision, content_bytes: Buffer.byteLength(text), markdown_content: text, content_available: true, content_error: null, ...overrides })
@@ -20,6 +22,39 @@ async function open(h, calls, id, text, overrides = {}) {
 }
 const invoke = handler => handler({ button: 0, preventDefault() {}, stopPropagation() {} })
 const countCalls = calls => calls.getSavedReport.length + calls.getSavedReports.length
+
+async function assertObservationDownload(file, expected, side) {
+  assert.ok(file.blob instanceof Blob)
+  assert.equal(file.blob.type, 'application/json;charset=utf-8')
+  assert.equal(file.filename, `${expected.report_id}-${side}-${expected.metadata_revision.slice(0, 12)}-${expected.content_revision?.slice(0, 12) ?? 'unavailable'}.observation.json`)
+  assert.match(file.filename, /^[A-Za-z0-9_-]+\.observation\.json$/)
+  assert.ok(file.filename.length <= 177)
+  const text = await file.blob.text()
+  assert.equal(text, createSavedReportFile(expected))
+  assert.deepEqual(Object.keys(JSON.parse(text)), ['format', 'version', 'observation'])
+  assert.deepEqual(Object.keys(JSON.parse(text).observation), REPORT_OBSERVATION_KEYS)
+  const reopened = await readSavedReportFile(file.blob)
+  assert.deepEqual(reopened, expected)
+  assert.ok(Object.isFrozen(reopened))
+  if (expected.content_available) assert.deepEqual(Buffer.from(reopened.markdown_content), Buffer.from(expected.markdown_content))
+}
+
+test('side JSON retains old and new same-ID observations beyond the preview after reader replacement and closure', async t => {
+  const { h, calls } = await setup(t)
+  const old = detail('\ufeff<script>literal</script>\r\n雪😀'.repeat(3000), 'report_A', { title: '../unsafe title', summary_preview: 'earlier summary', requirement_preview: 'earlier requirement', status: 'generating', created_at: 'arbitrary creation', completed_at: null })
+  await resolve(calls.getSavedReport[0], { ...old, ignored: 'not part of the file' }); await h.click('capture-left')
+  await open(h, calls, 'report_B', 'intermediate')
+  const next = detail('new same-ID body\n', 'report_A', { content_revision: 'd'.repeat(64), observed_at: '2026-10-05T12:01:00Z' })
+  await open(h, calls, 'report_A', next.markdown_content, next); await h.click('capture-right')
+  assert.ok(h.byId('comparison-left-truncated'))
+  const count = countCalls(calls)
+  await h.click('comparison-left-download-json'); await assertObservationDownload(h.downloads.at(-1), old, 'left')
+  await h.click('comparison-right-download-json'); await assertObservationDownload(h.downloads.at(-1), next, 'right')
+  await h.click('close-reader')
+  await h.click('comparison-left-download-json'); await assertObservationDownload(h.downloads.at(-1), old, 'left')
+  assert.equal(countCalls(calls), count)
+  assert.deepEqual(h.warnings, [])
+})
 
 test('bounded comparison utility exists and distinguishes exact text from missing bodies', () => {
   assert.equal(typeof utility.compareCapturedText, 'function', 'missing captured-text comparison utility')
@@ -116,7 +151,7 @@ test('same-ID body-only rewrite creates independent captures; replacement, swap 
   await h.click('capture-right')
   assert.equal(h.byId('comparison-status').props['data-status'], 'different')
   assert.equal(h.text(h.byId('comparison-left-text')), 'old\r\n'); assert.equal(h.text(h.byId('comparison-right-text')), 'new\n')
-  const retired = ['comparison-left-download', 'comparison-left-clear', 'comparison-swap', 'comparison-clear', 'capture-left'].map(id => h.byId(id).props.onClick)
+  const retired = ['comparison-left-download', 'comparison-left-download-json', 'comparison-left-clear', 'comparison-swap', 'comparison-clear', 'capture-left'].map(id => h.byId(id).props.onClick)
   const count = countCalls(calls)
   await h.click('comparison-swap')
   retired.forEach(invoke); await flush()
@@ -146,7 +181,7 @@ test('capture rejects synchronous retirement and ignored-abort A to B to A respo
   assert.ok(h.byId('capture-right').props.disabled)
   await resolve(newB, detail('current B', 'report_B')); await h.click('capture-right')
   assert.equal(h.text(h.byId('comparison-left-text')), 'accepted'); assert.equal(h.text(h.byId('comparison-right-text')), 'current B')
-  const actions = ['capture-left', 'comparison-left-download', 'comparison-swap', 'comparison-clear'].map(id => h.byId(id).props.onClick)
+  const actions = ['capture-left', 'comparison-left-download', 'comparison-left-download-json', 'comparison-swap', 'comparison-clear'].map(id => h.byId(id).props.onClick)
   await h.navigate('/'); actions.forEach(invoke); await flush()
   assert.equal(h.downloads.length, 0); assert.equal(h.timers.pending.size, 0)
 })
@@ -169,6 +204,11 @@ for (const contentError of ['not_saved', 'unreadable', 'too_large']) test(`empty
   assert.ok(h.byId('comparison-right-download').props.disabled)
   assert.equal(h.text(h.byId('comparison-left-text')), '')
   await h.click('comparison-left-download'); assert.equal(h.downloads[0].blob.size, 0)
+  const empty = detail('', 'report_A', { status: 'failed' })
+  const missing = detail('', 'report_B', { status: 'generating', content_available: false, markdown_content: null, content_bytes: null, content_revision: null, content_source: null, content_error: contentError })
+  await h.click('close-reader')
+  await h.click('comparison-left-download-json'); await assertObservationDownload(h.downloads.at(-1), empty, 'left')
+  await h.click('comparison-right-download-json'); await assertObservationDownload(h.downloads.at(-1), missing, 'right')
   assert.match(h.text(h.byId('comparison-left')), /Failed/); assert.match(h.text(h.byId('comparison-right')), /Generating/)
 })
 
@@ -192,6 +232,7 @@ test('comparison locales have matching nonempty keys and explain independent tem
   assert.deepEqual(entries(values[0]).map(([key]) => key).sort(), entries(values[1]).map(([key]) => key).sort())
   assert.ok(values.every(node => entries(node).every(([, value]) => value.trim())))
   assert.match(values[0].scope, /independent/i); assert.match(values[0].scope, /temporary/i)
+  assert.match(values[0].instructions, /JSON/); assert.match(values[0].downloadJson, /JSON/)
 })
 
 test('repeated-line changes use a minimal deterministic alignment', () => {

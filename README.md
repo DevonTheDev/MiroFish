@@ -64,7 +64,9 @@ the current backend. See [opening report files](docs/LOCAL_MODE.md#open-report-f
 
 Capture opened reports into left/right slots to compare their literal text and
 bounded line changes while browsing the library. Each side retains its own
-observed source and exact text download. See [captured report comparison](docs/LOCAL_MODE.md#compare-captured-report-text).
+observed source, exact Markdown and observation JSON downloads, even after the
+reader changes or closes. Reopen a side's JSON in **Open report files**, including
+observations with unavailable text. See [captured report comparison](docs/LOCAL_MODE.md#compare-captured-report-text).
 
 If a report request loses its response, retrying while that report is still
 running in the same backend process reopens the existing job. A forced

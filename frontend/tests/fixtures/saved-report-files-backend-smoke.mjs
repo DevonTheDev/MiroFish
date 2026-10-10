@@ -1,4 +1,4 @@
-// Real HTTP responses become live-exported native File bytes, then a fresh view.
+// Real HTTP responses become retained-side native File bytes, then a fresh view.
 // Flask or the explicitly labelled pure-reader loopback harness owns the server.
 import assert from 'node:assert/strict'
 import { File } from 'node:buffer'
@@ -16,6 +16,7 @@ assert.ok(['file', 'metadata', 'legacy', 'empty', 'unavailable'].includes(conten
 const source = process.env.MIRO_REPORT_FILES_SOURCE_ROOT
   ? pathToFileURL(resolve(process.env.MIRO_REPORT_FILES_SOURCE_ROOT, 'frontend') + '/') : new URL('../../', import.meta.url)
 const { mountReportLibrary, reportLibraryApi, waitFor, flush } = await import(new URL('tests/helpers/report-library-view-fixture.js', source))
+const { createSavedReportFile, readSavedReportFile } = await import(new URL('src/utils/savedReportFiles.js', source))
 const index = readFileSync(new URL('src/api/index.js', source), 'utf8')
   .replace(/^import .*$/gm, '').replaceAll('import.meta.env', 'buildEnvironment')
   .replace('export default service', 'return service')
@@ -42,22 +43,47 @@ const canonicalKeys = ['report_id', 'simulation_id', 'title', 'summary_preview',
 const literal = node => (node.type === '#comment' ? '' : node.text ?? '') + (node.children ?? []).map(literal).join('')
 const event = () => ({ button: 0, stopPropagation() {}, preventDefault() {} })
 const exported = []
+
+async function observationDownload(host, control, observed, filename) {
+  const before = host.downloads.length
+  await host.click(control)
+  assert.equal(host.downloads.length, before + 1, 'The selected observation control must emit exactly one file')
+  const download = host.downloads.at(-1)
+  assert.ok(download.blob instanceof Blob, 'Reopen the actual native Blob emitted by the production component')
+  assert.equal(download.blob.type, 'application/json;charset=utf-8')
+  const bytes = Buffer.from(await download.blob.arrayBuffer())
+  const envelope = JSON.parse(bytes.toString('utf8'))
+  assert.deepEqual(Object.keys(envelope).sort(), ['format', 'observation', 'version'])
+  assert.equal(envelope.format, 'mirofish-saved-report-observation')
+  assert.equal(envelope.version, 1)
+  assert.equal(canonicalKeys.length, 17)
+  assert.deepEqual(Object.keys(envelope.observation).sort(), [...canonicalKeys].sort())
+  assert.deepEqual(envelope.observation, observed, 'The exporter changed the independently captured observation')
+  assert.deepEqual(bytes, Buffer.from(createSavedReportFile(observed)), 'Export must use the complete production observation format')
+  assert.ok(bytes.toString('utf8').endsWith('\n'))
+  assert.equal(download.filename, filename)
+  const file = new File([download.blob], `<img src=x> Café 雪 ${filename}`, { type: 'application/json' })
+  assert.deepEqual(Buffer.from(await file.arrayBuffer()), bytes, 'Native File construction must retain the emitted Blob bytes')
+  const reopened = await readSavedReportFile(file)
+  assert.ok(Object.isFrozen(reopened))
+  assert.deepEqual(Object.keys(reopened).sort(), [...canonicalKeys].sort())
+  for (const key of canonicalKeys) assert.equal(reopened[key], observed[key], `Reopened canonical field ${key} changed`)
+  if (observed.content_available) assert.deepEqual(Buffer.from(reopened.markdown_content), Buffer.from(observed.markdown_content))
+  return { observation: observed, bytes, envelope, filename: download.filename, file }
+}
+function sideFilename(observation, side) {
+  return `${observation.report_id}-${side}-${observation.metadata_revision.slice(0, 12)}-${observation.content_revision?.slice(0, 12) ?? 'unavailable'}.observation.json`
+}
+
 const live = await mountReportLibrary({ api: reportLibraryApi(service), initialPath: '/reports', locale: 'en' })
 try {
   await waitFor(() => live.byId('open-report_old'))
-  for (const id of ['report_old', 'report_new']) {
+  const captures = []
+  for (const [id, side] of [['report_old', 'left'], ['report_new', 'right']]) {
     await live.click('open-' + id)
     await waitFor(() => live.byId('reader') && !live.byId('loading') && !live.byId('detail-loading') && replies.some(reply => reply.data.report_id === id))
     const observed = replies.filter(reply => reply.data.report_id === id).at(-1).data
     assert.ok(live.byId('download-observation'), 'Published saved report reader lacks the observation JSON export needed to reopen reports')
-    await live.click('download-observation')
-    const download = live.downloads.at(-1)
-    const bytes = Buffer.from(await download.blob.arrayBuffer())
-    const envelope = JSON.parse(bytes.toString('utf8'))
-    assert.deepEqual(Object.keys(envelope).sort(), ['format', 'observation', 'version'])
-    assert.equal(envelope.format, 'mirofish-saved-report-observation')
-    assert.equal(envelope.version, 1)
-    assert.deepEqual(Object.keys(envelope.observation).sort(), [...canonicalKeys].sort())
     if (id === 'report_old') {
       assert.equal(observed.source, contentMode === 'legacy' ? 'legacy' : 'modern')
       assert.equal(observed.content_available, contentMode !== 'unavailable')
@@ -65,13 +91,21 @@ try {
       if (contentMode === 'metadata') assert.equal(observed.content_source, 'metadata')
       if (contentMode === 'legacy') assert.equal(observed.content_source, 'legacy_markdown')
     }
-    assert.deepEqual(envelope.observation, observed, 'The live exporter changed the actual backend observation')
-    assert.ok(bytes.toString().endsWith('\n'))
-    assert.equal(download.filename, `${id}.observation.json`)
+    await live.click('capture-' + side)
+    captures.push({ side, observation: observed })
     assert.equal(live.byId('open-report-files').props.href, '/report-files')
-    exported.push({ observation: observed, bytes, envelope, filename: download.filename,
-      file: new File([bytes], `<img src=x> Café 雪 ${id}.json`, { type: 'application/json' }) })
   }
+  assert.notEqual(captures[0].observation.report_id, captures[1].observation.report_id)
+  assert.equal(live.downloads.length, 0, 'This workflow must defer JSON exports until both live captures outlast their readers')
+  await live.click('close-reader')
+  await waitFor(() => !live.byId('reader') && !live.byId('detail-loading'))
+  assert.ok(live.byId('download-observation').props.disabled)
+  const beforeSideExports = requests.length
+  for (const { side, observation } of captures) {
+    assert.ok(live.byId(`comparison-${side}-download-json`), 'A retained capture must export JSON after reader replacement and closure')
+    exported.push(await observationDownload(live, `comparison-${side}-download-json`, observation, sideFilename(observation, side)))
+  }
+  assert.equal(requests.length, beforeSideExports, 'Exporting retained sides must not read the backend again')
   assert.ok(requests.length >= 3, 'The live catalogue and both explicit detail reads must run')
 } finally {
   live.unmount()
@@ -119,13 +153,16 @@ function localOnly() {
   assert.equal(view.byId('report-library-form'), undefined)
 }
 async function jsonDownload(expected) {
-  const before = view.downloads.length
-  await view.click('download-file')
-  assert.equal(view.downloads.length, before + 1)
-  const downloaded = view.downloads.at(-1)
-  assert.deepEqual(Buffer.from(await downloaded.blob.arrayBuffer()), expected.bytes,
+  const downloaded = await observationDownload(view, 'download-file', expected.observation, `${expected.observation.report_id}.observation.json`)
+  assert.deepEqual(downloaded.bytes, expected.bytes,
     'Reopened JSON must preserve every canonical field and its exact original bytes')
-  assert.deepEqual(JSON.parse(await downloaded.blob.text()).observation, expected.observation)
+  return downloaded
+}
+async function sideJsonDownload(side, expected) {
+  const downloaded = await observationDownload(view, `comparison-${side}-download-json`, expected.observation, sideFilename(expected.observation, side))
+  assert.deepEqual(downloaded.bytes, expected.bytes,
+    'Retained-side re-export must preserve the original file after its parent reader changes or closes')
+  localOnly()
   return downloaded
 }
 function readerInstance() {
@@ -229,7 +266,8 @@ try {
       assert.equal(literal(view.byId(`comparison-${side}-text`)), record.observation.markdown_content)
       await view.click(`comparison-${side}-download`)
       assert.deepEqual(Buffer.from(await view.downloads.at(-1).blob.arrayBuffer()), Buffer.from(record.observation.markdown_content))
-    }
+    } else assert.ok(view.byId(`comparison-${side}-download`).props.disabled)
+    await sideJsonDownload(side, record)
   }
   await jsonDownload(second)
   // Returning to the original exact File must make a new owner, even with equal ID.
@@ -242,6 +280,8 @@ try {
   assert.equal(view.downloads.length, downloadsBeforeABA)
   verifyBody(first)
   assert.equal(literal(view.byId('comparison-right-text')), second.observation.markdown_content)
+  await sideJsonDownload('left', first)
+  await sideJsonDownload('right', second)
   // Cancelled and invalid replacements preserve the accepted observation object.
   await preview(second.file); await view.click('cancel-file')
   assert.equal(readerInstance().props.source, reopened.originalReference)
@@ -273,12 +313,13 @@ try {
   // A user-edited local JSON snapshot can keep the same report ID while its
   // body changes. Its hashes are recorded values, never proof of authorship.
   const editedObservation = { ...first.envelope.observation,
+    observed_at: `${first.observation.observed_at} (local edited observation)`,
     content_available: true, content_source: second.observation.content_source,
     markdown_content: second.observation.markdown_content,
     content_bytes: second.observation.content_bytes,
     content_revision: second.observation.content_revision, content_error: null,
   }
-  const editedBytes = Buffer.from(JSON.stringify({ ...first.envelope, observation: editedObservation }) + '\n')
+  const editedBytes = Buffer.from(createSavedReportFile(editedObservation))
   const edited = { observation: editedObservation, bytes: editedBytes,
     file: new File([editedBytes], 'same-id-edited.json', { type: 'application/json' }) }
   const retiringFind = view.byId('report-find').props.onInput
@@ -288,12 +329,18 @@ try {
   retiringCapture(event()); retiringFind({ target: { value: 'retired same-ID text' } }); await flush()
   const editedOwner = verifyBody(edited)
   assert.equal(editedOwner.originalReference.report_id, reopened.originalReference.report_id)
+  assert.equal(editedOwner.originalReference.metadata_revision, reopened.originalReference.metadata_revision)
+  assert.notEqual(editedOwner.originalReference.markdown_content, reopened.originalReference.markdown_content)
   assert.equal(editedOwner.component.props.isCurrent(reopened.originalReference), false)
   assert.equal(view.byId('report-find').props.value, '')
   assert.ok(view.text(view.byId('comparison-right')).includes(second.observation.report_id))
+  await sideJsonDownload('left', first)
+  await sideJsonDownload('right', second)
   await view.click('capture-right')
   assert.ok(view.text(view.byId('comparison-right')).includes(first.observation.report_id))
   assert.equal(view.byId('comparison-status').props['data-status'], contentMode === 'unavailable' ? 'unavailable' : 'different')
+  await sideJsonDownload('left', first)
+  await sideJsonDownload('right', edited)
   await jsonDownload(edited)
   await view.click('clear-file')
   assert.equal(view.byId('accepted-file'), undefined)
@@ -301,8 +348,12 @@ try {
   assert.ok(!view.byId('download-file') || view.byId('download-file').props.disabled)
   assert.ok(view.byId('comparison-status'), 'Clearing current file must retain independent pinned captures')
   assert.equal(literal(view.byId('comparison-right-text')), second.observation.markdown_content)
+  await sideJsonDownload('left', first)
+  await sideJsonDownload('right', edited)
   await view.click('comparison-swap')
   assert.equal(literal(view.byId('comparison-left-text')), second.observation.markdown_content)
+  await sideJsonDownload('left', edited)
+  await sideJsonDownload('right', first)
   await view.click('comparison-clear')
   assert.equal(view.byId('comparison-left-text'), undefined)
   await view.timers.advance(1000)
@@ -314,7 +365,7 @@ try {
   assert.equal(view.byId('comparison-left-text'), undefined)
   localOnly()
   console.log('actual Axios/Vue report file round trip passed: ' + contentMode)
-  console.log(JSON.stringify({ mode: contentMode, native_file_bytes: true, exact_observation_json_and_markdown: true, source_reference_ownership: true, pending_read_search_and_language: true, stale_read_success_and_rejection: true, same_id_changed_body_comparison: true, file_api_attempts: fileApiAttempts, file_network_calls: view.networkCalls.length + forbiddenGlobalCalls.length, file_persistence_writes: view.storageWrites.length, native_browser_rendering: false }))
+  console.log(JSON.stringify({ mode: contentMode, native_file_bytes: true, exact_observation_json_and_markdown: true, retained_live_side_json_after_reader_close: true, retained_imported_side_json_after_replacement_and_close: true, canonical_observation_fields: canonicalKeys.length, source_reference_ownership: true, pending_read_search_and_language: true, stale_read_success_and_rejection: true, same_id_changed_body_comparison: true, file_api_attempts: fileApiAttempts, file_network_calls: view.networkCalls.length + forbiddenGlobalCalls.length, file_persistence_writes: view.storageWrites.length, native_browser_rendering: false }))
 } finally {
   view.unmount()
 }

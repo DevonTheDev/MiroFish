@@ -441,14 +441,23 @@ silently presented as a complete truncated diff. Exact equality can still be
 reported for larger identical captured texts without building diff rows.
 
 Download either side to retain its exact full captured Markdown, including text
-beyond the preview limit. Capturing, comparing, swapping, clearing and downloading
+beyond the preview limit. Each side also offers **Download observation JSON**:
+it exports that side's full captured text and all recorded context, even after
+the reader opens another observation of the same report ID or closes. Available
+empty bodies and unavailable bodies remain distinct; unavailable exports retain
+their saved status and recorded reason. Open each JSON in **Open report files**
+to review it locally and capture it again. Filenames use the report ID, side and
+short revision prefixes (or `unavailable`); copied hashes are not authenticated
+by exporting or reopening the file. The same side downloads work in the report
+file reader. Capturing, comparing, swapping, clearing and downloading
 these accepted snapshots make no additional server reads, inference requests or
 report writes. Report HTML and links remain literal text. This is textual review,
 with no model-quality score or causal interpretation of the differences.
 
 ### Open report files
 
-Use **Download observation JSON** in the saved-report reader to retain its
+Use **Download observation JSON** in the saved-report reader or a captured
+comparison side to retain its
 accepted text together with report identity, recorded status, observation time,
 content source and revisions. The existing Markdown download still keeps only
 the exact captured text. An available empty body and an unavailable body remain

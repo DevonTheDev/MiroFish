@@ -22,7 +22,7 @@
             <dt>{{ t('savedReports.contentBytes') }}</dt><dd>{{ slot.saved.content_bytes ?? t('savedReportComparison.unknown') }}</dd>
             <dt>{{ t('savedReports.contentRevision') }}</dt><dd>{{ slot.saved.content_revision ?? t('savedReportComparison.unknown') }}</dd>
           </dl>
-          <div class="actions"><button type="button" :data-testid="`comparison-${slot.side}-download`" :disabled="!slot.saved.content_available" @click="slot.download">{{ t('savedReportComparison.download') }}</button><button type="button" :data-testid="`comparison-${slot.side}-clear`" @click="slot.clear">{{ t('savedReportComparison.clearSide') }}</button></div>
+          <div class="actions"><button type="button" :data-testid="`comparison-${slot.side}-download`" :disabled="!slot.saved.content_available" @click="slot.download">{{ t('savedReportComparison.download') }}</button><button type="button" :data-testid="`comparison-${slot.side}-download-json`" @click="slot.downloadJson">{{ t('savedReportComparison.downloadJson') }}</button><button type="button" :data-testid="`comparison-${slot.side}-clear`" @click="slot.clear">{{ t('savedReportComparison.clearSide') }}</button></div>
           <p v-if="!slot.saved.content_available" class="notice" :data-testid="`comparison-${slot.side}-unavailable`">{{ t(`savedReports.contentErrors.${slot.saved.content_error}`) }}</p>
           <template v-else>
             <p v-if="slot.preview.truncated" class="notice" :data-testid="`comparison-${slot.side}-truncated`">{{ t('savedReportComparison.truncated') }}</p>
@@ -50,6 +50,7 @@
 import { computed, shallowRef, onBeforeUnmount } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { compareCapturedText, previewCapturedText } from '../utils/savedReportComparison.js'
+import { createSavedReportFile } from '../utils/savedReportFiles.js'
 
 const props = defineProps({ source: { type: Object, default: null }, isCurrent: { type: Function, required: true }, isActive: { type: Function, default: null } })
 const { t } = useI18n()
@@ -79,20 +80,23 @@ function capture(snapshot, source, side) {
   if (!owns(snapshot) || !source || !props.isCurrent(source)) return
   replace(snapshot, { ...snapshot, [side]: Object.freeze({ ...source }) })
 }
-function download(snapshot, side) {
+function download(snapshot, side, markdown) {
   const saved = snapshot[side]
-  if (!owns(snapshot) || !saved?.content_available) return
+  if (!owns(snapshot) || !saved || (markdown && !saved.content_available)) return
   const previous = downloads.get(side) ?? null, current = { url: null, link: null, timer: null }
   downloads.set(side, current); revoke(side, previous)
   const currentOwner = () => owns(snapshot) && downloads.get(side) === current
   try {
     if (!currentOwner()) return
     downloadError.value = false
-    current.url = URL.createObjectURL(new Blob([saved.markdown_content], { type: 'text/markdown;charset=utf-8' }))
+    const body = markdown ? saved.markdown_content : createSavedReportFile(saved)
+    current.url = URL.createObjectURL(new Blob([body], { type: markdown ? 'text/markdown;charset=utf-8' : 'application/json;charset=utf-8' }))
     if (!currentOwner()) return
     current.link = document.createElement('a')
     if (!currentOwner()) return
-    current.link.href = current.url; current.link.download = `${saved.report_id}-${side}-${saved.content_revision.slice(0, 12)}.md`
+    current.link.href = current.url
+    current.link.download = markdown ? `${saved.report_id}-${side}-${saved.content_revision.slice(0, 12)}.md`
+      : `${saved.report_id}-${side}-${saved.metadata_revision.slice(0, 12)}-${saved.content_revision?.slice(0, 12) ?? 'unavailable'}.observation.json`
     document.body.appendChild(current.link)
     if (!currentOwner()) return
     current.link.click()
@@ -111,7 +115,7 @@ const slots = computed(() => {
     const saved = snapshot[side]
     return { side, saved, preview: saved?.content_available ? previewCapturedText(saved.markdown_content) : null,
       capture: () => capture(snapshot, source, side), clear: () => replace(snapshot, { ...snapshot, [side]: null }),
-      download: () => download(snapshot, side) }
+      download: () => download(snapshot, side, true), downloadJson: () => download(snapshot, side, false) }
   })
 })
 const pairActions = computed(() => {
