@@ -10,6 +10,23 @@ PC's RAM, disk, compute and electricity. Small-model accuracy is not equivalent
 to a large hosted model. Generated simulations are exploratory, not validated
 forecasts or a basis for consequential decisions.
 
+## Switch projects during graph building
+
+Step 1 follows the selected project route. Switching projects clears the previous
+project and graph before the new project can create a simulation. Leaving the
+page retires its pending upload, project, task and graph observations; late
+replies cannot navigate back or start a subsequent graph build. An upload
+response already being adopted into its assigned project continues one build
+path after that navigation succeeds.
+
+Task observations are single-flight and completion performs one final graph
+load. Explicit graph refreshes use the newest request's result. Returning to an
+existing project still observes its active build or reuses its completed graph.
+Aborting page requests does not cancel ontology generation or graph work already
+accepted by the backend. If a leave is canceled, the selected saved project is
+loaded again. An interrupted upload shows a restart instruction instead of
+silently uploading a second time. These rules apply in local and cloud mode.
+
 ## Choose a simulation platform
 
 In Step 1, after the graph is ready, select **Info Plaza** (Twitter), **Topic

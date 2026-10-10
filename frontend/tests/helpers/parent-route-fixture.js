@@ -7,8 +7,11 @@ import { parse as parseJavaScript } from '@babel/parser'
 import { parse, compileScript, compileTemplate } from '@vue/compiler-sfc'
 import * as Vue from 'vue'
 import * as Router from 'vue-router'
+import * as PendingUpload from '../../src/store/pendingUpload.js'
 import * as LocalCastPreset from '../../src/utils/localCastPreset.js'
 
+export const graphView = 'views/MainView.vue'
+export const graphChild = 'components/Step1GraphBuild.vue'
 export const setupView = 'views/SimulationView.vue'
 export const runView = 'views/SimulationRunView.vue'
 export const setupChild = 'components/Step2EnvSetup.vue'
@@ -90,16 +93,17 @@ export function build(options = {}) {
     Transition: { props: ['name', 'mode'], setup(_props, { slots }) { return () => slots.default?.() } },
     TransitionGroup: { props: ['name', 'mode'], setup(_props, { slots }) { return () => slots.default?.() } },
   } : Vue, 'vue-router': { ...Router, createWebHistory: Router.createMemoryHistory },
-    'vue-i18n': options.locale ? I18n : { useI18n: () => ({ t: (key, params) => key + (params ? JSON.stringify(params) : '') }) } }
+    'vue-i18n': options.locale ? I18n : { useI18n: () => ({ t: (key, params) => key + (params ? JSON.stringify(params) : ''), tm: () => [] }) } }
   const components = { '../components/GraphPanel.vue': graph }
   function evaluate(source, returnName = 'component') {
     const ast = parseJavaScript(source, { sourceType: 'module' })
-    const globals = { AbortController, Blob, URL: fileUrl, document: fileDocument, console: { warn: (...args) => warnings.push(args), error: (...args) => warnings.push(args) },
+    const globals = { AbortController, Blob, FormData, alert: message => warnings.push(['alert', message]), URL: fileUrl, document: fileDocument, console: { warn: (...args) => warnings.push(args), error: (...args) => warnings.push(args) },
       setInterval: (callback, ms) => { const id = nextTimer++; intervals.set(id, { callback, ms }); return id },
       clearInterval: id => intervals.delete(id) }
     for (const statement of ast.program.body.filter(item => item.type === 'ImportDeclaration').reverse()) {
       const path = statement.source.value
       let dependency = modules[path] ?? (path.includes('/api/') ? api : null)
+      if (path === '../store/pendingUpload') dependency = PendingUpload
       if (path === '../utils/localCastPreset') dependency = LocalCastPreset
       if (path === '../utils/localRunPlan') {
         const utility = readFileSync(new URL('../../src/utils/localRunPlan.js', import.meta.url), 'utf8')
@@ -141,6 +145,10 @@ export function build(options = {}) {
   components['../components/Step3Simulation.vue'] = component(runChild)
   components['../views/SimulationView.vue'] = component(setupView)
   components['../views/SimulationRunView.vue'] = component(runView)
+  if (options.graphRoute) {
+    components['../components/Step1GraphBuild.vue'] = component(graphChild)
+    components['../views/MainView.vue'] = component(graphView)
+  }
   const router = evaluate(readFileSync(new URL('../../src/router/index.js', import.meta.url), 'utf8'))
   const appSource = readFileSync(new URL('../../src/App.vue', import.meta.url), 'utf8')
   assert.equal(parse(appSource).descriptor.template.content.trim(), '<router-view />')

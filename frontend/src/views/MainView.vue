@@ -77,8 +77,8 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted, onUnmounted, nextTick } from 'vue'
-import { useRoute, useRouter } from 'vue-router'
+import { ref, computed, watch, onBeforeUnmount } from 'vue'
+import { useRoute, useRouter, onBeforeRouteLeave } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import GraphPanel from '../components/GraphPanel.vue'
 import Step1GraphBuild from '../components/Step1GraphBuild.vue'
@@ -99,7 +99,7 @@ const currentStep = ref(1) // 1: 图谱构建, 2: 环境搭建, 3: 开始模拟,
 const stepNames = computed(() => tm('main.stepNames'))
 
 // Data State
-const currentProjectId = ref(route.params.projectId)
+const currentProjectId = computed(() => route.params.projectId)
 const loading = ref(false)
 const graphLoading = ref(false)
 const error = ref('')
@@ -110,9 +110,34 @@ const ontologyProgress = ref(null)
 const buildProgress = ref(null)
 const systemLogs = ref([])
 
-// Polling timers
-let pollTimer = null
-let graphPollTimer = null
+// Every route selection has its own identity, including A → B → A.
+let viewContext = null
+let projectAdoption = null
+const ownsView = context => !!context && context.active && context === viewContext
+  && route.name === 'Process' && context.id === currentProjectId.value
+
+const resetProjectState = () => {
+  currentStep.value = 1
+  loading.value = false
+  graphLoading.value = false
+  error.value = ''
+  projectData.value = null
+  graphData.value = null
+  currentPhase.value = -1
+  ontologyProgress.value = null
+  buildProgress.value = null
+  systemLogs.value = []
+}
+
+const retireView = (context = viewContext) => {
+  if (!context) return
+  context.active = false
+  // Abort HTTP observers only; already accepted server work may continue.
+  context.controller.abort()
+  context.graphRequest?.controller.abort()
+  stopPolling(context)
+  if (context === viewContext) resetProjectState()
+}
 
 // --- Computed Layout Styles ---
 const leftPanelStyle = computed(() => {
@@ -143,7 +168,8 @@ const statusText = computed(() => {
 })
 
 // --- Helpers ---
-const addLog = (msg) => {
+const addLog = (msg, context = viewContext) => {
+  if (!ownsView(context)) return
   const time = new Date().toLocaleTimeString('en-US', { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' }) + '.' + new Date().getMilliseconds().toString().padStart(3, '0')
   systemLogs.value.push({ time, msg })
   // Keep last 100 logs
@@ -182,83 +208,91 @@ const handleGoBack = () => {
 
 // --- Data Logic ---
 
-const initProject = async () => {
-  addLog('Project view initialized.')
-  if (currentProjectId.value === 'new') {
-    await handleNewProject()
+const initProject = async (context) => {
+  if (!ownsView(context)) return
+  addLog('Project view initialized.', context)
+  if (context.id === 'new') {
+    await handleNewProject(context)
   } else {
-    await loadProject()
+    await loadProject(context)
   }
 }
 
-const handleNewProject = async () => {
+const handleNewProject = async (context) => {
+  if (!ownsView(context)) return
   const pending = getPendingUpload()
   if (!pending.isPending || pending.files.length === 0) {
     error.value = 'No pending files found.'
-    addLog('Error: No pending files found for new project.')
+    addLog('Error: No pending files found for new project.', context)
     return
   }
-  
+
   try {
     loading.value = true
     currentPhase.value = 0
     ontologyProgress.value = { message: 'Uploading and analyzing docs...' }
-    addLog('Starting ontology generation: Uploading files...')
-    
+    addLog('Starting ontology generation: Uploading files...', context)
+
     const formData = new FormData()
     pending.files.forEach(f => formData.append('files', f))
     formData.append('simulation_requirement', pending.simulationRequirement)
-    
-    const res = await generateOntology(formData)
+
+    const res = await generateOntology(formData, context.controller.signal)
+    if (!ownsView(context)) return
     if (res.success) {
-      clearPendingUpload()
-      currentProjectId.value = res.data.project_id
-      projectData.value = res.data
-      
-      router.replace({ name: 'Process', params: { projectId: res.data.project_id } })
-      ontologyProgress.value = null
-      addLog(`Ontology generated successfully for project ${res.data.project_id}`)
-      await startBuildGraph()
+      // The route watcher consumes this handoff once, after navigation commits.
+      // It owns the only build path; the retired upload never starts another one.
+      projectAdoption = { context, id: res.data.project_id, data: res.data, pending }
+      await router.replace({ name: 'Process', params: { projectId: res.data.project_id } })
+      if (!ownsView(context)) return
+      projectAdoption = null
+      error.value = 'Project navigation was interrupted.'
+      addLog(error.value, context)
     } else {
       error.value = res.error || 'Ontology generation failed'
-      addLog(`Error generating ontology: ${error.value}`)
+      addLog(`Error generating ontology: ${error.value}`, context)
     }
   } catch (err) {
+    if (!ownsView(context)) return
+    projectAdoption = null
     error.value = err.message
-    addLog(`Exception in handleNewProject: ${err.message}`)
+    addLog(`Exception in handleNewProject: ${err.message}`, context)
   } finally {
-    loading.value = false
+    if (ownsView(context)) loading.value = false
   }
 }
 
-const loadProject = async () => {
+const loadProject = async (context) => {
+  if (!ownsView(context)) return
   try {
     loading.value = true
-    addLog(`Loading project ${currentProjectId.value}...`)
-    const res = await getProject(currentProjectId.value)
+    addLog(`Loading project ${context.id}...`, context)
+    const res = await getProject(context.id, context.controller.signal)
+    if (!ownsView(context)) return
     if (res.success) {
       projectData.value = res.data
       updatePhaseByStatus(res.data.status)
-      addLog(`Project loaded. Status: ${res.data.status}`)
-      
+      addLog(`Project loaded. Status: ${res.data.status}`, context)
+
       if (res.data.status === 'ontology_generated' && !res.data.graph_id) {
-        await startBuildGraph()
+        await startBuildGraph(context)
       } else if (res.data.status === 'graph_building' && res.data.graph_build_task_id) {
         currentPhase.value = 1
-        startPollingTask(res.data.graph_build_task_id)
+        startPollingTask(res.data.graph_build_task_id, context)
       } else if (res.data.status === 'graph_completed' && res.data.graph_id) {
         currentPhase.value = 2
-        await loadGraph(res.data.graph_id)
+        await loadGraph(res.data.graph_id, context)
       }
     } else {
       error.value = res.error
-      addLog(`Error loading project: ${res.error}`)
+      addLog(`Error loading project: ${res.error}`, context)
     }
   } catch (err) {
+    if (!ownsView(context)) return
     error.value = err.message
-    addLog(`Exception in loadProject: ${err.message}`)
+    addLog(`Exception in loadProject: ${err.message}`, context)
   } finally {
-    loading.value = false
+    if (ownsView(context)) loading.value = false
   }
 }
 
@@ -272,149 +306,183 @@ const updatePhaseByStatus = (status) => {
   }
 }
 
-const startBuildGraph = async () => {
+const startBuildGraph = async (context) => {
+  if (!ownsView(context)) return
   try {
     currentPhase.value = 1
     buildProgress.value = { progress: 0, message: 'Starting build...' }
-    addLog('Initiating graph build...')
-    
-    const res = await buildGraph({ project_id: currentProjectId.value })
+    addLog('Initiating graph build...', context)
+
+    const res = await buildGraph({ project_id: context.id }, context.controller.signal)
+    if (!ownsView(context)) return
     if (res.success) {
       if (res.data.reused && res.data.graph_id) {
         currentPhase.value = 2
         buildProgress.value = null
-        const projectRes = await getProject(currentProjectId.value)
-        if (projectRes.success) {
-          projectData.value = projectRes.data
-        }
-        await loadGraph(res.data.graph_id)
+        const projectRes = await getProject(context.id, context.controller.signal)
+        if (!ownsView(context)) return
+        if (projectRes.success) projectData.value = projectRes.data
+        await loadGraph(res.data.graph_id, context)
         return
       }
 
-      addLog(`Graph build task started. Task ID: ${res.data.task_id}`)
-      startPollingTask(res.data.task_id)
+      addLog(`Graph build task started. Task ID: ${res.data.task_id}`, context)
+      startPollingTask(res.data.task_id, context)
     } else {
       error.value = res.error
-      addLog(`Error starting build: ${res.error}`)
+      addLog(`Error starting build: ${res.error}`, context)
     }
   } catch (err) {
+    if (!ownsView(context)) return
     error.value = err.message
-    addLog(`Exception in startBuildGraph: ${err.message}`)
+    addLog(`Exception in startBuildGraph: ${err.message}`, context)
   }
 }
 
-const startGraphPolling = () => {
-  addLog('Started polling for graph data...')
-  fetchGraphData()
-  graphPollTimer = setInterval(fetchGraphData, 10000)
+const stopPolling = (context) => {
+  if (context?.pollTimer != null) {
+    clearInterval(context.pollTimer)
+    context.pollTimer = null
+  }
 }
 
-const fetchGraphData = async () => {
+const startPollingTask = (taskId, context) => {
+  if (!ownsView(context)) return
+  stopPolling(context)
+  const task = { id: taskId, inFlight: false, terminal: false }
+  context.task = task
+  context.pollTimer = setInterval(() => pollTaskStatus(task, context), 2000)
+  pollTaskStatus(task, context)
+}
+
+const pollTaskStatus = async (task, context) => {
+  const ownsTask = () => ownsView(context) && context.task === task
+  if (!ownsTask() || task.terminal || task.inFlight) return
+  task.inFlight = true
   try {
-    // Refresh project info to check for graph_id
-    const projRes = await getProject(currentProjectId.value)
-    if (projRes.success && projRes.data.graph_id) {
-      const gRes = await getGraphData(projRes.data.graph_id)
-      if (gRes.success) {
-        graphData.value = gRes.data
-        const nodeCount = gRes.data.node_count || gRes.data.nodes?.length || 0
-        const edgeCount = gRes.data.edge_count || gRes.data.edges?.length || 0
-        addLog(`Graph data refreshed. Nodes: ${nodeCount}, Edges: ${edgeCount}`)
+    const res = await getTaskStatus(task.id, context.controller.signal)
+    if (!ownsTask() || task.terminal) return
+    if (res.success) {
+      const result = res.data
+      if (result.message && result.message !== buildProgress.value?.message) {
+        addLog(result.message, context)
+      }
+      buildProgress.value = { progress: result.progress || 0, message: result.message }
+
+      if (result.status === 'completed') {
+        // Claim the terminal transition before starting any final reads.
+        task.terminal = true
+        stopPolling(context)
+        addLog('Graph build task completed.', context)
+        currentPhase.value = 2
+        const projRes = await getProject(context.id, context.controller.signal)
+        if (!ownsTask()) return
+        if (projRes.success && projRes.data.graph_id) {
+          projectData.value = projRes.data
+          await loadGraph(projRes.data.graph_id, context)
+        }
+      } else if (result.status === 'failed') {
+        task.terminal = true
+        stopPolling(context)
+        error.value = result.error
+        addLog(`Graph build task failed: ${result.error}`, context)
       }
     }
   } catch (err) {
-    console.warn('Graph fetch error:', err)
+    if (ownsTask()) console.error(err)
+  } finally {
+    if (ownsTask()) task.inFlight = false
   }
 }
 
-const startPollingTask = (taskId) => {
-  pollTaskStatus(taskId)
-  pollTimer = setInterval(() => pollTaskStatus(taskId), 2000)
-}
-
-const pollTaskStatus = async (taskId) => {
-  try {
-    const res = await getTaskStatus(taskId)
-    if (res.success) {
-      const task = res.data
-      
-      // Log progress message if it changed
-      if (task.message && task.message !== buildProgress.value?.message) {
-        addLog(task.message)
-      }
-      
-      buildProgress.value = { progress: task.progress || 0, message: task.message }
-      
-      if (task.status === 'completed') {
-        addLog('Graph build task completed.')
-        stopPolling()
-        stopGraphPolling() // Stop polling, do final load
-        currentPhase.value = 2
-        
-        // Final load
-        const projRes = await getProject(currentProjectId.value)
-        if (projRes.success && projRes.data.graph_id) {
-            projectData.value = projRes.data
-            await loadGraph(projRes.data.graph_id)
-        }
-      } else if (task.status === 'failed') {
-        stopPolling()
-        error.value = task.error
-        addLog(`Graph build task failed: ${task.error}`)
-      }
-    }
-  } catch (e) {
-    console.error(e)
-  }
-}
-
-const loadGraph = async (graphId) => {
+const loadGraph = async (graphId, context) => {
+  if (!ownsView(context)) return
+  context.graphRequest?.controller.abort()
+  const request = { controller: new AbortController() }
+  context.graphRequest = request
+  const ownsRequest = () => ownsView(context) && context.graphRequest === request
   graphLoading.value = true
-  addLog(`Loading full graph data: ${graphId}`)
+  addLog(`Loading full graph data: ${graphId}`, context)
   try {
-    const res = await getGraphData(graphId)
+    const res = await getGraphData(graphId, request.controller.signal)
+    if (!ownsRequest()) return
     if (res.success) {
       graphData.value = res.data
-      addLog('Graph data loaded successfully.')
+      addLog('Graph data loaded successfully.', context)
     } else {
-      addLog(`Failed to load graph data: ${res.error}`)
+      addLog(`Failed to load graph data: ${res.error}`, context)
     }
-  } catch (e) {
-    addLog(`Exception loading graph: ${e.message}`)
+  } catch (err) {
+    if (ownsRequest()) addLog(`Exception loading graph: ${err.message}`, context)
   } finally {
-    graphLoading.value = false
+    if (ownsRequest()) graphLoading.value = false
   }
 }
 
 const refreshGraph = () => {
-  if (projectData.value?.graph_id) {
-    addLog('Manual graph refresh triggered.')
-    loadGraph(projectData.value.graph_id)
+  const context = viewContext
+  if (ownsView(context) && projectData.value?.graph_id) {
+    addLog('Manual graph refresh triggered.', context)
+    loadGraph(projectData.value.graph_id, context)
   }
 }
 
-const stopPolling = () => {
-  if (pollTimer) {
-    clearInterval(pollTimer)
-    pollTimer = null
+const selectProject = (id, recovering = false) => {
+  const adoption = !recovering && projectAdoption?.context === viewContext && viewContext?.active
+    && projectAdoption.id === id ? projectAdoption : null
+  retireView()
+  projectAdoption = null
+  viewContext = null
+  resetProjectState()
+  if (!id || route.name !== 'Process') return
+  const context = { id, active: true, controller: new AbortController(), graphRequest: null, task: null, pollTimer: null }
+  viewContext = context
+  if (recovering && id === 'new') {
+    // Aborted upload observation may already have created a server project.
+    // Never silently replay that POST after a canceled navigation.
+    error.value = 'Upload observation was interrupted. Return home to start the upload again.'
+    addLog(error.value, context)
+  } else if (adoption) {
+    const pending = getPendingUpload()
+    if (pending.files === adoption.pending.files && pending.simulationRequirement === adoption.pending.simulationRequirement) {
+      clearPendingUpload()
+    }
+    projectData.value = adoption.data
+    addLog(`Ontology generated successfully for project ${id}`, context)
+    startBuildGraph(context)
+  } else {
+    initProject(context)
   }
 }
 
-const stopGraphPolling = () => {
-  if (graphPollTimer) {
-    clearInterval(graphPollTimer)
-    graphPollTimer = null
-    addLog('Graph polling stopped.')
-  }
-}
+watch(currentProjectId, id => selectProject(id), { immediate: true, flush: 'sync' })
 
-onMounted(() => {
-  initProject()
+onBeforeRouteLeave(to => {
+  if (viewContext) viewContext.departure = to.redirectedFrom || to
+  retireView()
 })
-
-onUnmounted(() => {
-  stopPolling()
-  stopGraphPolling()
+// A leave may abort, redirect, throw, or lose to a newer navigation. Recover
+// only its exact failed attempt or a route that has actually become current.
+const recoverSelectedProject = (to, committed = false) => {
+  const context = viewContext
+  if (context && !context.active && route.name === 'Process'
+    && currentProjectId.value === context.id
+    && (context.departure === (to.redirectedFrom || to)
+      || (committed && router.currentRoute.value === to))) {
+    selectProject(context.id, true)
+  }
+}
+const removeRouteRecovery = router.afterEach((to, _from, failure) => {
+  recoverSelectedProject(to, !failure)
+})
+const removeRouteErrorRecovery = router.onError((err, to) => {
+  recoverSelectedProject(to)
+  console.error(err)
+})
+onBeforeUnmount(() => {
+  removeRouteRecovery()
+  removeRouteErrorRecovery()
+  retireView()
 })
 </script>
 
