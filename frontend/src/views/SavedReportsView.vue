@@ -123,7 +123,7 @@ function retireList() { activeList?.controller.abort(); activeList = null; resul
 function retireDetail() { activeDetail?.controller.abort(); activeDetail = null; savedReport.value = null; detailLoading.value = false; detailError.value = ''; downloadError.value = false; revokeDownload() }
 function retireAll() { if (pendingNavigation) pendingNavigation.retired = true; retireList(); retireDetail() }
 function ownsList(request) { return !disposed && !dirty.value && activeList === request && !request.controller.signal.aborted }
-function ownsDetail(request) { return !disposed && !dirty.value && activeDetail === request && !request.controller.signal.aborted }
+function ownsDetail(request) { return !disposed && route.name === 'SavedReports' && !dirty.value && activeDetail === request && !request.controller.signal.aborted }
 function errorCode(cause) { const code = cause?.response?.data?.error_code; return errorCodes.includes(code) ? code : 'generic' }
 const bounded = (value, max) => Number.isSafeInteger(value) && value >= 0 && value <= max
 function validCatalogue(data, selected) {

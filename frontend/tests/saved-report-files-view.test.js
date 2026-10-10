@@ -87,6 +87,61 @@ for (const downloadId of ['comparison-left-download', 'comparison-left-download-
   } finally { stop?.(); view.unmount() }
 })
 
+for (const cacheHandlers of [true, false]) for (const downloadId of ['download', 'download-observation']) test(`live reader route commit retires ${downloadId} with identical selection before queued unmount (${cacheHandlers})`, async () => {
+  const { watch } = await import('vue'), view = await mountReportFiles({ initialPath: '/reports?report_id=report_A', cacheHandlers })
+  let stop
+  try {
+    view.requests.calls.getSavedReport[0].resolve(ok(report())); await flush()
+    const retained = action(view, downloadId), snapshots = []
+    stop = watch(() => view.router.currentRoute.value.fullPath, () => {
+      const route = view.router.currentRoute.value.name, readerRendered = !!view.byId('reader')
+      invoke(retained)
+      snapshots.push({ route, readerRendered, downloads: view.downloads.length, blobs: view.blobs.size, anchors: view.anchors.length, attached: view.anchors.filter(anchor => anchor.attached).length, timers: view.timers.pending.size })
+    }, { flush: 'sync' })
+    await view.navigate('/runtime?report_id=report_A')
+    stop(); stop = null
+    assert.equal(snapshots.length, 1)
+    assert.equal(snapshots[0].route, 'RuntimeStatus')
+    assert.equal(snapshots[0].readerRendered, true, 'Exercise the accepted reader callback before its queued unmount')
+    assert.deepEqual(snapshots[0], { route: 'RuntimeStatus', readerRendered: true, downloads: 0, blobs: 0, anchors: 0, attached: 0, timers: 0 }, 'A departed reader must not allocate or download from a retained callback')
+    assert.equal(view.byId('reader'), undefined)
+    invoke(retained); await flush()
+    assert.equal(view.downloads.length, 0); assert.equal(view.blobs.size, 0); assert.equal(view.anchors.length, 0); assert.equal(view.timers.pending.size, 0)
+    assert.equal(view.requests.calls.getSavedReport.length, 1); assert.equal(view.requests.calls.getSavedReports.length, 1)
+    assert.deepEqual(view.networkCalls, []); assert.deepEqual(view.storageWrites, []); assert.deepEqual(view.warnings, [])
+  } finally { stop?.(); view.unmount() }
+})
+
+for (const cacheHandlers of [true, false]) for (const downloadId of ['download', 'download-observation']) for (const suffix of ['&limit=20', '#reader']) test(`live reader equivalent route change preserves ${downloadId} bytes (${cacheHandlers}, ${suffix})`, async () => {
+  const { watch } = await import('vue'), view = await mountReportFiles({ initialPath: '/reports?report_id=report_A', cacheHandlers })
+  let stop
+  try {
+    const value = report('report_A', '\ufeff<script>literal</script>\r\n雪😀\n')
+    view.requests.calls.getSavedReport[0].resolve(ok(value)); await flush()
+    const retained = action(view, downloadId), snapshots = []
+    stop = watch(() => view.router.currentRoute.value.fullPath, () => {
+      invoke(retained)
+      snapshots.push({ route: view.router.currentRoute.value.name, readerRendered: !!view.byId('reader'), downloads: view.downloads.length })
+    }, { flush: 'sync' })
+    await view.navigate('/reports?report_id=report_A' + suffix)
+    stop(); stop = null
+    assert.deepEqual(snapshots, [{ route: 'SavedReports', readerRendered: true, downloads: 1 }])
+    await view.click(downloadId)
+    assert.equal(view.downloads.length, 2)
+    const markdown = downloadId === 'download'
+    const expected = markdown ? value.markdown_content : JSON.stringify({ format: 'mirofish-saved-report-observation', version: 1, observation: value }) + '\n'
+    for (const downloaded of view.downloads) {
+      assert.equal(downloaded.filename, markdown ? 'report_A.md' : 'report_A.observation.json')
+      assert.equal(downloaded.blob.type, markdown ? 'text/markdown;charset=utf-8' : 'application/json;charset=utf-8')
+      assert.deepEqual(new Uint8Array(await downloaded.blob.arrayBuffer()), new TextEncoder().encode(expected))
+      if (!markdown) assert.deepEqual(await readSavedReportFile(downloaded.blob), value)
+    }
+    assert.equal(view.requests.calls.getSavedReport.length, 1); assert.equal(view.requests.calls.getSavedReports.length, 1)
+    assert.deepEqual(view.networkCalls, []); assert.deepEqual(view.storageWrites, []); assert.deepEqual(view.warnings, [])
+  } finally { stop?.(); view.unmount() }
+  assert.equal(view.blobs.size, 0); assert.ok(view.anchors.every(anchor => !anchor.attached)); assert.equal(view.timers.pending.size, 0)
+})
+
 for (const initialPath of ['/', '/reports']) test(`entry remains available at ${initialPath} even when backend reads fail`, async () => {
   const view = await mountReportFiles({ initialPath })
   try {
