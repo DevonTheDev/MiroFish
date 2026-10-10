@@ -618,7 +618,8 @@ const sendToReportAgent = async (message, request) => {
   const historyForApi = request.history.slice(0, -1).slice(-10)
     .map(msg => ({ role: msg.role, content: msg.content }))
   const res = await chatWithReport({
-    simulation_id: request.simulationId, message, chat_history: historyForApi
+    simulation_id: request.simulationId, report_id: request.reportId,
+    message, chat_history: historyForApi
   }, request.signal)
   if (res.success && res.data) {
     return res.data.response || res.data.answer || t('step5.noResponse')

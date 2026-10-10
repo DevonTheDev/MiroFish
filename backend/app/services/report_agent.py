@@ -1808,7 +1808,8 @@ class ReportAgent:
     def chat(
         self, 
         message: str,
-        chat_history: List[Dict[str, str]] = None
+        chat_history: List[Dict[str, str]] = None,
+        *, report_content: Optional[str] = None
     ) -> Dict[str, Any]:
         """
         与Report Agent对话
@@ -1818,6 +1819,7 @@ class ReportAgent:
         Args:
             message: 用户消息
             chat_history: 对话历史
+            report_content: 已验证并读取的指定报告正文；None 保留按模拟选择最新报告
             
         Returns:
             {
@@ -1831,16 +1833,19 @@ class ReportAgent:
         chat_history = chat_history or []
         
         # 获取已生成的报告内容
-        report_content = ""
-        try:
-            report = ReportManager.get_report_by_simulation(self.simulation_id)
-            if report and report.markdown_content:
-                # 限制报告长度，避免上下文过长
-                report_content = report.markdown_content[:15000]
-                if len(report.markdown_content) > 15000:
-                    report_content += "\n\n... [报告内容已截断] ..."
-        except Exception as e:
-            logger.warning(t('report.fetchReportFailed', error=e))
+        if report_content is None:
+            report_content = ""
+            try:
+                report = ReportManager.get_report_by_simulation(self.simulation_id)
+                if report and report.markdown_content:
+                    report_content = report.markdown_content[:15000]
+                    if len(report.markdown_content) > 15000:
+                        report_content += "\n\n... [报告内容已截断] ..."
+            except Exception as e:
+                logger.warning(t('report.fetchReportFailed', error=e))
+        # Apply the existing context limit to already captured report text too.
+        elif len(report_content) > 15000:
+            report_content = report_content[:15000] + "\n\n... [报告内容已截断] ..."
         
         system_prompt = CHAT_SYSTEM_PROMPT_TEMPLATE.format(
             simulation_requirement=self.simulation_requirement,

@@ -71,6 +71,13 @@ running in the same backend process reopens the existing job. A forced
 regeneration also reuses that active job; it can start a new report after the
 worker finishes. See [report request retries](docs/LOCAL_MODE.md#retry-a-report-request).
 
+Report Agent chat in Step 5 uses the displayed report's saved text, even when a
+newer report exists for the same simulation. Missing, unreadable, incomplete or
+mismatched selected reports fail before agent work. API clients can supply
+`report_id` to bind a report, or omit it to keep latest-by-simulation selection.
+The existing context limit still applies; graph searches and interviews use
+current simulation data, not a historical graph snapshot.
+
 ## Monitor local runtime activity
 
 Open **Runtime monitor** from Home to see loaded model settings, resource limits,

@@ -445,3 +445,30 @@ test('parent IDs drive the child without mixed-context requests during route rep
     assert.equal(parent.state.graphData.value, null)
   } finally { stop(); parent.close(); child.close() }
 })
+
+for (const returnToA of [false, true]) {
+  test(`same-simulation report chat binds captured ID and rejects stale replies${returnToA ? ' after A to B to A' : ''}`, async () => {
+    const h = harness()
+    try {
+      h.state.chatInput.value = 'question A'
+      const oldSend = h.state.sendMessage(), old = h.calls.chatWithReport[0]
+      assert.equal(old.args[0].report_id, 'A')
+      assert.equal(old.args[0].simulation_id, 'SA')
+      h.props.reportId = 'B'; await settle()
+      if (returnToA) { h.props.reportId = 'A'; await settle() }
+      const visible = returnToA ? 'A' : 'B'
+      h.state.chatInput.value = 'current question'
+      const currentSend = h.state.sendMessage(), current = h.calls.chatWithReport[1]
+      assert.equal(current.args[0].report_id, visible)
+      assert.equal(current.args[0].simulation_id, 'SA')
+      assert.equal(old.args[0].report_id, 'A')
+      assert.equal(old.args[1]?.aborted, true)
+      assert.equal(current.args[0].chat_history.length, 0)
+      old.resolve(ok({ response: 'stale answer A' })); await oldSend; await settle()
+      assert.equal(h.state.isSending.value, true)
+      assert.deepEqual(Array.from(h.state.chatHistory.value, msg => msg.content), ['current question'])
+      current.resolve(ok({ response: 'current answer' })); await currentSend
+      assert.deepEqual(Array.from(h.state.chatHistory.value, msg => msg.content), ['current question', 'current answer'])
+    } finally { h.close() }
+  })
+}

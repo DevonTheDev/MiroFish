@@ -726,6 +726,7 @@ def chat_with_report_agent():
     请求（JSON）：
         {
             "simulation_id": "sim_xxxx",        // 必填，模拟ID
+            "report_id": "report_xxxx",         // 可选，绑定已完成的报告；省略时使用最新报告
             "message": "请解释一下舆情走向",    // 必填，用户消息
             "chat_history": [                   // 可选，对话历史
                 {"role": "user", "content": "..."},
@@ -787,6 +788,29 @@ def chat_with_report_agent():
             }), 400
         
         simulation_requirement = project.simulation_requirement or ""
+
+        # Resolve an explicit report once, before constructing any model/tools.
+        # Missing IDs keep the legacy latest-by-simulation behavior.
+        chat_options = {}
+        if 'report_id' in data:
+            report_id = data['report_id']
+            try:
+                report = ReportManager.get_report(report_id)
+            except StoragePathError as exc:
+                return jsonify({"success": False, "error": str(exc)}), 400
+            if report is None or report.simulation_id != simulation_id:
+                return jsonify({
+                    "success": False, "error": t('api.reportNotFound', id=report_id)
+                }), 404
+            if report.report_id != report_id:
+                raise ValueError("Saved report ID does not match the requested report")
+            if report.status != ReportStatus.COMPLETED:
+                return jsonify({
+                    "success": False, "error": "The selected report is not completed"
+                }), 409
+            if not isinstance(report.markdown_content, str) or not report.markdown_content.strip():
+                raise ValueError("The selected report has no readable content")
+            chat_options['report_content'] = report.markdown_content
         
         # 创建Agent并进行对话
         agent = ReportAgent(
@@ -795,7 +819,7 @@ def chat_with_report_agent():
             simulation_requirement=simulation_requirement
         )
         
-        result = agent.chat(message=message, chat_history=chat_history)
+        result = agent.chat(message=message, chat_history=chat_history, **chat_options)
         
         return jsonify({
             "success": True,
