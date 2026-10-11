@@ -598,10 +598,11 @@ def _build_graph_impl():
         graph_name = data.get('graph_name', project.name or 'MiroFish Graph')
         chunk_size = data.get('chunk_size', project.chunk_size or Config.DEFAULT_CHUNK_SIZE)
         chunk_overlap = data.get('chunk_overlap', project.chunk_overlap or Config.DEFAULT_CHUNK_OVERLAP)
-        if not isinstance(chunk_size, int) or chunk_size <= 0:
+        if isinstance(chunk_size, bool) or not isinstance(chunk_size, int) or chunk_size <= 0:
             return jsonify({"success": False, "error": "chunk_size must be a positive integer"}), 400
         if (
-            not isinstance(chunk_overlap, int)
+            isinstance(chunk_overlap, bool)
+            or not isinstance(chunk_overlap, int)
             or chunk_overlap < 0
             or chunk_overlap >= chunk_size
         ):
