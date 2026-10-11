@@ -57,6 +57,7 @@
           :projectData="projectData"
           :ontologyProgress="ontologyProgress"
           :buildProgress="buildProgress"
+          :graphResult="graphResult"
           :graphData="graphData"
           :systemLogs="systemLogs"
           @next-step="handleNextStep"
@@ -108,6 +109,7 @@ const graphData = ref(null)
 const currentPhase = ref(-1) // -1: Upload, 0: Ontology, 1: Build, 2: Complete
 const ontologyProgress = ref(null)
 const buildProgress = ref(null)
+const graphResult = ref(null)
 const systemLogs = ref([])
 
 // Every route selection has its own identity, including A → B → A.
@@ -126,6 +128,7 @@ const resetProjectState = () => {
   currentPhase.value = -1
   ontologyProgress.value = null
   buildProgress.value = null
+  graphResult.value = null
   systemLogs.value = []
 }
 
@@ -160,6 +163,7 @@ const statusClass = computed(() => {
 })
 
 const statusText = computed(() => {
+  if (graphResult.value) return t(graphResult.value.loading ? 'step1.loadingGraphResult' : 'step1.graphResultNeedsRetry')
   if (error.value) return 'Error'
   if (currentPhase.value >= 2) return 'Ready'
   if (currentPhase.value === 1) return 'Building Graph'
@@ -386,13 +390,10 @@ const pollTaskStatus = async (task, context) => {
         task.terminal = true
         stopPolling(context)
         addLog('Graph build task completed.', context)
-        currentPhase.value = 2
-        const projRes = await getProject(context.id, context.controller.signal)
-        if (!ownsTask()) return
-        if (projRes.success && projRes.data.graph_id) {
-          projectData.value = projRes.data
-          await loadGraph(projRes.data.graph_id, context)
-        }
+        // A terminal task is not proof that its saved project can be loaded.
+        // Keep setup gated even if the building project already had a graph ID.
+        graphResult.value = { loading: true, retry: () => loadCompletedGraphResult(task, context) }
+        await loadCompletedGraphResult(task, context)
       } else if (result.status === 'failed') {
         task.terminal = true
         stopPolling(context)
@@ -404,6 +405,37 @@ const pollTaskStatus = async (task, context) => {
     if (ownsTask()) console.error(err)
   } finally {
     if (ownsTask()) task.inFlight = false
+  }
+}
+
+const loadCompletedGraphResult = async (task, context) => {
+  const ownsResult = () => ownsView(context) && context.task === task && task.terminal
+  if (!ownsResult() || task.resultInFlight || task.resultAccepted) return
+  task.resultInFlight = true
+  graphResult.value.loading = true
+  error.value = ''
+  try {
+    // Recovery is a read of this saved project, never another build request.
+    const res = await getProject(context.id, context.controller.signal)
+    if (!ownsResult()) return
+    const project = res?.data
+    if (!res?.success || project?.project_id !== context.id || project.status !== 'graph_completed'
+      || typeof project.graph_id !== 'string' || !project.graph_id.trim()) {
+      throw new Error(res?.error || 'Completed graph result is unavailable for this project.')
+    }
+    task.resultAccepted = true
+    projectData.value = project
+    graphResult.value = null
+    currentPhase.value = 2
+    // A valid saved result permits setup while the preview loads independently.
+    await loadGraph(project.graph_id, context)
+  } catch (err) {
+    if (!ownsResult()) return
+    graphResult.value.loading = false
+    error.value = t('step1.graphResultUnavailable')
+    addLog(`Unable to load completed graph result: ${err.message}`, context)
+  } finally {
+    if (ownsResult()) task.resultInFlight = false
   }
 }
 
@@ -433,7 +465,7 @@ const loadGraph = async (graphId, context) => {
 
 const refreshGraph = () => {
   const context = viewContext
-  if (ownsView(context) && projectData.value?.graph_id) {
+  if (ownsView(context) && !graphResult.value && projectData.value?.graph_id) {
     addLog('Manual graph refresh triggered.', context)
     loadGraph(projectData.value.graph_id, context)
   }

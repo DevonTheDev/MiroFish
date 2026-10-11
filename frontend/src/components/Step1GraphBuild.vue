@@ -124,6 +124,23 @@
           <p class="description">
             {{ $t('step1.graphRagDesc') }}
           </p>
+
+          <div v-if="graphResult" class="graph-result-recovery">
+            <p
+              data-testid="graph-result-status"
+              class="description"
+              :role="graphResult.loading ? 'status' : 'alert'"
+              aria-live="polite"
+              aria-atomic="true"
+            >{{ $t(graphResult.loading ? 'step1.graphResultLoading' : 'step1.graphResultUnavailable') }}</p>
+            <button
+              type="button"
+              data-testid="retry-graph-result"
+              class="action-btn"
+              :disabled="graphResult.loading"
+              :onClick="graphResult.retry"
+            >{{ $t(graphResult.loading ? 'step1.loadingGraphResult' : 'step1.retryGraphResult') }}</button>
+          </div>
           
           <!-- Stats Cards -->
           <div class="stats-grid">
@@ -216,6 +233,7 @@ const props = defineProps({
   projectData: Object,
   ontologyProgress: Object,
   buildProgress: Object,
+  graphResult: Object,
   graphData: Object,
   systemLogs: { type: Array, default: () => [] }
 })

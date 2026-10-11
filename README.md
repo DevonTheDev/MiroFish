@@ -38,6 +38,12 @@ Opening a preset does not prepare or start a simulation.
 
 ## Choose one or both simulation platforms
 
+When a graph build finishes, setup becomes available after its completed project
+and graph ID are loaded. If that final read fails or returns an incomplete result,
+choose **Retry loading graph result** inline. This only reloads the saved project
+and its graph; it does not rebuild the graph or create a simulation. Graph preview
+loading remains independent, so setup can proceed once the saved result is valid.
+
 After graph building, choose **Info Plaza**, **Topic Community**, or **Both**
 before entering setup. The choice follows that simulation through preparation,
 startup, live activity and agent interviews. Both remains the default; selecting
