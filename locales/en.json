@@ -358,6 +358,7 @@
     "requireSimulationRequirement": "Please provide a simulation requirement (simulation_requirement)",
     "requireFileUpload": "Please upload at least one document file",
     "noDocProcessed": "No documents were processed successfully. Please check file formats.",
+    "requireReadableSourceText": "Please upload at least one document with readable text. For PDFs, the text must be selectable.",
     "requireProjectId": "Please provide project_id",
     "configError": "Configuration error: {details}",
     "zepApiKeyMissing": "ZEP_API_KEY not configured",

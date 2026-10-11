@@ -358,6 +358,7 @@
     "requireSimulationRequirement": "请提供模拟需求描述 (simulation_requirement)",
     "requireFileUpload": "请至少上传一个文档文件",
     "noDocProcessed": "没有成功处理任何文档，请检查文件格式",
+    "requireReadableSourceText": "请至少上传一个包含可读取文本的文档；PDF 中的文本必须可选择。",
     "requireProjectId": "请提供 project_id",
     "configError": "配置错误: {details}",
     "zepApiKeyMissing": "ZEP_API_KEY未配置",

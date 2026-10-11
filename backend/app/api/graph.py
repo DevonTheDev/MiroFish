@@ -356,11 +356,15 @@ def generate_ontology():
                 document_texts.append(text)
                 all_text += f"\n\n=== {file_info['original_filename']} ===\n{text}"
         
-        if not document_texts:
+        # Filename headers are not source text; keep mixed batches unchanged.
+        if not any(document_texts):
             ProjectManager.delete_project(project.project_id)
+            error_key = (
+                'api.requireReadableSourceText' if document_texts else 'api.noDocProcessed'
+            )
             return jsonify({
                 "success": False,
-                "error": t('api.noDocProcessed')
+                "error": t(error_key)
             }), 400
         
         # 保存提取的文本
