@@ -205,6 +205,21 @@ is historical and is not checked against the current backend. The same local
 text search works on an opened file. See
 [opening interview files](docs/LOCAL_MODE.md#open-interview-files).
 
+Choose **Download observation TXT** beside JSON for a readable transcript of
+all rows in the accepted live observation or opened file, including version-2
+windows. Search, selected question and local page do not narrow this download;
+other windows are not fetched or combined. Fixed English file labels preserve
+recorded order, exact IDs, filters, limits, source coverage and warning codes.
+Null, empty, raw and truncated values remain distinct. Ordinary Unicode and LF
+line breaks stay readable; control characters, backslashes and lone surrogates
+use visible individual-value escapes. The complete UTF-8 output is limited to
+8 MiB and fails as a whole if it cannot be produced. JSON remains the canonical
+machine-readable export and only supported import format; TXT has no parser or
+full-file roundtrip guarantee. Neither format establishes authenticity, current
+availability, conversation sessions or unique respondents. Focused formatter and
+compiled-view checks plus a production build cover the feature; native browser
+download behavior, responsive wrapping and visual appearance remain unverified.
+
 Choose **Compare interview files** to keep two saved observations open together.
 Questions align only when their complete stored prompt text is identical. Inspect
 each side's replies, local search and pages independently, with its recorded

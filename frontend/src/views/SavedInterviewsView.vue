@@ -10,7 +10,7 @@
           <div><label for="interviews-agent-id">{{ t('savedActivity.agentId') }}</label><input id="interviews-agent-id" data-testid="interviews-agent-id" inputmode="numeric" :value="draft.agent_id" :placeholder="t('savedActivity.any')" aria-describedby="interviews-filter-note" :onInput="liveHandlers.agent"></div>
         </div>
         <p id="interviews-filter-note" class="note">{{ t('savedInterviews.filterNote') }}</p>
-        <div class="actions"><button type="submit" class="primary" data-testid="interviews-apply" :onClick="liveHandlers.apply">{{ t('savedActivity.apply') }}</button><button type="button" data-testid="interviews-refresh" :onClick="liveHandlers.refresh">{{ t('savedInterviews.refreshNewest') }}</button><button type="button" data-testid="interviews-download" :disabled="!accepted" :onClick="downloadHandler(result)">{{ t('savedInterviews.download') }}</button></div>
+        <div class="actions"><button type="submit" class="primary" data-testid="interviews-apply" :onClick="liveHandlers.apply">{{ t('savedActivity.apply') }}</button><button type="button" data-testid="interviews-refresh" :onClick="liveHandlers.refresh">{{ t('savedInterviews.refreshNewest') }}</button><button type="button" data-testid="interviews-download" :disabled="!accepted" :onClick="downloadHandler(result)">{{ t('savedInterviews.download') }}</button><button type="button" data-testid="interviews-download-text" :disabled="!accepted" :onClick="downloadHandler(result, 'txt')">{{ t('savedInterviews.downloadText') }}</button></div>
       </form>
       <section v-else class="panel" aria-labelledby="interviews-file-heading">
         <h2 id="interviews-file-heading">{{ t('savedInterviewFiles.openTitle') }}</h2>
@@ -31,9 +31,9 @@
           <p v-for="platform in platforms" :key="platform">{{ t(`comparison.platforms.${platform}`) }}: {{ t(`savedInterviewFiles.statuses.${fileState.preview.sources[platform].status}`) }} · {{ t(`savedInterviewFiles.coverage.${fileState.preview.sources[platform].coverage}`) }} · {{ t('savedInterviewFiles.returned', { count: fileState.preview.sources[platform].returned_count }) }}</p>
           <div class="actions"><button type="button" class="primary" data-testid="interviews-file-open" :onClick="fileHandlers.open">{{ t('savedInterviewFiles.open') }}</button></div>
         </section>
-        <div v-if="accepted" class="actions"><button type="button" data-testid="interviews-file-clear" :onClick="fileHandlers.clear">{{ t('savedInterviewFiles.clear') }}</button><button type="button" data-testid="interviews-download" :onClick="downloadHandler(result)">{{ t('savedInterviews.download') }}</button></div>
+        <div v-if="accepted" class="actions"><button type="button" data-testid="interviews-file-clear" :onClick="fileHandlers.clear">{{ t('savedInterviewFiles.clear') }}</button><button type="button" data-testid="interviews-download" :onClick="downloadHandler(result)">{{ t('savedInterviews.download') }}</button><button type="button" data-testid="interviews-download-text" :disabled="!accepted" :onClick="downloadHandler(result, 'txt')">{{ t('savedInterviews.downloadText') }}</button></div>
       </section>
-      <p class="note">{{ t('savedInterviews.orderNote') }}</p><p class="note">{{ t('savedInterviews.downloadNote') }}</p>
+      <p class="note">{{ t('savedInterviews.orderNote') }}</p><p class="note">{{ t('savedInterviews.downloadNote') }}</p><p class="note" data-testid="interviews-text-note">{{ t('savedInterviews.textNote') }}</p>
       <p v-if="dirty" class="notice" role="status">{{ t('savedInterviews.draftNote') }}</p>
       <p v-if="loading" class="notice" data-testid="interviews-loading" role="status" aria-live="polite">{{ t('savedInterviews.loading') }}</p>
       <p v-if="error" class="notice error" data-testid="interviews-error" role="alert">{{ t(`savedInterviews.errors.${error}`) }}</p>
@@ -94,6 +94,7 @@ import { getSavedInterviews } from '../api/savedInterviews'
 import { buildSavedInterviewQuestions } from '../utils/savedInterviewQuestions'
 import { filterSavedInterviewRecords } from '../utils/savedInterviewSearch.js'
 import { validSavedInterviewObservation as validResponse, validSavedInterviewDecimal as validDecimal, savedInterviewExactKeys as exactKeys } from '../utils/savedInterviewObservation.js'
+import { formatSavedInterviewText } from '../utils/savedInterviewText.js'
 import { SAVED_INTERVIEW_FILE_MAX_BYTES, readSavedInterviewFile } from '../utils/savedInterviewFiles.js'
 
 const { t } = useI18n(), route = useRoute(), router = useRouter()
@@ -351,7 +352,7 @@ function pageHandler(saved, view, index) {
     if (current() && Number.isInteger(index) && index >= 0 && index < pageCount.value) presentation.value = { ...view, page: index }
   }
 }
-function downloadHandler(saved) {
+function downloadHandler(saved, format = 'json') {
   const ownsSaved = observationOwner(saved)
   return () => {
     if (!ownsSaved()) return
@@ -364,13 +365,15 @@ function downloadHandler(saved) {
     const current = () => activeDownload === attempt && downloadGeneration === generation && ownsSaved()
     let finished = false
     try {
-      const blob = new Blob([JSON.stringify(saved, null, 2) + '\n'], { type: 'application/json;charset=utf-8' })
+      const body = format === 'txt' ? formatSavedInterviewText(saved) : JSON.stringify(saved, null, 2) + '\n'
+      if (!current()) return
+      const blob = new Blob([body], { type: format === 'txt' ? 'text/plain;charset=utf-8' : 'application/json;charset=utf-8' })
       if (!current()) return
       attempt.url = URL.createObjectURL(blob)
       if (!current()) return
       attempt.anchor = document.createElement('a')
       if (!current()) return
-      attempt.anchor.href = attempt.url; attempt.anchor.download = `${saved.simulation_id}-saved-interviews.json`
+      attempt.anchor.href = attempt.url; attempt.anchor.download = `${saved.simulation_id}-saved-interviews.${format}`
       document.body.appendChild(attempt.anchor)
       if (!current()) return
       attempt.anchor.click()

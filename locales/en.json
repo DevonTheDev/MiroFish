@@ -2055,6 +2055,8 @@
     }
   },
   "savedInterviews": {
+    "downloadText": "Download observation TXT",
+    "textNote": "TXT includes all rows in this accepted observation or window, regardless of search, selected question or page. It uses fixed English labels and visible escapes for control characters. JSON preserves the existing machine-readable observation.",
     "reviewMode": "Review saved interviews",
     "recordsMode": "All records",
     "questionsMode": "Review by saved question",

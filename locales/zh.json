@@ -2055,6 +2055,8 @@
     }
   },
   "savedInterviews": {
+    "downloadText": "下载观察结果 TXT",
+    "textNote": "TXT 包含当前已接受观察结果或窗口中的全部记录，不受搜索、所选问题或页码影响。文件使用固定英文标签，并以可见转义表示控制字符。JSON 保留现有的机器可读观察结果。",
     "reviewMode": "查看已保存访谈",
     "recordsMode": "全部记录",
     "questionsMode": "按已保存问题查看",

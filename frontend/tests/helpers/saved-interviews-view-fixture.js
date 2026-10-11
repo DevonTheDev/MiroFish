@@ -9,6 +9,7 @@ import { createI18n, useI18n } from 'vue-i18n'
 import * as savedInterviewQuestions from '../../src/utils/savedInterviewQuestions.js'
 import * as savedInterviewSearch from '../../src/utils/savedInterviewSearch.js'
 import * as savedInterviewObservation from '../../src/utils/savedInterviewObservation.js'
+import * as savedInterviewText from '../../src/utils/savedInterviewText.js'
 import * as savedInterviewFiles from '../../src/utils/savedInterviewFiles.js'
 
 export const ok = data => ({ success: true, data })
@@ -93,6 +94,7 @@ export async function mountSavedInterviews({ api, initialPath = '/simulation/sim
     '../utils/savedInterviewSearch.js': savedInterviewSearch,
     '../utils/savedInterviewObservation.js': savedInterviewObservation,
     '../utils/savedInterviewFiles.js': savedInterviewFiles,
+    '../utils/savedInterviewText.js': savedInterviewText,
   }
   const components = { '../components/LanguageSwitcher.vue': stub }
   function evaluate(source, returnName = 'component') {
