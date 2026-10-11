@@ -2861,6 +2861,23 @@ records remain discoverable beyond the 20 Home history cards.
   existing readers; opening the catalog does not start a simulation, run
   inference, generate a report or create a capture. Capture preview and save
   remain separate explicit actions in Run captures.
+- **Download matching JSON** saves every matching record across all pages, in
+  the currently applied order, without another request. The search draft does
+  not apply until Search is selected. This is a metadata catalog export, **not
+  a restorable simulation backup**: it contains no configuration, reports,
+  interviews or other extra API fields. Scenario text is included as saved.
+  The UTF-8 `mirofish-saved-simulation-catalog.json` file uses format
+  `mirofish-saved-simulation-catalog`, version `1`, with normalized applied
+  `selection` (`q`, `status`, `order`), `counts` and ordered `records`. Each record
+  contains only `simulation_id`, `project_id`, `scenario`, `status`, `created_at`
+  and `updated_at`; raw strings and nulls are retained, including unrecognized
+  dates. An empty `order` means service order. `counts.total` counts readable
+  records in the loaded catalog, `counts.matched` counts exported records, and
+  `counts.skipped` is the service's whole-catalog skipped count. Whether skipped
+  records would match the filters is unknown; they are not reconstructed.
+  Valid empty results can be exported. Download is unavailable while loading,
+  navigating via the controls, or after a failed/invalid load. Refresh,
+  navigation and leaving the page retire prior download actions and resources.
 
 This is **client-side paging**, not bounded server paging. The existing service
 reads and returns the full metadata catalog with no aggregate response cap;
@@ -2872,12 +2889,14 @@ check. The destination view checks availability. The catalog is a read of saved
 files, not a fixed historical snapshot or a live stream. Refresh reads it again;
 it clears the old list while loading and offers a safe retry on failure.
 
-Frontend verification: `node --test tests/saved-simulations-view.test.js tests/saved-simulations-order.test.js` from
+Frontend verification: `node --test tests/saved-simulations-view.test.js tests/saved-simulations-order.test.js tests/saved-simulations-export.test.js` from
 `frontend` compiles the real Home, History and Saved simulations components and
 uses the real Vue router with synthetic read-only services. It covers the
 35-record discovery regression, literal searches, filters, URL restoration,
 counts, exact destinations, ordering before pagination, microseconds, invalid
-dates, URL restoration and ignored-abort/unmount/retry cases. These host
+dates, URL restoration, full-catalog export across more than 40 records, metadata
+projection, raw JSON strings, retained callbacks, download failure/reentry cleanup
+and ignored-abort/unmount/retry cases. These host
 renderer checks do not replace browser visual/accessibility verification.
 
 ### 已保存的模拟浏览器
@@ -2896,6 +2915,16 @@ renderer checks do not replace browser visual/accessibility verification.
 时间仅识别有效的 `YYYY-MM-DD` 或 `YYYY-MM-DDTHH:mm:ss`，后者可含 1–6 位小数秒
 以及 `Z` 或 `±HH:MM` 偏移；具体范围与限制见上方英文格式说明。排序保留微秒精度。
 无偏移时间按 UTC 解释，与后端的时区假设一致；显示使用本地时区和语言格式。
+
+“下载匹配结果 JSON”按已应用的搜索、状态和排序导出所有页面的匹配记录，不会再次
+请求服务，也不使用尚未提交的搜索文字。这是元数据目录，不能用于恢复模拟；不包含
+配置、报告、访谈或其他新增 API 字段，但包含原样保存的场景文字。UTF-8 文件名固定为
+`mirofish-saved-simulation-catalog.json`，格式标识为 `mirofish-saved-simulation-catalog`，
+版本为 `1`。文件记录已应用的 `q`、`status`、`order`、可读记录总数、导出匹配数和服务端
+整个目录的跳过数；无法判断跳过记录是否匹配。每条记录仅含模拟 ID、项目 ID、场景、
+状态、创建时间和更新时间，保留原始字符串、空值以及无法识别的日期。可以导出有效的
+空结果；加载中、通过控件切换网址期间或加载失败时不能下载。刷新、导航或离开页面
+会停用先前的下载操作并释放其资源。
 无法识别的时间显示 `—`，不会删除该条保存记录。
 
 每页最多显示 20 条，但这是客户端分页。现有只读接口一次读取完整元数据目录，

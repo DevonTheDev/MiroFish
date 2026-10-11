@@ -22,8 +22,11 @@
           <div class="order-field"><label for="simulations-order">{{ t('savedSimulations.order') }}</label><select id="simulations-order" data-testid="simulations-order" :value="selection.order" @change="changeOrder($event.target.value)" aria-describedby="simulations-order-note"><option value="">{{ t('savedSimulations.serverOrder') }}</option><option v-for="order in orders" :key="order" :value="order">{{ t(`savedSimulations.orders.${order}`) }}</option></select></div>
           <button type="button" data-testid="simulations-clear" @click="navigate('', '', 1, '')">{{ t('savedSimulations.clear') }}</button>
           <button type="button" data-testid="simulations-refresh" @click="loadCandidates">{{ t('savedSimulations.refresh') }}</button>
+          <button type="button" data-testid="simulations-download" :disabled="!canDownload" :onClick="downloadAction" aria-describedby="simulations-download-note">{{ t('savedSimulations.download') }}</button>
         </div>
         <p id="simulations-order-note" class="note">{{ t('savedSimulations.sortNote') }}</p>
+        <p id="simulations-download-note" class="note">{{ t('savedSimulations.downloadNote') }}</p>
+        <p v-if="downloadError" role="alert" class="notice error" data-testid="simulations-download-error">{{ t('savedSimulations.downloadError') }}</p>
       </section>
       <p v-if="selection.malformed || (loaded && selection.page !== page)" class="notice" role="status" data-testid="simulations-url-notice">{{ t('savedSimulations.urlNotice') }}</p>
       <p v-if="loading" role="status" data-testid="simulations-loading">{{ t('savedSimulations.loading') }}</p>
@@ -69,7 +72,8 @@ const orders = ['updated-desc', 'updated-asc', 'id-asc']
 const pageSize = 20
 const candidates = ref([]), skippedRecords = ref(0), loaded = ref(false), loading = ref(false), error = ref(false)
 const draftQuery = ref('')
-let request = null, disposed = false
+const downloadRevision = ref(0), downloadError = ref(false), pendingNavigation = ref(null)
+let request = null, disposed = false, downloadResource = null
 const selection = computed(() => {
   const { q, status, order, page } = route.query
   const validQuery = q === undefined || typeof q === 'string'
@@ -103,10 +107,17 @@ const start = computed(() => filtered.value.length ? (page.value - 1) * pageSize
 const end = computed(() => Math.min(page.value * pageSize, filtered.value.length))
 const visible = computed(() => ordered.value.slice((page.value - 1) * pageSize, page.value * pageSize))
 
-function navigate(q, status, targetPage, order = selection.value.order) {
+async function navigate(q, status, targetPage, order = selection.value.order) {
   if (disposed) return
+  const navigation = Symbol()
+  pendingNavigation.value = navigation
+  retireDownload()
   draftQuery.value = q
-  router.push({ name: 'SavedSimulations', query: { ...(q ? { q } : {}), ...(status ? { status } : {}), ...(order ? { order } : {}), ...(targetPage > 1 ? { page: String(targetPage) } : {}) } })
+  try {
+    await router.push({ name: 'SavedSimulations', query: { ...(q ? { q } : {}), ...(status ? { status } : {}), ...(order ? { order } : {}), ...(targetPage > 1 ? { page: String(targetPage) } : {}) } })
+  } finally {
+    if (pendingNavigation.value === navigation) { pendingNavigation.value = null; retireDownload() }
+  }
 }
 function applySearch() { navigate(draftQuery.value, selection.value.status, 1) }
 function changeStatus(status) { navigate(selection.value.q, statuses.includes(status) ? status : '', 1) }
@@ -124,6 +135,7 @@ function validCatalog(data) {
 }
 async function loadCandidates() {
   if (disposed) return
+  retireDownload()
   request?.controller.abort()
   const current = { controller: new AbortController() }
   request = current
@@ -142,6 +154,59 @@ async function loadCandidates() {
     if (owns()) loading.value = false
   }
 }
+function releaseDownload(current = downloadResource) {
+  if (!current) return
+  if (downloadResource === current) downloadResource = null
+  const link = current.link, url = current.url
+  current.link = null; current.url = null
+  try { link?.remove() } catch { /* Still release this attempt's URL. */ }
+  try { if (url) URL.revokeObjectURL(url) } catch { /* Never disturb a newer owner. */ }
+}
+function retireDownload() {
+  downloadRevision.value++
+  downloadError.value = false
+  releaseDownload()
+}
+const canDownload = computed(() => loaded.value && !loading.value && !error.value && !pendingNavigation.value && route.name === 'SavedSimulations')
+const downloadAction = computed(() => {
+  const revision = downloadRevision.value, source = candidates.value, path = route.fullPath
+  const ready = canDownload.value, records = ordered.value
+  const { q, status, order } = selection.value
+  const counts = { total: source.length, matched: records.length, skipped: skippedRecords.value }
+  const owns = () => ready && !disposed && canDownload.value && revision === downloadRevision.value &&
+    source === candidates.value && router.currentRoute.value.name === 'SavedSimulations' && router.currentRoute.value.fullPath === path
+  return () => {
+    if (!owns()) return
+    const previous = downloadResource, current = { url: null, link: null }
+    downloadResource = current; releaseDownload(previous)
+    const currentOwner = () => owns() && downloadResource === current
+    try {
+      if (!currentOwner()) return
+      downloadError.value = false
+      // Project only validated metadata, never future API fields or toJSON hooks.
+      const body = JSON.stringify({ format: 'mirofish-saved-simulation-catalog', version: 1,
+        selection: { q, status, order }, counts,
+        records: records.map(({ simulation_id, project_id, scenario, status, created_at, updated_at }) =>
+          ({ simulation_id, project_id, scenario, status, created_at, updated_at })) }, null, 2) + '\n'
+      const blob = new Blob([body], { type: 'application/json;charset=utf-8' })
+      if (!currentOwner()) return
+      current.url = URL.createObjectURL(blob)
+      if (!currentOwner()) return
+      current.link = document.createElement('a')
+      if (!currentOwner()) return
+      current.link.href = current.url
+      if (!currentOwner()) return
+      current.link.download = 'mirofish-saved-simulation-catalog.json'
+      if (!currentOwner()) return
+      document.body.appendChild(current.link)
+      if (!currentOwner()) return
+      current.link.click()
+      if (!currentOwner()) return
+      const link = current.link; link.remove(); current.link = null
+    } catch { if (currentOwner()) downloadError.value = true; releaseDownload(current) }
+    finally { if (!currentOwner()) releaseDownload(current) }
+  }
+})
 // Saved ISO dates or full timestamps only; not all Python fromisoformat variants.
 // Unzoned values use UTC, matching the service. Keep microseconds separate so
 // Python saves within one JavaScript millisecond still have an exact order.
@@ -163,9 +228,9 @@ function formatDate(value) {
   if (!time) return '—'
   return new Date(time.milliseconds + Math.floor(time.microseconds / 1000)).toLocaleString(locale.value === 'zh' ? 'zh-CN' : 'en-US', { timeZoneName: 'short' })
 }
-watch(() => route.fullPath, () => { draftQuery.value = selection.value.q }, { immediate: true, flush: 'sync' })
+watch(() => route.fullPath, () => { retireDownload(); draftQuery.value = selection.value.q }, { immediate: true, flush: 'sync' })
 loadCandidates()
-onBeforeUnmount(() => { disposed = true; request?.controller.abort(); request = null })
+onBeforeUnmount(() => { disposed = true; request?.controller.abort(); request = null; retireDownload() })
 </script>
 
 <style scoped>

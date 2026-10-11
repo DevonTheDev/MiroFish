@@ -63,10 +63,35 @@ function renderer() {
   return { host, root, body }
 }
 
-export async function mountSavedSimulations({ api, initialPath = '/simulations', locale = 'en' } = {}) {
+export async function mountSavedSimulations({ api, initialPath = '/simulations', locale = 'en', cacheHandlers = false, downloadHooks = {} } = {}) {
   const requests = api ? null : deferredApi()
   api ??= requests.api
   const warnings = []
+  const downloads = [], anchors = [], revoked = [], blobs = new Map(), networkCalls = [], storageWrites = []
+  let nextUrl = 0
+  const hit = (stage, value) => downloadHooks[stage]?.(value)
+  const browser = {
+    Blob: class extends Blob { constructor(parts, options) { super(parts, options); hit('blob', this) } },
+    URL: {
+      createObjectURL(blob) { hit('url'); const url = `blob:fixture-${++nextUrl}`; blobs.set(url, blob); hit('afterUrl', url); return url },
+      revokeObjectURL(url) { revoked.push(url); blobs.delete(url); hit('revoke', url) },
+    },
+    document: {
+      createElement(type) {
+        assert.equal(type, 'a'); hit('create')
+        const anchor = { attached: false, url: '', filename: '',
+          set href(value) { this.url = value; hit('href', this) },
+          set download(value) { this.filename = value; hit('filename', this) },
+          click() { hit('click', this); downloads.push({ filename: this.filename, blob: blobs.get(this.url), url: this.url }); hit('afterClick', this) },
+          remove() { hit('beforeRemove', this); this.attached = false; hit('remove', this) },
+        }
+        anchors.push(anchor); hit('afterCreate', anchor); return anchor
+      },
+      body: { appendChild(anchor) { anchor.attached = true; hit('append', anchor) } },
+    },
+    fetch(...args) { networkCalls.push(args); throw Error('Forbidden network call') },
+    localStorage: { setItem(...args) { storageWrites.push(args); throw Error('Forbidden storage write') } },
+  }
   const { host, root, body } = renderer()
   const stub = { render: () => Vue.h('fixture-boundary') }
   const passThrough = { setup: (_props, { slots }) => () => slots.default?.() }
@@ -78,7 +103,7 @@ export async function mountSavedSimulations({ api, initialPath = '/simulations',
   const components = { '../components/LanguageSwitcher.vue': stub }
   function evaluate(source, returnName = 'component') {
     const ast = parseJavaScript(source, { sourceType: 'module' })
-    const globals = { AbortController, Date, Intl, console,
+    const globals = { AbortController, Date, Intl, console, ...browser,
       setTimeout: () => 0, clearTimeout() {},
       IntersectionObserver: class { observe() {} disconnect() {} } }
     for (const statement of ast.program.body.filter(item => item.type === 'ImportDeclaration').reverse()) {
@@ -97,7 +122,7 @@ export async function mountSavedSimulations({ api, initialPath = '/simulations',
     const { descriptor } = parse(readFileSync(new URL('../../src/' + path, import.meta.url), 'utf8'), { filename: path })
     const script = compileScript(descriptor, { id: path })
     const template = compileTemplate({ source: descriptor.template.content, filename: path, id: path,
-      compilerOptions: { bindingMetadata: script.bindings, hoistStatic: false } })
+      compilerOptions: { bindingMetadata: script.bindings, hoistStatic: false, cacheHandlers } })
     assert.deepEqual(template.errors, [])
     const value = evaluate(script.content)
     value.render = evaluate(template.code, 'render')
@@ -125,6 +150,7 @@ export async function mountSavedSimulations({ api, initialPath = '/simulations',
   const byId = id => find(node => node.props['data-testid'] === id)
   const text = (target = root) => (target.type === '#comment' ? '' : target.text ?? '') + (target.children ?? []).map(text).join(' ')
   return { root, body, router, i18n, warnings, requests, flush, waitFor, all, find, byId, text,
+    downloads, anchors, revoked, blobs, networkCalls, storageWrites, downloadHooks,
     async click(id) {
       const target = byId(id); assert.ok(target, `missing clickable control ${id}`)
       assert.ok(!target.props.disabled, `disabled control ${id}`)
