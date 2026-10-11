@@ -19,9 +19,11 @@
         <p id="simulations-search-note" class="note">{{ t('savedSimulations.searchNote') }}</p>
         <div class="filter-actions">
           <div class="status-field"><label for="simulations-status">{{ t('savedSimulations.status') }}</label><select id="simulations-status" data-testid="simulations-status" :value="selection.status" @change="changeStatus($event.target.value)"><option value="">{{ t('savedSimulations.allStatuses') }}</option><option v-for="status in statuses" :key="status" :value="status">{{ t(`comparison.statuses.${status}`) }}</option></select></div>
-          <button type="button" data-testid="simulations-clear" @click="navigate('', '', 1)">{{ t('savedSimulations.clear') }}</button>
+          <div class="order-field"><label for="simulations-order">{{ t('savedSimulations.order') }}</label><select id="simulations-order" data-testid="simulations-order" :value="selection.order" @change="changeOrder($event.target.value)" aria-describedby="simulations-order-note"><option value="">{{ t('savedSimulations.serverOrder') }}</option><option v-for="order in orders" :key="order" :value="order">{{ t(`savedSimulations.orders.${order}`) }}</option></select></div>
+          <button type="button" data-testid="simulations-clear" @click="navigate('', '', 1, '')">{{ t('savedSimulations.clear') }}</button>
           <button type="button" data-testid="simulations-refresh" @click="loadCandidates">{{ t('savedSimulations.refresh') }}</button>
         </div>
+        <p id="simulations-order-note" class="note">{{ t('savedSimulations.sortNote') }}</p>
       </section>
       <p v-if="selection.malformed || (loaded && selection.page !== page)" class="notice" role="status" data-testid="simulations-url-notice">{{ t('savedSimulations.urlNotice') }}</p>
       <p v-if="loading" role="status" data-testid="simulations-loading">{{ t('savedSimulations.loading') }}</p>
@@ -63,37 +65,52 @@ import { getComparisonCandidates } from '../api/simulation'
 const { t, locale } = useI18n()
 const route = useRoute(), router = useRouter()
 const statuses = ['idle', 'created', 'preparing', 'ready', 'starting', 'running', 'paused', 'stopping', 'completed', 'stopped', 'failed', 'unknown']
+const orders = ['updated-desc', 'updated-asc', 'id-asc']
 const pageSize = 20
 const candidates = ref([]), skippedRecords = ref(0), loaded = ref(false), loading = ref(false), error = ref(false)
 const draftQuery = ref('')
 let request = null, disposed = false
 const selection = computed(() => {
-  const { q, status, page } = route.query
+  const { q, status, order, page } = route.query
   const validQuery = q === undefined || typeof q === 'string'
   const validStatus = status === undefined || status === '' || (typeof status === 'string' && statuses.includes(status))
+  const validOrder = order === undefined || order === '' || (typeof order === 'string' && orders.includes(order))
   const emptyPage = page === undefined || page === ''
   const validPage = emptyPage || (typeof page === 'string' && /^[1-9]\d*$/.test(page) && Number.isSafeInteger(Number(page)))
   return { q: validQuery ? q || '' : '', status: validStatus ? status || '' : '',
-    page: validPage && !emptyPage ? Number(page) : 1, malformed: !validQuery || !validStatus || !validPage }
+    order: validOrder ? order || '' : '',
+    page: validPage && !emptyPage ? Number(page) : 1, malformed: !validQuery || !validStatus || !validOrder || !validPage }
 })
 const filtered = computed(() => {
   const needle = selection.value.q.toLowerCase()
   return candidates.value.filter(candidate => (!selection.value.status || candidate.status === selection.value.status) &&
     (!needle || [candidate.simulation_id, candidate.project_id, candidate.scenario].some(value => (value || '').toLowerCase().includes(needle))))
 })
+const ordered = computed(() => {
+  const order = selection.value.order
+  if (!order) return filtered.value
+  if (order === 'id-asc') return [...filtered.value].sort((a, b) => a.simulation_id < b.simulation_id ? -1 : a.simulation_id > b.simulation_id ? 1 : 0)
+  const direction = order === 'updated-asc' ? 1 : -1
+  return filtered.value.map((candidate, index) => ({ candidate, index, time: savedUpdate(candidate.updated_at) }))
+    .sort((a, b) => {
+      if (!a.time || !b.time) return Number(!a.time) - Number(!b.time) || a.index - b.index
+      return direction * (a.time.milliseconds - b.time.milliseconds || a.time.microseconds - b.time.microseconds) || a.index - b.index
+    }).map(item => item.candidate)
+})
 const pages = computed(() => Math.max(1, Math.ceil(filtered.value.length / pageSize)))
 const page = computed(() => Math.min(selection.value.page, pages.value))
 const start = computed(() => filtered.value.length ? (page.value - 1) * pageSize + 1 : 0)
 const end = computed(() => Math.min(page.value * pageSize, filtered.value.length))
-const visible = computed(() => filtered.value.slice((page.value - 1) * pageSize, page.value * pageSize))
+const visible = computed(() => ordered.value.slice((page.value - 1) * pageSize, page.value * pageSize))
 
-function navigate(q, status, targetPage) {
+function navigate(q, status, targetPage, order = selection.value.order) {
   if (disposed) return
   draftQuery.value = q
-  router.push({ name: 'SavedSimulations', query: { ...(q ? { q } : {}), ...(status ? { status } : {}), ...(targetPage > 1 ? { page: String(targetPage) } : {}) } })
+  router.push({ name: 'SavedSimulations', query: { ...(q ? { q } : {}), ...(status ? { status } : {}), ...(order ? { order } : {}), ...(targetPage > 1 ? { page: String(targetPage) } : {}) } })
 }
 function applySearch() { navigate(draftQuery.value, selection.value.status, 1) }
 function changeStatus(status) { navigate(selection.value.q, statuses.includes(status) ? status : '', 1) }
+function changeOrder(order) { navigate(selection.value.q, selection.value.status, 1, orders.includes(order) ? order : '') }
 function validCatalog(data) {
   if (!Array.isArray(data?.candidates) || !Number.isSafeInteger(data.skipped_records) || data.skipped_records < 0) return false
   const ids = new Set()
@@ -125,10 +142,26 @@ async function loadCandidates() {
     if (owns()) loading.value = false
   }
 }
+// Saved ISO dates or full timestamps only; not all Python fromisoformat variants.
+// Unzoned values use UTC, matching the service. Keep microseconds separate so
+// Python saves within one JavaScript millisecond still have an exact order.
+function savedUpdate(value) {
+  const match = /^(\d{4})-(\d{2})-(\d{2})(?:T(\d{2}):(\d{2}):(\d{2})(?:\.(\d{1,6}))?(?:Z|([+-])(\d{2}):(\d{2}))?)?$/.exec(value || '')
+  if (!match) return null
+  const [year, month, day, hour, minute, second] = match.slice(1, 7).map(value => Number(value || 0))
+  const offsetHours = Number(match[9] || 0), offsetMinutes = Number(match[10] || 0)
+  if (!year || hour > 23 || minute > 59 || second > 59 || offsetHours > 23 || offsetMinutes > 59) return null
+  const date = new Date(0)
+  date.setUTCFullYear(year, month - 1, day)
+  date.setUTCHours(hour, minute, second, 0)
+  if (date.getUTCFullYear() !== year || date.getUTCMonth() !== month - 1 || date.getUTCDate() !== day) return null
+  const offset = (offsetHours * 60 + offsetMinutes) * (match[8] === '-' ? -1 : 1)
+  return { milliseconds: date.getTime() - offset * 60000, microseconds: Number((match[7] || '').padEnd(6, '0')) }
+}
 function formatDate(value) {
-  if (!value) return '—'
-  const date = new Date(value)
-  return Number.isNaN(date.getTime()) ? '—' : date.toLocaleString(locale.value === 'zh' ? 'zh-CN' : 'en-US', { timeZoneName: 'short' })
+  const time = savedUpdate(value)
+  if (!time) return '—'
+  return new Date(time.milliseconds + Math.floor(time.microseconds / 1000)).toLocaleString(locale.value === 'zh' ? 'zh-CN' : 'en-US', { timeZoneName: 'short' })
 }
 watch(() => route.fullPath, () => { draftQuery.value = selection.value.q }, { immediate: true, flush: 'sync' })
 loadCandidates()
@@ -148,7 +181,7 @@ p { line-height: 1.6; } .note { font-size: 13px; color: #59616d; }
 .search-form { display: flex; align-items: end; gap: 12px; } .search-field { flex: 1; min-width: 0; } label { display: block; font-size: 14px; margin-bottom: 8px; }
 input, select, button { font: inherit; border: 1px solid #ccd2db; border-radius: 6px; padding: 10px 12px; background: #fff; color: #202329; } input { width: 100%; box-sizing: border-box; }
 button { cursor: pointer; } button:disabled { opacity: .45; cursor: default; } button:focus-visible, input:focus-visible, select:focus-visible, a:focus-visible { outline: 2px solid #405fbd; outline-offset: 3px; }
-.filter-actions { align-items: end; } .status-field { min-width: 180px; } select { width: 100%; }
+.filter-actions { align-items: end; } .status-field, .order-field { min-width: 180px; max-width: 100%; } select { width: 100%; }
 .notice { padding: 16px; background: #fff7e8; border: 1px solid #e8cd9b; border-radius: 8px; } .error { background: #fff1f2; border-color: #edc5ca; }
 .results { display: grid; gap: 16px; } .counts { color: #59616d; } .row-heading { display: flex; justify-content: space-between; align-items: start; gap: 16px; }
 .status { background: #eef1f5; padding: 4px 10px; border-radius: 20px; font-size: 12px; white-space: nowrap; }

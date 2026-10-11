@@ -2825,17 +2825,36 @@ records remain discoverable beyond the 20 Home history cards.
 - Search simulation ID, project ID or saved scenario using literal,
   case-insensitive text. Unicode, punctuation and spaces are matched as written;
   this is not a regular-expression search. Select a saved status to narrow the
-  list. Applying a search or changing status resets the page to 1.
-- The URL stores `q`, `status` and a one-based `page`. Back and Forward restore
+  list. Applying a search or changing status or order resets the page to 1.
+- The URL stores `q`, `status`, `order` and a one-based `page`. Back and Forward restore
   these controls and the visible page. Repeated/non-string query values, unknown
-  statuses and invalid page numbers use safe defaults with a notice. A valid
+  statuses/orders and invalid page numbers use safe defaults with a notice. A valid
   page beyond the current result set displays the last available page, also with
   a notice; the next filter or page action writes a valid URL. Empty values use
-  the defaults. Clearing filters also clears an unapplied search draft.
+  the defaults. **Reset filters and order** clears search (including an unapplied
+  draft), status, order and page, returning to `/simulations`.
 - Pages contain up to 20 records. The counts distinguish the visible range,
   matching records, all readable catalog records and records skipped by the
   service. The order is the service's saved update time descending, then ID;
-  missing/invalid update times appear last. The client preserves that order.
+  missing/invalid update times appear last. The default client order preserves
+  that exact service sequence, with no `order` query parameter.
+- The Order selector offers `updated-desc` (newest first), `updated-asc` (oldest
+  first), and `id-asc` (literal, case-sensitive character order; `sim_10` sorts
+  before `sim_2`). Explicit update ordering sorts all filtered records before
+  pagination without changing the service array. Equal timestamps and unknown
+  timestamps each retain service order; unknown times appear last in either
+  direction. Search, status, pagination and Refresh preserve the selected order.
+- Explicit update ordering and the displayed update time recognize only a valid
+  `YYYY-MM-DD` date or `YYYY-MM-DDTHH:mm:ss` timestamp, optionally followed by
+  a decimal point with 1–6 fractional-second digits, and/or `Z` or a
+  `+HH:MM`/`-HH:MM` offset. Years
+  are 0001–9999; hours are 00–23 and minutes/seconds are 00–59 (including offset
+  hours/minutes). Impossible calendar dates, leap seconds, whitespace and other
+  formats are unrecognized, sort last and display `—`; they remain searchable
+  catalog records. This is a finite saved-format grammar, not every Python
+  `fromisoformat` variant. Microseconds remain distinct when ordering. Timestamps
+  without an offset and date-only values use UTC, matching the backend's timezone
+  assumption; displays use the browser's local timezone and native locale format.
 - Each result opens **Saved activity** or **Saved interviews** with its exact
   simulation ID route parameter, **Compare this simulation** as the left
   selection, or **Run captures** with that simulation selected. These are
@@ -2853,23 +2872,34 @@ check. The destination view checks availability. The catalog is a read of saved
 files, not a fixed historical snapshot or a live stream. Refresh reads it again;
 it clears the old list while loading and offers a safe retry on failure.
 
-Frontend verification: `node --test tests/saved-simulations-view.test.js` from
+Frontend verification: `node --test tests/saved-simulations-view.test.js tests/saved-simulations-order.test.js` from
 `frontend` compiles the real Home, History and Saved simulations components and
 uses the real Vue router with synthetic read-only services. It covers the
 35-record discovery regression, literal searches, filters, URL restoration,
-counts, exact destinations and ignored-abort/unmount/retry cases. These host
+counts, exact destinations, ordering before pagination, microseconds, invalid
+dates, URL restoration and ignored-abort/unmount/retry cases. These host
 renderer checks do not replace browser visual/accessibility verification.
 
 ### 已保存的模拟浏览器
 
 从首页导航的“已保存的模拟”或历史区域的“浏览已保存的模拟”进入
 `/simulations`。可按模拟 ID、项目 ID、已保存场景进行不区分大小写的
-字面文本搜索，并按保存状态筛选。搜索和状态变更会将页码重置为第一页；
-网址中的 `q`、`status` 和 `page` 支持后退、前进恢复。无效参数使用默认值，
-超出范围的有效页码显示最后一页，并给出提示。清除筛选也会清除未提交的搜索。
+字面文本搜索，并按保存状态筛选。搜索、状态和排序变更会将页码重置为第一页；
+网址中的 `q`、`status`、`order` 和 `page` 支持后退、前进恢复。无效参数使用默认值，
+超出范围的有效页码显示最后一页，并给出提示。“重置筛选和排序”会清除搜索
+（包括未提交的内容）、状态、排序和页码，返回 `/simulations`。
+
+默认保留完整的服务端顺序且不写入 `order`；可选择 `updated-desc`（更新由新到旧）、
+`updated-asc`（更新由旧到新）或 `id-asc`（ID 按区分大小写的字面文本升序）。
+先对全部筛选结果排序再分页；相同时间保留服务端顺序。缺失或无法识别的时间在两个
+更新时间排序方向中均排在最后，彼此保留服务端顺序。搜索、状态、翻页和刷新保留排序。
+时间仅识别有效的 `YYYY-MM-DD` 或 `YYYY-MM-DDTHH:mm:ss`，后者可含 1–6 位小数秒
+以及 `Z` 或 `±HH:MM` 偏移；具体范围与限制见上方英文格式说明。排序保留微秒精度。
+无偏移时间按 UTC 解释，与后端的时区假设一致；显示使用本地时区和语言格式。
+无法识别的时间显示 `—`，不会删除该条保存记录。
 
 每页最多显示 20 条，但这是客户端分页。现有只读接口一次读取完整元数据目录，
-没有响应总量上限。列表按保存的更新时间由新到旧、再按模拟 ID 排序；缺失或无效
+没有响应总量上限。列表默认按保存的更新时间由新到旧、再按模拟 ID 排序；缺失或无效
 时间排在最后。显示数量区分当前范围、匹配数、可读记录总数和接口跳过数。
 不安全、不可读或正在变化的记录可能被跳过。列表中的记录不保证存在活动、访谈
 或可创建快照的数据，保存状态也不是实时进程状态。各结果链接携带所选模拟的准确
