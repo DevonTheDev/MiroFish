@@ -1,5 +1,6 @@
 import { createRouter, createWebHistory } from 'vue-router'
 import Home from '../views/Home.vue'
+import SavedSimulationsView from '../views/SavedSimulationsView.vue'
 import Process from '../views/MainView.vue'
 import SimulationView from '../views/SimulationView.vue'
 import SimulationRunView from '../views/SimulationRunView.vue'
@@ -23,6 +24,7 @@ import RunCapturesView from '../views/RunCapturesView.vue'
 import RunCaptureFilesView from '../views/RunCaptureFilesView.vue'
 
 const routes = [
+  { path: '/simulations', name: 'SavedSimulations', component: SavedSimulationsView },
   { path: '/interview-files/compare', name: 'SavedInterviewComparison', component: SavedInterviewComparisonView },
   {
     path: '/report-files',

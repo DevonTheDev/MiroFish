@@ -4,6 +4,7 @@
     <nav class="navbar">
       <div class="nav-brand">MIROFISH</div>
       <div class="nav-links">
+        <RouterLink to="/simulations" class="github-link" data-testid="saved-simulations-link">{{ $t('savedSimulations.title') }}</RouterLink>
         <RouterLink to="/activity-files" class="github-link" data-testid="open-activity-files">{{ $t('savedActivityFiles.entry') }}</RouterLink>
         <RouterLink to="/report-files" class="github-link" data-testid="open-report-files">{{ $t('savedReportFiles.entry') }}</RouterLink>
         <RouterLink to="/reports" class="github-link" data-testid="saved-reports-link">{{ $t('savedReports.navTitle') }}</RouterLink>

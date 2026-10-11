@@ -2813,3 +2813,64 @@ parser, comparison parity, bounds and malformed input, plus compiled Vue/router
 workflows with delayed file reads, stale controls, literal text, downloads and
 both languages. Native browser file pickers, layout and download dialogs remain
 unverified. No model, provider, database import or restore operation is involved.
+
+
+## Saved simulations browser
+
+Open **Saved simulations** in the Home navigation or **Browse saved simulations**
+in the History heading. `/simulations` uses the existing read-only
+`GET /api/simulation/comparison/candidates` metadata catalog, so older readable
+records remain discoverable beyond the 20 Home history cards.
+
+- Search simulation ID, project ID or saved scenario using literal,
+  case-insensitive text. Unicode, punctuation and spaces are matched as written;
+  this is not a regular-expression search. Select a saved status to narrow the
+  list. Applying a search or changing status resets the page to 1.
+- The URL stores `q`, `status` and a one-based `page`. Back and Forward restore
+  these controls and the visible page. Repeated/non-string query values, unknown
+  statuses and invalid page numbers use safe defaults with a notice. A valid
+  page beyond the current result set displays the last available page, also with
+  a notice; the next filter or page action writes a valid URL. Empty values use
+  the defaults. Clearing filters also clears an unapplied search draft.
+- Pages contain up to 20 records. The counts distinguish the visible range,
+  matching records, all readable catalog records and records skipped by the
+  service. The order is the service's saved update time descending, then ID;
+  missing/invalid update times appear last. The client preserves that order.
+- Each result opens **Saved activity** or **Saved interviews** with its exact
+  simulation ID route parameter, **Compare this simulation** as the left
+  selection, or **Run captures** with that simulation selected. These are
+  existing readers; opening the catalog does not start a simulation, run
+  inference, generate a report or create a capture. Capture preview and save
+  remain separate explicit actions in Run captures.
+
+This is **client-side paging**, not bounded server paging. The existing service
+reads and returns the full metadata catalog with no aggregate response cap;
+large catalogs still incur that read/transfer cost. Unsafe, unreadable or changing
+records may be skipped. Readable metadata does not mean complete activity logs,
+saved interviews or capture-ready data exist. Scenarios can be absent when
+configuration metadata is unavailable, and saved status is not a live process
+check. The destination view checks availability. The catalog is a read of saved
+files, not a fixed historical snapshot or a live stream. Refresh reads it again;
+it clears the old list while loading and offers a safe retry on failure.
+
+Frontend verification: `node --test tests/saved-simulations-view.test.js` from
+`frontend` compiles the real Home, History and Saved simulations components and
+uses the real Vue router with synthetic read-only services. It covers the
+35-record discovery regression, literal searches, filters, URL restoration,
+counts, exact destinations and ignored-abort/unmount/retry cases. These host
+renderer checks do not replace browser visual/accessibility verification.
+
+### 已保存的模拟浏览器
+
+从首页导航的“已保存的模拟”或历史区域的“浏览已保存的模拟”进入
+`/simulations`。可按模拟 ID、项目 ID、已保存场景进行不区分大小写的
+字面文本搜索，并按保存状态筛选。搜索和状态变更会将页码重置为第一页；
+网址中的 `q`、`status` 和 `page` 支持后退、前进恢复。无效参数使用默认值，
+超出范围的有效页码显示最后一页，并给出提示。清除筛选也会清除未提交的搜索。
+
+每页最多显示 20 条，但这是客户端分页。现有只读接口一次读取完整元数据目录，
+没有响应总量上限。列表按保存的更新时间由新到旧、再按模拟 ID 排序；缺失或无效
+时间排在最后。显示数量区分当前范围、匹配数、可读记录总数和接口跳过数。
+不安全、不可读或正在变化的记录可能被跳过。列表中的记录不保证存在活动、访谈
+或可创建快照的数据，保存状态也不是实时进程状态。各结果链接携带所选模拟的准确
+ID，进入现有已保存活动、访谈、比较或运行快照页面，由目标页面检查数据可用性。

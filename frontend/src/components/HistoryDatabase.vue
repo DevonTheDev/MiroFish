@@ -14,6 +14,7 @@
     <div class="section-header">
       <div class="section-line"></div>
       <span class="section-title">{{ $t('history.title') }}</span>
+      <button type="button" class="history-compare-btn" data-testid="history-simulations" @click="router.push({ name: 'SavedSimulations' })">{{ $t('savedSimulations.browseAll') }}</button>
       <button type="button" class="history-compare-btn" data-testid="history-compare" @click="goToComparison()">{{ $t('comparison.historyEntry') }}</button>
       <button type="button" class="history-compare-btn" data-testid="history-captures" @click="goToCaptures()">{{ $t('runCaptures.historyEntry') }}</button>
       <button type="button" class="history-compare-btn" data-testid="history-interview-files-link" @click="router.push({ name: 'SavedInterviewFiles' })">{{ $t('savedInterviewFiles.entry') }}</button>
