@@ -66,7 +66,7 @@ for (const [name, change] of [
   ['v2 with requirements', value => value.schema_version = 2],
   ['v2 JSON fields mode', value => { value.schema_version = 2; delete value.cases[0].required_fields }],
   ['v1 with requirements', value => { value.schema_version = 1; delete value.cases[0].check_kind }],
-  ['unknown version', value => value.schema_version = 4],
+  ['unknown version', value => value.schema_version = 5],
 ]) test(`v3 schema rejects ${name}`, () => {
   const source = definition(); change(source)
   assert.throws(() => suites.acceptPromptSuiteDefinition(source), /^Error: Invalid prompt suite definition$/)

@@ -24,24 +24,70 @@ export function getPromptSuiteCheck(item) {
     ...(item.check_kind === 'json_fields' ? { required_fields: item.required_fields } : {}) }
 }
 
-export function evaluatePromptSuiteCheck(item, status, content) {
-  if (status !== 'succeeded') return 'not_evaluated'
-  const check = getPromptSuiteCheck(item)
-  if (check.kind === 'none') return 'not_requested'
-  let matched
-  if (check.kind === 'json_object' || check.kind === 'json_fields') {
-    const reply = parseJsonObjectReply(content)
-    matched = reply !== null && (check.kind === 'json_object' || check.required_fields.every(({ name, type }) => {
-      if (!Object.hasOwn(reply, name)) return false
-      const value = reply[name]
-      const actualType = value === null ? 'null' : Array.isArray(value) ? 'array' : typeof value
-      return actualType === type
-    }))
-  } else matched = content === check.expected_text
-  return matched ? 'matched' : 'mismatched'
+const valueType = value => value === null ? 'null' : Array.isArray(value) ? 'array' : typeof value
+const hasLiteral = rule => Object.hasOwn(rule, 'equals')
+const literalTypes = ['string', 'number', 'boolean', 'null']
+// JSON quoting is also used for display: format and directional characters must
+// not hide labels or reorder the visible requirement and diagnostic text.
+const literalText = value => JSON.stringify(value).replace(/[\u007f-\u009f\p{Cf}\p{Zl}\p{Zp}]/gu,
+  character => character.split('').map(unit => `\\u${unit.charCodeAt(0).toString(16).padStart(4, '0')}`).join(''))
+
+function acceptFieldLiteral(value, type) {
+  if (!literalTypes.includes(type) || valueType(value) !== type ||
+    (type === 'string' && !text(value, 500)) || (type === 'number' && !Number.isFinite(value))) return invalid('field literal')
+  return type === 'number' && value === 0 ? 0 : value
 }
 
-function acceptRequiredFields(item) {
+export function parsePromptSuiteFieldLiteral(source, type) {
+  return acceptFieldLiteral(parseJson(source, 4096, 0, () => invalid('field literal'), true, 1), type)
+}
+
+export function formatPromptSuiteRequiredFields(item) {
+  return item.required_fields.map(rule => `${JSON.stringify(rule.name)}: ${rule.type}${hasLiteral(rule) ? ` = ${literalText(rule.equals)}` : ''}`).join('\n')
+}
+
+// Status and display-only feedback share this path. Reports continue to store
+// only the historical check status, never diagnostics derived for the UI.
+function checkResult(item, status, content) {
+  if (status !== 'succeeded') return { status: 'not_evaluated', failure: null }
+  const check = getPromptSuiteCheck(item)
+  if (check.kind === 'none') return { status: 'not_requested', failure: null }
+  let matched, failure = null
+  if (check.kind === 'json_object' || check.kind === 'json_fields') {
+    const reply = parseJsonObjectReply(content)
+    if (reply === null) failure = { code: 'invalid_object', params: {} }
+    else if (check.kind === 'json_fields') {
+      for (const rule of check.required_fields) {
+        const name = literalText(rule.name)
+        if (!Object.hasOwn(reply, rule.name)) failure = { code: 'missing_field', params: { name } }
+        else {
+          const value = reply[rule.name], actualType = valueType(value)
+          if (actualType !== rule.type) failure = { code: 'type_mismatch', params: { name, expectedType: rule.type, actualType } }
+          else if (hasLiteral(rule) && value !== rule.equals) {
+            const expected = literalText(rule.equals)
+            failure = actualType === 'string' && Array.from(value).length > 500
+              ? { code: 'literal_mismatch_long_string', params: { name, expected } }
+              : { code: 'literal_mismatch', params: { name, expected, actual: literalText(value) } }
+          }
+        }
+        if (failure) break
+      }
+    }
+    matched = failure === null
+  } else matched = content === check.expected_text
+  return { status: matched ? 'matched' : 'mismatched', failure }
+}
+
+export function evaluatePromptSuiteCheck(item, status, content) {
+  return checkResult(item, status, content).status
+}
+
+export function getPromptSuiteCheckFailure(item, status, content) {
+  if (getPromptSuiteCheck(item).kind !== 'json_fields' || !item.required_fields.some(hasLiteral)) return null
+  return checkResult(item, status, content).failure
+}
+
+function acceptRequiredFields(item, version) {
   if (item.check_kind !== 'json_fields') {
     if (item.required_fields !== null) return invalid('definition')
     return null
@@ -49,19 +95,21 @@ function acceptRequiredFields(item) {
   if (!Array.isArray(item.required_fields) || item.required_fields.length < 1 || item.required_fields.length > 10) return invalid('definition')
   const names = new Set()
   return Array.from(item.required_fields, rule => {
-    if (!exact(rule, ['name', 'type']) || !text(rule.name, 80, true, true) || names.has(rule.name) || !fieldTypes.includes(rule.type)) return invalid('definition')
+    const literal = rule !== null && typeof rule === 'object' && hasLiteral(rule)
+    if (!exact(rule, ['name', 'type', ...(version === 4 && literal ? ['equals'] : [])]) ||
+      (version === 4 && !literal && 'equals' in rule) || !text(rule.name, 80, true, true) || names.has(rule.name) || !fieldTypes.includes(rule.type)) return invalid('definition')
     names.add(rule.name)
-    return { name: rule.name, type: rule.type }
+    return { name: rule.name, type: rule.type, ...(literal ? { equals: acceptFieldLiteral(rule.equals, rule.type) } : {}) }
   })
 }
 
 export function acceptPromptSuiteDefinition(source) {
   try {
-    if (!exact(source, definitionKeys) || ![1, 2, 3].includes(source.schema_version) || source.kind !== 'mirofish_local_prompt_suite' ||
+    if (!exact(source, definitionKeys) || ![1, 2, 3, 4].includes(source.schema_version) || source.kind !== 'mirofish_local_prompt_suite' ||
       !text(source.name, 80, true, true) || !Array.isArray(source.cases) || source.cases.length < 1 || source.cases.length > 5) return invalid('definition')
-    const explicitCheck = source.schema_version >= 2, version3 = source.schema_version === 3
-    const keys = [...caseKeys, ...(explicitCheck ? ['check_kind'] : []), ...(version3 ? ['required_fields'] : [])]
-    const kinds = version3 ? [...checkKinds, 'json_fields'] : checkKinds
+    const explicitCheck = source.schema_version >= 2, withFields = source.schema_version >= 3
+    const keys = [...caseKeys, ...(explicitCheck ? ['check_kind'] : []), ...(withFields ? ['required_fields'] : [])]
+    const kinds = withFields ? [...checkKinds, 'json_fields'] : checkKinds
     const ids = new Set()
     const cases = Array.from(source.cases, item => {
       if (!exact(item, keys) || !uuid(item.case_id) || ids.has(item.case_id) ||
@@ -70,7 +118,7 @@ export function acceptPromptSuiteDefinition(source) {
           (item.check_kind === 'exact_text' ? typeof item.expected_text !== 'string' : item.expected_text !== null)))) return invalid('definition')
       ids.add(item.case_id)
       return { case_id: item.case_id, ...acceptPromptTrialInputs(item), ...(explicitCheck ? { check_kind: item.check_kind } : {}), expected_text: item.expected_text,
-        ...(version3 ? { required_fields: acceptRequiredFields(item) } : {}) }
+        ...(withFields ? { required_fields: acceptRequiredFields(item, source.schema_version) } : {}) }
     })
     const result = { schema_version: source.schema_version, kind: 'mirofish_local_prompt_suite', name: source.name, cases }
     if (bytes(JSON.stringify(result)) > PROMPT_SUITE_MAX_BYTES) return invalid('definition')
@@ -117,7 +165,7 @@ const timestamp = value => typeof value === 'string' && /^\d{4}-\d{2}-\d{2}T\d{2
 
 export function acceptPromptSuiteReport(source) {
   try {
-    if (!exact(source, reportKeys) || ![1, 2, 3].includes(source.schema_version) || source.kind !== 'mirofish_local_prompt_suite_run' || !uuid(source.run_id) ||
+    if (!exact(source, reportKeys) || ![1, 2, 3, 4].includes(source.schema_version) || source.kind !== 'mirofish_local_prompt_suite_run' || !uuid(source.run_id) ||
       !timestamp(source.started_at) || !(source.finished_at === null || timestamp(source.finished_at)) ||
       !['running', 'completed', 'stopped', 'halted'].includes(source.status) || typeof source.stop_requested !== 'boolean' || !code(source.halt_code)) return invalid('report')
     const definition = acceptPromptSuiteDefinition(source.definition)

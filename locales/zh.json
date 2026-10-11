@@ -1470,6 +1470,23 @@
     "stopNote": "停止此试验请求及等待。这可能影响其他标签页或套件中的同一试验。若在派发前检测到停止，排队转发将被撤回；请求可能已到达模型服务器，计算仍可能继续。此操作不会卸载模型或停止模型服务器。"
   },
   "promptSuites": {
+    "fieldMode": "字段期望",
+    "fieldModes": {
+      "type_only": "仅检查类型",
+      "equals": "等于指定值"
+    },
+    "fieldLiteral": "期望的 JSON 标量",
+    "fieldLiteralHint": "输入一个 JSON 标量，例如 \"approved\"、3、false、null 或 \"\"。其类型必须与所选字段类型一致。最多 4,096 个 UTF-8 字节；字符串最多 500 个字符。",
+    "fieldLiteralInvalid": "请输入符合所选类型和限制的有效 JSON 标量。",
+    "fieldLiteralNumberNote": "数字使用 JavaScript 有限精度：3 与 3.0 相等，-0 与 0 相等。大整数、高精度小数和极小值可能被舍入。",
+    "fieldLiteralTypeOnly": "对象和数组字段仅支持类型检查。选择这两种类型前，请先切换为“仅检查类型”。",
+    "fieldFailures": {
+      "invalid_object": "回复必须是现有限制内的一个有效 JSON 对象",
+      "missing_field": "缺少必需字段 {name}",
+      "type_mismatch": "字段 {name} 必须是{expectedType}；实际为{actualType}",
+      "literal_mismatch": "字段 {name} 必须等于 {expected}；实际为 {actual}",
+      "literal_mismatch_long_string": "字段 {name} 必须等于 {expected}；实际为不同的字符串，请查看捕获的回复"
+    },
     "navTitle": "提示词套件",
     "navigation": "提示词套件导航",
     "eyebrow": "本地提示词工作区",

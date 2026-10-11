@@ -42,6 +42,7 @@
           </template>
           <ol><li v-for="(item, index) in importState.preview.report.definition.cases" :key="item.case_id">
             {{ item.label }} · {{ t(`promptSuites.caseStates.${importState.preview.report.cases[index].status}`) }} · {{ t(`promptSuites.checkKinds.${checkKind(item)}`) }}
+            <template v-if="item.required_fields?.some(rule => Object.hasOwn(rule, 'equals'))"><h4>{{ t('promptSuites.requiredFields') }}</h4><pre :data-testid="`examples-preview-required-fields-${index}`">{{ requiredFieldsText(item) }}</pre></template>
             <template v-if="importState.preview.kind === 'draft'">
               <p class="identifier">{{ t('promptExamples.caseId') }}: {{ item.case_id }}</p>
               <h4>{{ t('promptExamples.draftTarget') }}</h4><pre :data-testid="`examples-preview-target-${index}`">{{ importState.preview.targets[index].target_text }}</pre>
@@ -76,6 +77,7 @@
             <section class="historical-case">
               <h4>{{ t('promptExamples.recordedCase') }}</h4>
               <dl><div><dt>{{ t('promptExamples.recordedOutcome') }}</dt><dd :data-testid="`examples-row-${index}-status`">{{ t(`promptSuites.caseStates.${entry.row.status}`) }}</dd></div><div><dt>{{ t('promptExamples.recordedCheck') }}</dt><dd :data-testid="`examples-row-${index}-recorded-check`">{{ checkLabel(entry.input, entry.row.check) }}</dd></div></dl>
+              <p v-if="failureText(entry.input, entry.row.status, entry.row.snapshot?.run?.response?.content)" class="reading-note" :data-testid="`examples-row-${index}-recorded-failure`">{{ failureText(entry.input, entry.row.status, entry.row.snapshot?.run?.response?.content) }}</p>
               <p v-if="entry.row.error_code" class="notice warning">{{ t(`promptSuites.errors.${entry.row.error_code}`) }}</p>
               <p v-if="entry.row.snapshot?.run?.error_code" class="notice warning">{{ t(`promptTrials.errors.${entry.row.snapshot.run.error_code}`) }}</p>
               <h5>{{ t('promptExamples.recordedReply') }}</h5>
@@ -100,6 +102,7 @@
               <p class="reading-note">{{ t('promptExamples.editNote') }}</p>
               <button v-if="entry.row.status === 'succeeded'" type="button" :data-testid="`examples-row-${index}-copy`" @click="entry.copy">{{ t('promptExamples.copy') }}</button>
               <dl><div><dt>{{ t('promptExamples.targetCheck') }}</dt><dd :data-testid="`examples-row-${index}-target-check`">{{ entry.valid ? checkLabel(entry.input, entry.targetCheck) : t('promptExamples.targetNotChecked') }}</dd></div><div><dt>{{ t('promptExamples.replyEqual') }}</dt><dd :data-testid="`examples-row-${index}-reply-equal`" :data-equal="entry.replyEqual">{{ booleanValue(entry.replyEqual) }}</dd></div></dl>
+              <p v-if="entry.valid && failureText(entry.input, 'succeeded', entry.target)" class="reading-note" :data-testid="`examples-row-${index}-target-failure`">{{ failureText(entry.input, 'succeeded', entry.target) }}</p>
               <p class="reading-note">{{ t('promptExamples.checkNote') }}</p>
               <p v-if="entry.approval" class="notice approved" :data-testid="`examples-row-${index}-approved`">{{ t('promptExamples.approved') }} <time :datetime="entry.approvalReport.reviewed_at">{{ entry.approvalReport.reviewed_at }}</time></p>
               <p v-else :data-testid="`examples-row-${index}-unapproved`">{{ t('promptExamples.unapproved') }}</p>
@@ -132,7 +135,7 @@ import { computed, onBeforeUnmount, shallowRef, ref } from 'vue'
 import { RouterLink } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import LanguageSwitcher from '../components/LanguageSwitcher.vue'
-import { parsePromptSuiteReport, getPromptSuiteCheck, evaluatePromptSuiteCheck, PROMPT_SUITE_REPORT_MAX_BYTES } from '../utils/promptSuites.js'
+import { parsePromptSuiteReport, getPromptSuiteCheck, evaluatePromptSuiteCheck, formatPromptSuiteRequiredFields, getPromptSuiteCheckFailure, PROMPT_SUITE_REPORT_MAX_BYTES } from '../utils/promptSuites.js'
 import { capturePromptExampleSource, approvePromptExampleTarget, buildPromptExamples, exportPromptExamples,
   capturePromptExampleDraft, parsePromptExampleDraft, exportPromptExampleDraft, PROMPT_EXAMPLES_DRAFT_MAX_BYTES } from '../utils/promptExamples.js'
 
@@ -286,7 +289,16 @@ const draftDownloadActions = computed(() => {
 })
 function sourceReportText(report) { return JSON.stringify(report, null, 2) }
 function checkKind(input) { return getPromptSuiteCheck(input).kind }
-function requiredFieldsText(input) { return input.required_fields.map(rule => `${JSON.stringify(rule.name)}: ${rule.type}`).join('\n') }
+function requiredFieldsText(input) { return formatPromptSuiteRequiredFields(input) }
+function failureText(input, status, content) {
+  const failure = getPromptSuiteCheckFailure(input, status, content)
+  if (!failure) return ''
+  const params = { ...failure.params }
+  if (params.expectedType) params.expectedType = t(`promptSuites.fieldTypes.${params.expectedType}`)
+  if (params.actualType) params.actualType = t(`promptSuites.fieldTypes.${params.actualType}`)
+  return t(`promptSuites.fieldFailures.${failure.code}`, params)
+}
+
 function checkLabel(input, check) {
   const kind = checkKind(input)
   return t(`promptSuites.${kind === 'json_fields' ? 'jsonFieldsChecks' : kind === 'json_object' ? 'jsonChecks' : 'checks'}.${check}`)

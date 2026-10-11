@@ -1470,6 +1470,23 @@
     "stopNote": "Stops this trial request and wait. This may affect the same trial in another tab or suite. Queued forwarding is withdrawn if caught before dispatch; work may already have reached the model server and may continue. This does not unload or stop the model server."
   },
   "promptSuites": {
+    "fieldMode": "Field expectation",
+    "fieldModes": {
+      "type_only": "Type only",
+      "equals": "Equals value"
+    },
+    "fieldLiteral": "Expected JSON scalar",
+    "fieldLiteralHint": "Enter one JSON scalar, for example \"approved\", 3, false, null or \"\". Its type must match the selected field type. Up to 4,096 UTF-8 bytes; strings may contain up to 500 characters.",
+    "fieldLiteralInvalid": "Enter one valid JSON scalar matching the selected type and limits.",
+    "fieldLiteralNumberNote": "Numbers use finite JavaScript precision: 3 and 3.0 are equal; -0 equals 0. Large integers, very precise decimals and tiny values may round.",
+    "fieldLiteralTypeOnly": "Object and array fields support Type only. Switch to Type only before choosing either type.",
+    "fieldFailures": {
+      "invalid_object": "Reply must be one valid JSON object within the existing limits",
+      "missing_field": "Required field {name} is missing",
+      "type_mismatch": "Field {name} must be {expectedType}; received {actualType}",
+      "literal_mismatch": "Field {name} must equal {expected}; received {actual}",
+      "literal_mismatch_long_string": "Field {name} must equal {expected}; received a different string; see the captured reply"
+    },
     "navTitle": "Prompt suites",
     "navigation": "Prompt suite navigation",
     "eyebrow": "LOCAL PROMPT WORKSPACE",

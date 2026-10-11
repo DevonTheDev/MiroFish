@@ -49,6 +49,7 @@
               <template v-if="item.recorded">
                 <label class="check-control"><input type="checkbox" :data-testid="`suite-import-case-${index}-included`" :checked="item.included" @change="item.include">{{ t('promptSuites.includeCapturedCase') }}</label>
                 <dl class="result-grid"><div><dt>{{ t('promptSuites.recordedOutcome') }}</dt><dd :data-testid="`suite-import-case-${index}-status`">{{ t(`promptSuites.caseStates.${item.recorded.status}`) }}</dd></div><div><dt>{{ t('promptSuites.recordedCheck') }}</dt><dd :data-testid="`suite-import-case-${index}-check`">{{ checkLabel(item, item.recorded.check) }}</dd></div></dl>
+                <p v-if="item.recorded.failure" class="reading-note" :data-testid="`suite-import-case-${index}-field-failure`">{{ fieldFailureText(item.recorded.failure) }}</p>
               </template>
               <dl class="result-grid"><div><dt>{{ t('promptTrials.temperature') }}</dt><dd>{{ item.temperature }}</dd></div><div><dt>{{ t('promptTrials.maxOutputTokens') }}</dt><dd>{{ item.max_output_tokens }}</dd></div></dl><details><summary>{{ t('promptSuites.reviewCase') }}</summary><h4>{{ t('promptTrials.systemPrompt') }}</h4><pre>{{ item.system_prompt }}</pre><h4>{{ t('promptTrials.userPrompt') }}</h4><pre>{{ item.user_prompt }}</pre><h4>{{ t('promptSuites.checkKind') }}</h4><p>{{ t(`promptSuites.checkKinds.${checkKind(item)}`) }}</p><p v-if="checkKind(item) === 'json_object'" class="reading-note">{{ t('promptSuites.jsonObjectHint') }}</p><template v-if="checkKind(item) === 'json_fields'"><h4>{{ t('promptSuites.requiredFields') }}</h4><pre :data-testid="`suite-import-case-${index}-required-fields`">{{ requiredFieldsText(item) }}</pre><p class="reading-note">{{ t('promptSuites.jsonFieldsHint') }}</p></template><template v-if="checkKind(item) === 'exact_text'"><h4>{{ t('promptSuites.expected') }}</h4><pre>{{ item.expected_text }}</pre><small v-if="item.expected_text === ''">{{ t('promptSuites.emptyExpected') }}</small></template></details>
             </li></ol>
@@ -81,10 +82,19 @@
           <section v-for="fieldsView in requiredFieldViews(item)" :key="'required-fields'" class="required-fields" :aria-label="t('promptSuites.requiredFields')">
             <h4>{{ t('promptSuites.requiredFields') }} <small>{{ fieldsView.fields.length }}/10</small></h4>
             <p class="reading-note">{{ t('promptSuites.requiredFieldsHint') }}</p>
-            <div v-for="(fieldView, ruleIndex) in fieldsView.rules" :key="ruleIndex" class="required-field-row">
+            <div v-for="(fieldView, ruleIndex) in fieldsView.rules" :key="ruleIndex">
+              <div class="required-field-row">
               <div class="field"><label :for="`suite-field-name-${item.case_id}-${ruleIndex}`">{{ t('promptSuites.fieldName', { number: ruleIndex + 1 }) }}</label><input :id="`suite-field-name-${item.case_id}-${ruleIndex}`" :data-testid="`suite-case-${index}-required-field-${ruleIndex}-name`" :value="fieldView.rule.name" maxlength="160" required @input="fieldView.name"></div>
-              <div class="field"><label :for="`suite-field-type-${item.case_id}-${ruleIndex}`">{{ t('promptSuites.fieldType') }}</label><select :id="`suite-field-type-${item.case_id}-${ruleIndex}`" :data-testid="`suite-case-${index}-required-field-${ruleIndex}-type`" :value="fieldView.rule.type" required @change="fieldView.type"><option value="">{{ t('promptSuites.chooseFieldType') }}</option><option v-for="type in fieldTypes" :key="type" :value="type">{{ t(`promptSuites.fieldTypes.${type}`) }}</option></select></div>
+              <div class="field"><label :for="`suite-field-type-${item.case_id}-${ruleIndex}`">{{ t('promptSuites.fieldType') }}</label><select :id="`suite-field-type-${item.case_id}-${ruleIndex}`" :data-testid="`suite-case-${index}-required-field-${ruleIndex}-type`" :value="fieldView.rule.type" required @change="fieldView.type"><option value="">{{ t('promptSuites.chooseFieldType') }}</option><option v-for="type in fieldTypes" :key="type" :value="type" :disabled="fieldView.literal && ['object', 'array'].includes(type)">{{ t(`promptSuites.fieldTypes.${type}`) }}</option></select></div>
               <button type="button" :data-testid="`suite-case-${index}-required-field-${ruleIndex}-remove`" :disabled="fieldsView.fields.length <= 1" @click="fieldView.remove">{{ t('promptSuites.removeField') }}</button>
+              </div>
+              <div class="field"><label :for="`suite-field-mode-${item.case_id}-${ruleIndex}`">{{ t('promptSuites.fieldMode') }}</label><select :id="`suite-field-mode-${item.case_id}-${ruleIndex}`" :data-testid="`suite-case-${index}-required-field-${ruleIndex}-mode`" :value="fieldView.literal ? 'equals' : 'type_only'" @change="fieldView.mode"><option value="type_only">{{ t('promptSuites.fieldModes.type_only') }}</option><option value="equals" :disabled="!primitiveFieldTypes.includes(fieldView.rule.type)">{{ t('promptSuites.fieldModes.equals') }}</option></select><small v-if="['object', 'array'].includes(fieldView.rule.type)" :data-testid="`suite-case-${index}-required-field-${ruleIndex}-mode-hint`">{{ t('promptSuites.fieldLiteralTypeOnly') }}</small></div>
+              <div v-if="fieldView.literal" class="field">
+                <label :for="`suite-field-value-${item.case_id}-${ruleIndex}`">{{ t('promptSuites.fieldLiteral') }}</label><textarea :id="`suite-field-value-${item.case_id}-${ruleIndex}`" :data-testid="`suite-case-${index}-required-field-${ruleIndex}-value`" :value="fieldView.raw" :aria-invalid="fieldView.rule.equals === undefined" :aria-describedby="`suite-field-value-hint-${item.case_id}-${ruleIndex}${fieldView.rule.equals === undefined ? ` suite-field-value-error-${item.case_id}-${ruleIndex}` : ''}${fieldView.rule.type === 'number' ? ` suite-field-number-note-${item.case_id}-${ruleIndex}` : ''}`" rows="2" @input="fieldView.value" />
+                <small :id="`suite-field-value-hint-${item.case_id}-${ruleIndex}`">{{ t('promptSuites.fieldLiteralHint') }}</small>
+                <small v-if="fieldView.rule.type === 'number'" :id="`suite-field-number-note-${item.case_id}-${ruleIndex}`" :data-testid="`suite-case-${index}-required-field-${ruleIndex}-number-note`">{{ t('promptSuites.fieldLiteralNumberNote') }}</small>
+                <small v-if="fieldView.rule.equals === undefined" :id="`suite-field-value-error-${item.case_id}-${ruleIndex}`" :data-testid="`suite-case-${index}-required-field-${ruleIndex}-literal-error`" role="status">{{ t('promptSuites.fieldLiteralInvalid') }}</small>
+              </div>
             </div>
             <button type="button" :data-testid="`suite-case-${index}-add-required-field`" :disabled="fieldsView.fields.length >= 10" @click="fieldsView.add">{{ t('promptSuites.addField') }}</button>
             <p class="reading-note">{{ t('promptSuites.jsonFieldsHint') }}</p>
@@ -121,6 +131,7 @@
           <article v-for="(result, index) in state.report.cases" :key="result.case_id" class="case-result" :data-testid="`suite-result-${index}`" :data-status="result.status" :data-check="result.check">
             <h3>{{ index + 1 }}. {{ state.report.definition.cases[index].label }}</h3>
             <div class="toolbar"><span class="badge" :data-testid="`suite-result-${index}-status`">{{ t(`promptSuites.caseStates.${result.status}`) }}</span><span class="badge" :data-testid="`suite-result-${index}-check`">{{ checkLabel(state.report.definition.cases[index], result.check) }}</span></div>
+            <p v-for="failure in checkFailures(state.report.definition.cases[index], result.status, result.snapshot?.run.response?.content)" :key="failure.code" class="reading-note" :data-testid="`suite-result-${index}-field-failure`">{{ fieldFailureText(failure) }}</p>
             <p v-if="result.error_code" class="notice warning">{{ t(`promptSuites.errors.${result.error_code}`) }}</p>
             <details><summary>{{ t('promptSuites.capturedCase') }}</summary><h4>{{ t('promptTrials.systemPrompt') }}</h4><pre>{{ state.report.definition.cases[index].system_prompt }}</pre><h4>{{ t('promptTrials.userPrompt') }}</h4><pre>{{ state.report.definition.cases[index].user_prompt }}</pre><h4>{{ t('promptSuites.checkKind') }}</h4><p :data-testid="`suite-result-${index}-kind`">{{ t(`promptSuites.checkKinds.${checkKind(state.report.definition.cases[index])}`) }}</p><p v-if="checkKind(state.report.definition.cases[index]) === 'json_object'" class="reading-note">{{ t('promptSuites.jsonObjectHint') }}</p><template v-if="checkKind(state.report.definition.cases[index]) === 'json_fields'"><h4>{{ t('promptSuites.requiredFields') }}</h4><pre :data-testid="`suite-result-${index}-required-fields`">{{ requiredFieldsText(state.report.definition.cases[index]) }}</pre><p class="reading-note">{{ t('promptSuites.jsonFieldsHint') }}</p></template><template v-if="checkKind(state.report.definition.cases[index]) === 'exact_text'"><h4>{{ t('promptSuites.expected') }}</h4><pre>{{ state.report.definition.cases[index].expected_text }}</pre><small v-if="state.report.definition.cases[index].expected_text === ''">{{ t('promptSuites.emptyExpected') }}</small></template></details>
             <template v-if="result.snapshot">
@@ -140,11 +151,11 @@
 </template>
 
 <script setup>
-import { computed, onBeforeUnmount, onMounted, ref, shallowRef } from 'vue'
+import { computed, onBeforeUnmount, onMounted, reactive, ref, shallowRef } from 'vue'
 import { RouterLink } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import LanguageSwitcher from '../components/LanguageSwitcher.vue'
-import { acceptPromptSuiteDefinition, parsePromptSuiteDefinition, parsePromptSuiteReport, exportPromptSuiteDefinition, exportPromptSuiteReport, summarizePromptSuiteReport, getPromptSuiteCheck, PROMPT_SUITE_MAX_BYTES, PROMPT_SUITE_REPORT_MAX_BYTES } from '../utils/promptSuites.js'
+import { acceptPromptSuiteDefinition, parsePromptSuiteDefinition, parsePromptSuiteReport, exportPromptSuiteDefinition, exportPromptSuiteReport, summarizePromptSuiteReport, getPromptSuiteCheck, parsePromptSuiteFieldLiteral, formatPromptSuiteRequiredFields, getPromptSuiteCheckFailure, PROMPT_SUITE_MAX_BYTES, PROMPT_SUITE_REPORT_MAX_BYTES } from '../utils/promptSuites.js'
 import { createPromptSuiteRunner } from '../utils/promptSuiteRunner.js'
 
 const { t, locale } = useI18n()
@@ -155,6 +166,9 @@ const draft = ref({ schema_version: 1, kind: 'mirofish_local_prompt_suite', name
 const excludedCases = shallowRef([])
 // Preview selection is separate from both its immutable owner and draft selection.
 const excludedImportCases = shallowRef([])
+// Raw text belongs to the exact rule, never to the serializable definition.
+// Weak keys release retired rules and reactive access preserves incomplete input.
+const fieldLiteralInputs = reactive(new WeakMap())
 const emptyImport = token => ({ token, preview: null, loading: false, error: false })
 const importState = shallowRef(emptyImport(importGeneration)), exportError = ref(false), duplicateError = ref(false)
 const state = ref(null)
@@ -176,13 +190,23 @@ const schedulingControls = computed(() => {
 const summaryFields = ['total', 'attempted', 'succeeded', 'evaluated', 'matched', 'mismatched', 'not_requested', 'not_evaluated']
 const summary = computed(() => state.value.report ? summarizePromptSuiteReport(state.value.report) : null)
 const fieldTypes = ['string', 'number', 'boolean', 'object', 'array', 'null']
+const primitiveFieldTypes = ['string', 'number', 'boolean', 'null']
 function newCase(number, version = 1) { return { case_id: crypto.randomUUID(), label: t('promptSuites.caseNumber', { number }), system_prompt: '', user_prompt: '', temperature: 0.2, max_output_tokens: 128, expected_text: null, ...(version >= 2 ? { check_kind: 'none' } : {}), ...(version >= 3 ? { required_fields: null } : {}) } }
 function checkKind(item) { return getPromptSuiteCheck(item).kind }
 function checkLabel(item, state) {
   const kind = checkKind(item)
   return t(`promptSuites.${kind === 'json_fields' ? 'jsonFieldsChecks' : kind === 'json_object' ? 'jsonChecks' : 'checks'}.${state}`)
 }
-function requiredFieldsText(item) { return item.required_fields.map(rule => `${JSON.stringify(rule.name)}: ${rule.type}`).join('\n') }
+function requiredFieldsText(item) { return formatPromptSuiteRequiredFields(item) }
+function checkFailures(item, status, content) {
+  const failure = getPromptSuiteCheckFailure(item, status, content)
+  return failure ? [failure] : []
+}
+function fieldFailureText(failure) {
+  const params = { ...failure.params }
+  for (const key of ['expectedType', 'actualType']) if (params[key]) params[key] = t(`promptSuites.fieldTypes.${params[key]}`)
+  return t(`promptSuites.fieldFailures.${failure.code}`, params)
+}
 function ownsCase(item) { return !retired && draft.value.cases.includes(item) }
 function setCheckEnabled(item, enabled) {
   if (!ownsCase(item) || enabled === (checkKind(item) !== 'none')) return
@@ -207,6 +231,12 @@ function setCheckKind(item, kind) {
 function setExpectedText(item, value) { if (ownsCase(item) && checkKind(item) === 'exact_text') item.expected_text = value }
 function ownsRequiredFields(item, fields) { return ownsCase(item) && checkKind(item) === 'json_fields' && item.required_fields === fields }
 function ownsRequiredField(item, fields, rule) { return ownsRequiredFields(item, fields) && fields.includes(rule) }
+function rawFieldLiteral(rule) { return fieldLiteralInputs.get(rule) ?? (rule.equals === undefined ? '' : JSON.stringify(rule.equals)) }
+function setFieldLiteral(rule, raw) {
+  fieldLiteralInputs.set(rule, raw)
+  try { rule.equals = parsePromptSuiteFieldLiteral(raw, rule.type) }
+  catch { rule.equals = undefined }
+}
 // Each rendered action owns its case, list and rule. Replacing a list during a
 // mode change retires its old actions even if the same case becomes JSON again.
 function requiredFieldViews(item) {
@@ -215,12 +245,34 @@ function requiredFieldViews(item) {
   return [{
     fields,
     add() { if (ownsRequiredFields(item, fields) && fields.length < 10) fields.push({ name: '', type: '' }) },
-    rules: fields.map(rule => ({
-      rule,
-      name(event) { if (ownsRequiredField(item, fields, rule)) rule.name = event.target.value },
-      type(event) { if (ownsRequiredField(item, fields, rule)) rule.type = event.target.value },
-      remove() { if (ownsRequiredField(item, fields, rule) && fields.length > 1) fields.splice(fields.indexOf(rule), 1) },
-    })),
+    rules: fields.map(rule => {
+      const literal = Object.hasOwn(rule, 'equals'), raw = literal ? rawFieldLiteral(rule) : ''
+      return {
+        rule, literal, raw,
+        name(event) { if (ownsRequiredField(item, fields, rule)) rule.name = event.target.value },
+        type(event) {
+          const type = event.target.value
+          if (!ownsRequiredField(item, fields, rule) || rule.type === type || (literal && ['object', 'array'].includes(type))) return
+          const replacement = { ...rule, type }
+          if (literal) setFieldLiteral(replacement, rawFieldLiteral(rule))
+          fields.splice(fields.indexOf(rule), 1, replacement)
+        },
+        mode(event) {
+          const mode = event.target.value
+          if (!ownsRequiredField(item, fields, rule) || !['type_only', 'equals'].includes(mode) || literal === (mode === 'equals') || (mode === 'equals' && !primitiveFieldTypes.includes(rule.type))) return
+          const replacement = { ...rule }
+          if (mode === 'equals') {
+            draft.value.schema_version = 4
+            setFieldLiteral(replacement, '')
+          } else delete replacement.equals
+          // Replacing identity retires all callbacks from the previous mode or
+          // type, including callbacks saved before an away-and-back cycle.
+          fields.splice(fields.indexOf(rule), 1, replacement)
+        },
+        value(event) { if (literal && ownsRequiredField(item, fields, rule)) setFieldLiteral(rule, event.target.value) },
+        remove() { if (ownsRequiredField(item, fields, rule) && fields.length > 1) fields.splice(fields.indexOf(rule), 1) },
+      }
+    }),
   }]
 }
 function numeric(input) { return input === '' ? '' : Number(input) }
@@ -241,7 +293,11 @@ function duplicateCase(owned, item) {
   try {
     const case_id = crypto.randomUUID()
     if (typeof case_id !== 'string' || !/^[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}$/.test(case_id) || owned.cases.some(current => current.case_id === case_id)) throw new Error('Invalid case identity')
-    const copy = { ...item, case_id, ...(Array.isArray(item.required_fields) ? { required_fields: item.required_fields.map(rule => ({ ...rule })) } : {}) }
+    const copy = { ...item, case_id, ...(Array.isArray(item.required_fields) ? { required_fields: item.required_fields.map(rule => {
+      const duplicate = { ...rule }
+      if (Object.hasOwn(rule, 'equals')) fieldLiteralInputs.set(duplicate, rawFieldLiteral(rule))
+      return duplicate
+    }) } : {}) }
     owned.cases.splice(owned.cases.indexOf(item) + 1, 0, copy)
     duplicateError.value = false
   } catch { duplicateError.value = true }
@@ -282,7 +338,8 @@ async function readImportFile(event, fromRun) {
       const content = new TextDecoder('utf-8', { fatal: true, ignoreBOM: true }).decode(bytes)
       const report = parsePromptSuiteReport(content)
       definition = acceptPromptSuiteDefinition(report.definition)
-      recorded = report.cases.map(({ status, check }) => ({ status, check }))
+      recorded = report.cases.map(({ status, check, snapshot }, index) => ({ status, check,
+        failure: getPromptSuiteCheckFailure(definition.cases[index], status, snapshot?.run.response?.content) }))
       provenance = { run_id: report.run_id, status: report.status, started_at: report.started_at, finished_at: report.finished_at,
         total: report.cases.length, attempted: report.cases.filter(item => item.status !== 'not_attempted').length }
     } else {

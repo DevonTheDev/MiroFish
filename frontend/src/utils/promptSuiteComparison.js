@@ -34,15 +34,19 @@ function sameRequiredFields(left, right) {
   const baseline = left.required_fields ?? null, comparison = right.required_fields ?? null
   if (baseline === null || comparison === null) return baseline === comparison
   if (baseline.length !== comparison.length) return false
-  const types = new Map(baseline.map(rule => [rule.name, rule.type]))
-  return comparison.every(rule => types.get(rule.name) === rule.type)
+  const rules = new Map(baseline.map(rule => [rule.name, rule]))
+  return comparison.every(rule => {
+    const other = rules.get(rule.name)
+    return other !== undefined && other.type === rule.type && Object.hasOwn(other, 'equals') === Object.hasOwn(rule, 'equals') &&
+      (!Object.hasOwn(rule, 'equals') || other.equals === rule.equals)
+  })
 }
 
 function compareRow(caseId, baseline, comparison, baselineRequestIds, comparisonRequestIds, version) {
   const shared = baseline !== undefined && comparison !== undefined
   const inputChanges = shared ? Object.fromEntries(evaluationInputs.map(key => [key, baseline.input[key] !== comparison.input[key]])) : null
   if (shared && version >= 2) inputChanges.check_kind = getPromptSuiteCheck(baseline.input).kind !== getPromptSuiteCheck(comparison.input).kind
-  if (shared && version === 3) inputChanges.required_fields = !sameRequiredFields(baseline.input, comparison.input)
+  if (shared && version >= 3) inputChanges.required_fields = !sameRequiredFields(baseline.input, comparison.input)
   const sameInputs = shared ? !Object.values(inputChanges).some(Boolean) : null
   // A reused request can appear under a different case ID, including an added
   // or removed case. Membership still joins only by case ID; observation reuse
@@ -120,6 +124,7 @@ export function exportPromptSuiteComparison(capture) {
       'Paired findings require unchanged evaluation inputs, two succeeded rows and neither request ID appearing anywhere in the opposite report.',
       ...(report.schema_version === 2 ? ['JSON-object matches verify bounded object format only, not fields, schema or meaning. Reply equality remains literal.'] : []),
       ...(report.schema_version === 3 ? ['JSON checks verify bounded object format and, when requested, required top-level fields and types, not full schema or meaning. Reply equality remains literal.'] : []),
+      ...(report.schema_version === 4 ? ['JSON checks verify bounded object format and, when requested, required top-level fields, types and literal primitive values, not full schema or meaning. Numbers use decoded JavaScript equality. Reply equality remains literal.'] : []),
       'Null means unavailable or inapplicable; zero is a recorded numeric value.',
       `Captured at: ${literalJson(report.captured_at)}`,
       'Definition changes:', literalJson(report.definition_changes),

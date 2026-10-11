@@ -367,3 +367,23 @@ test('oversized UTF-16 target input is rejected before allocating codepoint arra
   assert.equal(module.approvePromptExampleTarget(captured, id(1), '🦙'.repeat(16384), { reviewedAt }).toReport().target_text, '🦙'.repeat(16384))
   assert.equal(codepointCopies, 1)
 })
+
+test('v4 literal targets remain independently approvable while review v1 preserves captured assertions', () => {
+  const rules = [{ name: 'ready', type: 'boolean', equals: false }, { name: 'count', type: 'number', equals: 0 }]
+  const source = report([input(1, { check_kind: 'json_fields', required_fields: rules })], 4)
+  setReply(source, '{"ready":true,"count":0}')
+  const captured = capture(source)
+  assert.equal(captured.toReport().cases[0].check, 'mismatched')
+  const matching = approve(captured, id(1), '{"ready":false,"count":0}')
+  const mismatching = approve(captured, id(1), '{"ready":true,"count":0}')
+  assert.equal(matching.toReport().target_check, 'matched'); assert.equal(mismatching.toReport().target_check, 'mismatched')
+  const bundle = build(captured, [mismatching]), output = exported(bundle), review = JSON.parse(output.review_json_text)
+  assert.equal(review.schema_version, 1); assert.equal(review.source_summary.schema_version, 4)
+  assert.deepEqual(review.examples[0].source_input.required_fields, rules)
+  assert.equal(review.examples[0].source_row.check, 'mismatched')
+  assert.deepEqual(Object.keys(JSON.parse(output.jsonl_text)), ['messages'])
+  source.definition.cases[0].required_fields[0].equals = true
+  captured.toReport().definition.cases[0].required_fields[0].equals = true
+  review.examples[0].source_input.required_fields[0].equals = true
+  assert.deepEqual(exported(bundle), output)
+})

@@ -448,3 +448,20 @@ test('capture, import and export require no network, model calls or target appro
   const result = module.exportPromptExampleDraft(handle)
   assert.equal(module.parsePromptExampleDraft(result.draft_json_text).toReport().targets[0].target_text, '{')
 })
+
+test('v1 draft captures v4 literals and targets without approvals or aliasing', () => {
+  const source = report(2, 3); source.schema_version = 4; source.definition.schema_version = 4
+  const input = source.definition.cases[0]
+  input.check_kind = 'json_fields'; input.required_fields = [{ name: 'ready', type: 'boolean', equals: false }]
+  source.cases[0].snapshot.run.response.content = '{"ready":true}'; source.cases[0].check = 'mismatched'
+  const captured = captureSource(source), rows = targets(source, ['', '{"ready":false}'])
+  const handle = captureDraft(captured, rows), output = exportDraft(handle)
+  source.definition.cases[0].required_fields[0].equals = true; rows[1].target_text = 'changed'
+  const returned = handle.toReport(); returned.source_report.definition.cases[0].required_fields[0].equals = true
+  assert.deepEqual(exportDraft(handle), output)
+  const restored = parseDraft(output.draft_json_text).toReport()
+  assert.equal(restored.schema_version, 1); assert.equal(restored.source_report.schema_version, 4)
+  assert.equal(restored.source_report.definition.cases[0].required_fields[0].equals, false)
+  assert.deepEqual(restored.targets.map(row => row.target_text), ['', '{"ready":false}'])
+  assert.deepEqual(Object.keys(restored), ['schema_version', 'kind', 'captured_at', 'source_report', 'targets'])
+})

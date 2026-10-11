@@ -323,3 +323,34 @@ test('all five explicitly approved cases are exported once in source order', asy
     assert.equal(review.examples.length, 5); assert.deepEqual(review.examples.map(example => example.line_number), [1,2,3,4,5])
   } finally { view.unmount() }
 })
+
+for (const locale of ['en', 'zh']) test(`v4 shows safe literal previews and independent historical/target failures in ${locale}`, async () => {
+  const view = await mountPromptExamplesView({ locale })
+  try {
+    const required_fields = [{ name: 'answer', type: 'string', equals: '<b>ok</b>\u202e\u2028' }, { name: 'ready', type: 'boolean', equals: false }]
+    const source = report(1, { version: 3, kind: 'json_fields', requiredFields: required_fields, reply: '{"answer":"old","ready":false}' })
+    source.schema_version = 4; source.definition.schema_version = 4
+    await view.file(reportFile(source))
+    const expected = '"answer": string = "<b>ok</b>\\u202e\\u2028"\n"ready": boolean = false'
+    assert.ok(view.byId('examples-preview-required-fields-0'), 'preview must disclose literal assertions before Use')
+    assert.equal(view.text(view.byId('examples-preview-required-fields-0')), expected)
+    await view.click('examples-use')
+    assert.equal(view.text(view.byId('examples-row-0-required-fields')), expected)
+    const recorded = view.byId('examples-row-0-recorded-failure'); assert.ok(recorded)
+    assert.match(view.text(recorded), /"old"/)
+    await view.input('examples-row-0-target', '{"answer":"new","ready":false}')
+    assert.ok(view.byId('examples-row-0-target-failure')); assert.match(view.text(view.byId('examples-row-0-target-failure')), /"new"/)
+    assert.match(view.text(view.byId('examples-row-0-recorded-failure')), /"old"/)
+    await view.click('examples-row-0-approve'); await view.click('examples-build')
+    await view.click('examples-export-review')
+    const saved = JSON.parse(await view.downloads.at(-1).blob.text())
+    assert.equal(saved.source_summary.schema_version, 4); assert.equal(saved.examples[0].target_check, 'mismatched')
+    const staleApprove = handler(view, 'examples-row-0-remove-approval')
+    await view.input('examples-row-0-target', JSON.stringify({ answer: required_fields[0].equals, ready: false }))
+    await invoke(staleApprove)
+    assert.equal(view.byId('examples-row-0-target-failure'), undefined); assert.ok(view.byId('examples-row-0-recorded-failure'))
+    assert.equal(view.byId('examples-bundle'), undefined); assert.equal(view.byId('examples-row-0-remove-approval'), undefined)
+    assert.equal(view.all(node => ['script', 'b'].includes(node.type) || node.props.innerHTML !== undefined).length, 0)
+    assert.deepEqual(view.warnings, []); noRequests(view)
+  } finally { view.unmount() }
+})

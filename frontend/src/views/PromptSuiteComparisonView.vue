@@ -74,6 +74,7 @@
               <p v-if="!row[side]">{{ t('promptSuiteComparison.absentCase') }}</p>
               <template v-else>
                 <p>{{ row[side].item.label }}</p><p :data-testid="`comparison-row-${index}-${side}-status`">{{ t(`promptSuites.caseStates.${row[side].section.status}`) }} · {{ checkLabel(row[side].item, row[side].section.check) }}</p>
+                <p v-if="failureText(row[side].item, row[side].section.status, row[side].section.snapshot?.run?.response?.content)" class="reading-note" :data-testid="`comparison-row-${index}-${side}-failure`">{{ failureText(row[side].item, row[side].section.status, row[side].section.snapshot?.run?.response?.content) }}</p>
                 <p v-if="row[side].section.error_code" class="notice warning">{{ t(`promptSuites.errors.${row[side].section.error_code}`) }}</p>
                 <dl><div><dt>{{ t('promptTrials.requestId') }}</dt><dd>{{ value(row[side].section.request_id) }}</dd></div><div><dt>{{ t('promptTrials.temperature') }}</dt><dd>{{ row[side].item.temperature }}</dd></div><div><dt>{{ t('promptTrials.maxOutputTokens') }}</dt><dd>{{ row[side].item.max_output_tokens }}</dd></div><div><dt>{{ t('promptTrials.capturedModel') }}</dt><dd :data-testid="`comparison-row-${index}-${side}-model`">{{ value(row[side].section.snapshot?.run?.configuration.model) }}</dd></div><div><dt>{{ t('promptTrials.reasoningEffort') }}</dt><dd>{{ row[side].section.snapshot?.run ? row[side].section.snapshot.run.configuration.reasoning_effort ?? t('promptTrials.serverDefault') : t('promptTrials.unknown') }}</dd></div><div><dt>{{ t('promptTrials.requestDuration') }}</dt><dd :data-testid="`comparison-row-${index}-${side}-request-duration`">{{ value(row[side].section.snapshot?.run?.request_duration_ms) }}</dd></div><div><dt>{{ t('promptTrials.overallDuration') }}</dt><dd :data-testid="`comparison-row-${index}-${side}-elapsed`">{{ value(row[side].section.snapshot?.run?.elapsed_ms) }}</dd></div><div><dt>{{ t('promptTrials.finishReason') }}</dt><dd>{{ value(row[side].section.snapshot?.run?.response?.finish_reason) }}</dd></div></dl>
                 <p v-if="row[side].section.snapshot?.run?.error_code" class="notice error">{{ t(`promptTrials.errors.${row[side].section.snapshot.run.error_code}`) }}</p>
@@ -94,7 +95,7 @@ import { computed, onBeforeUnmount, shallowRef, ref } from 'vue'
 import { RouterLink } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import LanguageSwitcher from '../components/LanguageSwitcher.vue'
-import { parsePromptSuiteReport, getPromptSuiteCheck, PROMPT_SUITE_REPORT_MAX_BYTES } from '../utils/promptSuites.js'
+import { parsePromptSuiteReport, getPromptSuiteCheck, formatPromptSuiteRequiredFields, getPromptSuiteCheckFailure, PROMPT_SUITE_REPORT_MAX_BYTES } from '../utils/promptSuites.js'
 import { comparePromptSuiteReports, exportPromptSuiteComparison } from '../utils/promptSuiteComparison.js'
 
 const { t } = useI18n()
@@ -187,7 +188,16 @@ function download(owned, format) {
 }
 const downloadActions = computed(() => { const owned = result.value; return { json: () => download(owned, 'json'), txt: () => download(owned, 'txt') } })
 function checkKind(item) { return getPromptSuiteCheck(item).kind }
-function requiredFieldsText(item) { return item.required_fields.map(rule => `${JSON.stringify(rule.name)}: ${rule.type}`).join('\n') }
+function requiredFieldsText(item) { return formatPromptSuiteRequiredFields(item) }
+function failureText(input, status, content) {
+  const failure = getPromptSuiteCheckFailure(input, status, content)
+  if (!failure) return ''
+  const params = { ...failure.params }
+  if (params.expectedType) params.expectedType = t(`promptSuites.fieldTypes.${params.expectedType}`)
+  if (params.actualType) params.actualType = t(`promptSuites.fieldTypes.${params.actualType}`)
+  return t(`promptSuites.fieldFailures.${failure.code}`, params)
+}
+
 function checkLabel(item, state) {
   const kind = checkKind(item)
   return t(`promptSuites.${kind === 'json_fields' ? 'jsonFieldsChecks' : kind === 'json_object' ? 'jsonChecks' : 'checks'}.${state}`)

@@ -295,3 +295,35 @@ for (const stage of ['blob','url','anchor','append','click','remove','revoke']) 
     assert.equal(view.downloads.length, prior + 1); assert.equal(view.byId('examples-draft-export-error'), undefined)
   } finally { view.unmount() }
 })
+
+for (const locale of ['en', 'zh']) test(`v4 draft preview discloses literals and restores only unapproved targets in ${locale}`, async () => {
+  const view = await mountPromptExamplesView({ locale })
+  try {
+    const source = draft(2, ['{"ready":false}', ''])
+    source.source_report.schema_version = 4; source.source_report.definition.schema_version = 4
+    source.source_report.definition.cases.forEach((input, index) => {
+      input.check_kind = 'json_fields'; input.required_fields = [{ name: 'ready', type: 'boolean', equals: false }]
+      source.source_report.cases[index].snapshot.run.response.content = '{"ready":true}'
+      source.source_report.cases[index].check = 'mismatched'
+    })
+    await view.draftFile(file(source))
+    const preview = view.byId('examples-preview-required-fields-0'); assert.ok(preview)
+    assert.equal(view.text(preview), '"ready": boolean = false')
+    await view.click('examples-use')
+    assert.equal(view.byId('examples-row-0-target').props.value, '{"ready":false}')
+    assert.equal(view.byId('examples-row-1-target').props.value, '')
+    assert.equal(view.byId('examples-row-0-remove-approval'), undefined)
+    assert.equal(view.byId('examples-row-0-target-failure'), undefined)
+    assert.ok(view.byId('examples-row-0-recorded-failure'))
+    await view.click('examples-row-0-approve'); await view.click('examples-build')
+    const oldUse = handler(view, 'examples-draft-file', 'onChange'), slow = pendingFile()
+    await view.draftFile(slow); await view.click('examples-cancel'); slow.resolve(draft(9)); await flush()
+    assert.ok(view.byId('examples-bundle')); assert.ok(view.byId('examples-row-0-remove-approval'))
+    await view.click('examples-export-draft')
+    const saved = JSON.parse(await view.downloads.at(-1).blob.text())
+    assert.equal(saved.source_report.schema_version, 4); assert.equal(saved.source_report.definition.cases[0].required_fields[0].equals, false)
+    assert.deepEqual(Object.keys(saved.targets[0]), ['case_id', 'target_text'])
+    oldUse({ target: { files: [file(draft(8))], value: 'stale' } }); await flush()
+    assert.equal(view.byId('examples-preview'), undefined); assert.deepEqual(view.warnings, []); noRequests(view)
+  } finally { view.unmount() }
+})

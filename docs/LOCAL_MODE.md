@@ -1124,6 +1124,50 @@ does not downgrade the draft. Versions 1 and 2 remain supported with their
 existing shapes and exported bytes. Choosing only JSON object in a v1 draft
 still promotes it to v2.
 
+For a string, number, boolean or null field, choose **Equals value** to add an
+explicit primitive value requirement. This promotes the draft to version 4 and
+adds an own `equals` key to that rule; **Type only** omits the key. A mixed v4
+case can require `{name: "status", type: "string", equals: "approved"}` while
+requiring `items` only to be an array. Arrays and objects support type-only checks.
+Switch to Type only before selecting either container type. Removing the final
+literal, changing check modes or adding cases never downgrades a v4 draft.
+
+Enter one raw JSON scalar: `"approved"`, `3`, `false`, `null` or `""`. Equals starts
+blank and invalid; it never guesses from the recorded reply. The scalar must
+match the selected type. Blank, incomplete, fenced, trailing or container input
+blocks Run and export rather than retaining a prior valid value. Type changes
+preserve the entered text for revalidation, and duplicated cases keep independent
+valid or incomplete text. Turning Equals off discards that text; turning it back
+on starts blank. An invalid excluded case need not block a valid selected subset.
+Raw editor text is transient and never appears in exported definitions.
+
+The scalar editor allows at most 4,096 UTF-8 bytes, depth zero and one strict
+JSON value. Expected strings allow 0–500 Unicode codepoints; CR, LF and tab are
+allowed but other control characters and lone surrogates are rejected. Case,
+whitespace and Unicode spelling are literal, without normalization. Surrounding
+JSON whitespace is allowed. `false`, zero, the empty string and null are explicit
+assertions. A missing property fails even when the expected value is null.
+Numbers use decoded finite JavaScript equality: `3`, `3.0` and `3e0` are equal,
+and negative zero is normalized to zero. Large integers, precise fractions and
+very small values may round (`9007199254740993` to `9007199254740992`,
+`1.0000000000000001` to `1`, and `1e-400` to `0`). This is not lexical or
+arbitrary-precision numeric equality, coercion, or object/array equality.
+
+All existing definition (128 KiB/depth 5), report (1 MiB/depth 12), and reply
+(64 KiB/depth 16) bounds remain in place. Versions 1–3 preserve their exact
+formats and exported bytes and reject the new own `equals` key. Imports retain
+the supplied version; older clients reject v4 files rather than silently dropping
+assertions. Suite/run v4 otherwise uses the existing case, check and report shape.
+
+Captured rules display quoted names and values, with format/directional marks
+and line separators escaped. For a case containing literal assertions, the first
+failure explains invalid JSON, a missing property, a wrong type or an unequal
+literal. It follows rule order and appears only for a succeeded observation.
+Long actual strings refer to the captured reply rather than repeating it.
+Diagnostics are display-only; historical check badges and report fields retain
+their original meanings. Extra reply properties are still allowed, but the
+entire reply must satisfy the strict JSON parser.
+
 Captured definitions clone and freeze their rule data. Later editor changes do
 not change an active run, captured report or imported preview. Rule checks run
 only on a confirmed successful response; a mismatch continues to the next case,
@@ -1179,7 +1223,7 @@ and token caps, uses the currently configured model and generates new run/reques
 IDs. A historical report does not establish that the present server is ready.
 
 Run files are limited to 1 MiB before and after reading, require valid UTF-8, and
-use the supported v1/v2/v3 report admission. Duplicate keys, excessive nesting,
+use the supported v1/v2/v3/v4 report admission. Duplicate keys, excessive nesting,
 invalid identities, contradictory check outcomes, BOMs and unsupported file kinds
 are refused before any cases are copied. The whole report must pass admission,
 including cases you would leave unselected. A valid definition embedded in an
@@ -1206,7 +1250,7 @@ remain unverified.
 Open **Reviewed examples** from Prompt suites or Compare run reports
 (`/prompt-examples`). This separate offline page helps turn a few captured
 prompts into explicitly reviewed examples for later local-model experiments.
-It reads one downloaded v1/v2/v3 suite-run report using the existing strict
+It reads one downloaded v1/v2/v3/v4 suite-run report using the existing strict
 1 MiB importer. It does not query runtime status, run inference, start training,
 download weights, or write a backend archive.
 
@@ -1238,7 +1282,11 @@ target before inclusion.
 The **Recorded reply check** remains historical. The target's check is computed
 separately against the original case's exact-text/JSON requirements. A target
 that does not match those requirements can still be explicitly approved. These
-bounded checks do not judge meaning. Equality with a recorded reply is available
+bounded checks do not judge meaning. Literal requirements are shown before using
+a report or draft and alongside the recorded case. Historical and target
+first-failure explanations use their own replies independently. The review
+envelope stays v1, records source schema version 4 for a v4 source and preserves
+its complete literal rules; JSONL remains messages-only. Equality with a recorded reply is available
 only when that source succeeded; otherwise it is inapplicable. Repeated content
 under different case IDs is retained, not silently deduplicated. Inspect repeated
 prompts for duplicate or conflicting targets.
@@ -1310,6 +1358,8 @@ as a curation draft. The original suite-run report input also remains separate.
 The draft format is `schema_version: 1`, `kind: mirofish_prompt_example_draft`,
 with `captured_at`, `source_report` and an ordered `targets` array containing
 exactly `case_id` / `target_text` for every source case. It has no approval fields.
+The outer draft remains v1 when its embedded source report is v4; literal rules
+and empty or unapproved targets survive reopening, while approvals never restore.
 The file is bounded to 4 MiB of strict UTF-8 JSON and depth 14. The embedded source
 is independently checked under the existing suite-report 1 MiB/depth-12 rules
 before its known-field projection. Invalid source observations, duplicate or
@@ -1366,7 +1416,7 @@ check, expectation and required-field mapping. A disabled check differs from exp
 Two valid JSON objects can both pass their format check while their literal
 replies differ. A change between exact text, JSON object and JSON fields is a
 changed input, so it does not produce a paired check finding. Older checks are
-normalized internally for comparison with equivalent v2/v3 cases.
+normalized internally for comparison with equivalent v2/v3/v4 cases.
 Unknown, running, rejected, not-attempted, truncated, refused and failed outcomes
 are preserved, with unavailable findings shown as unavailable rather than zero.
 The page does not infer coverage from the report's overall status: a halted run
@@ -1381,7 +1431,7 @@ labels, not authenticated weights or proof the server followed them. Hardware,
 warm-up and other workload conditions are unknown. No pass rate, overall winner,
 accuracy, throughput or statistically significant speed claim is produced.
 
-Imports are limited to 1 MiB each and require valid UTF-8, supported v1/v2/v3 report
+Imports are limited to 1 MiB each and require valid UTF-8, supported v1/v2/v3/v4 report
 structure and identities. Duplicate keys, excessive nesting and malformed
 captures are rejected before fixed-field projection. A failed or canceled
 replacement retains the accepted historical slot and comparison. An accepted
@@ -1399,13 +1449,23 @@ input version is v2, the comparison is v2: rows use `check_transition` instead o
 `exact_transition`, and `input_changes` includes `check_kind`. These versioned
 exports retain the original accepted run reports.
 
-If either input is v3, the comparison is v3 and also records
+If the highest input version is v3, the comparison is v3 and also records
 `input_changes.required_fields`. Adding, removing, renaming or changing a field's
 type makes evaluation inputs different and excludes paired findings. Rule order
 has no checking meaning, so reordering the same name/type mapping alone keeps
 the pair eligible; the captured arrays retain their original order. Older checks
 have no field requirements and can pair with equivalent v3 cases whose
 `required_fields` is null. Both sides display their captured rules literally.
+
+If either input is v4, the comparison is v4 with the same row and summary shape
+as v3. Required-field equality compares name, type, own `equals` presence and the
+primitive value, ignoring array order. Adding, removing or changing a literal
+excludes every paired finding, including reply equality and duration differences.
+Type-only null and explicit `equals: null` are different authored assertions.
+Identical v3/v4 type-only rules can pair in either direction without rewriting
+the source reports. Literal rule equality does not change raw reply equality:
+differently formatted JSON replies still differ as text. The v4 TXT explanation
+covers literal values and numeric precision; older TXT explanations are unchanged.
 
 Local tests import actual suite exports generated through Flask, the shared
 gateway, a synthetic loopback model, Axios and the compiled suite editor. The
