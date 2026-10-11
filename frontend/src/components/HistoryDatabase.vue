@@ -1,7 +1,7 @@
 <template>
   <div 
     class="history-database"
-    :class="{ 'no-projects': projects.length === 0 && !loading }"
+    :class="{ 'no-projects': projects.length === 0 && !loading && !loadError }"
     ref="historyContainer"
   >
     <!-- 背景装饰：技术网格线（只在有项目时显示） -->
@@ -103,8 +103,13 @@
       </div>
     </div>
 
+    <div v-if="loadError" class="history-error" role="alert" data-testid="history-error">
+      <p>{{ $t('history.loadError') }}</p>
+      <button type="button" class="history-compare-btn" data-testid="history-retry" :disabled="loading" @click="loadHistory">{{ $t('history.retry') }}</button>
+    </div>
+
     <!-- 加载状态 -->
-    <div v-if="loading" class="loading-state">
+    <div v-if="loading" class="loading-state" role="status">
       <span class="loading-spinner"></span>
       <span class="loading-text">{{ $t('history.loadingText') }}</span>
     </div>
@@ -213,6 +218,8 @@ const { t } = useI18n()
 // 状态
 const projects = ref([])
 const loading = ref(true)
+const loadError = ref(false)
+let historyRequestPending = false
 const isExpanded = ref(false)
 const hoveringCard = ref(null)
 const historyContainer = ref(null)
@@ -474,17 +481,25 @@ const goToReport = () => {
 
 // 加载历史项目
 const loadHistory = async () => {
+  // Initial loading starts true; guard actual requests separately so mount still loads.
+  if (historyRequestPending) return
+  historyRequestPending = true
   try {
     loading.value = true
     const response = await getSimulationHistory(20)
     if (response.success) {
       projects.value = response.data || []
+      loadError.value = false
+    } else {
+      projects.value = []
+      loadError.value = true
     }
-  } catch (error) {
-    console.error('加载历史项目失败:', error)
+  } catch {
     projects.value = []
+    loadError.value = true
   } finally {
     loading.value = false
+    historyRequestPending = false
   }
 }
 
@@ -610,6 +625,10 @@ onUnmounted(() => {
 .history-compare-btn { cursor: pointer; border: 1px solid #cbd1d9; border-radius: 6px; padding: 9px 14px; background: #fff; color: #354153; font: inherit; font-size: 12px; white-space: nowrap; }
 .history-compare-btn:hover { background: #f1f4f8; }
 .history-compare-btn:focus-visible { outline: 3px solid #5b8bc9; outline-offset: 3px; }
+.history-error { position: relative; display: flex; flex-direction: column; align-items: center; gap: 14px; padding: 24px 20px; color: #a23f3f; text-align: center; }
+.history-error p { margin: 0; }
+.history-error .history-compare-btn { min-height: 44px; white-space: normal; }
+.history-error .history-compare-btn:disabled { cursor: wait; opacity: 0.6; }
 .comparison-entry { display: flex; flex-wrap: wrap; justify-content: center; gap: 10px; padding: 0 24px 8px; text-align: center; }
 .comparison-entry .history-compare-btn { min-height: 44px; white-space: normal; }
 @media (max-width: 600px) {

@@ -337,6 +337,8 @@
     "moreFiles": "+{count} 个文件",
     "noFiles": "暂无文件",
     "loadingText": "加载中...",
+    "loadError": "无法加载推演记录，请重试。",
+    "retry": "重试加载记录",
     "simRequirement": "模拟需求",
     "relatedFiles": "关联文件",
     "noRelatedFiles": "暂无关联文件",

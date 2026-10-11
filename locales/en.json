@@ -337,6 +337,8 @@
     "moreFiles": "+{count} files",
     "noFiles": "No files",
     "loadingText": "Loading...",
+    "loadError": "Could not load simulation history. Please try again.",
+    "retry": "Retry loading history",
     "simRequirement": "Simulation Requirement",
     "relatedFiles": "Related Files",
     "noRelatedFiles": "No related files",

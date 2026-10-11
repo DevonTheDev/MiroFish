@@ -63,7 +63,7 @@ function renderer() {
   return { host, root, body }
 }
 
-export async function mountSavedSimulations({ api, initialPath = '/simulations', locale = 'en', cacheHandlers = false, downloadHooks = {} } = {}) {
+export async function mountSavedSimulations({ api, initialPath = '/simulations', locale = 'en', cacheHandlers = false, keepAlive = false, downloadHooks = {} } = {}) {
   const requests = api ? null : deferredApi()
   api ??= requests.api
   const warnings = []
@@ -94,7 +94,7 @@ export async function mountSavedSimulations({ api, initialPath = '/simulations',
   }
   const { host, root, body } = renderer()
   const stub = { render: () => Vue.h('fixture-boundary') }
-  const passThrough = { setup: (_props, { slots }) => () => slots.default?.() }
+  const passThrough = { inheritAttrs: false, setup: (_props, { slots }) => () => slots.default?.() }
   const modules = {
     vue: { ...Vue, Transition: passThrough },
     'vue-router': { ...Router, createWebHistory: Router.createMemoryHistory },
@@ -137,7 +137,9 @@ export async function mountSavedSimulations({ api, initialPath = '/simulations',
   const messages = Object.fromEntries(['en', 'zh'].map(key => [key,
     JSON.parse(readFileSync(new URL('../../../locales/' + key + '.json', import.meta.url), 'utf8'))]))
   const i18n = createI18n({ legacy: false, locale, fallbackLocale: 'en', messages })
-  const app = host.createApp({ render: () => Vue.h(Router.RouterView) })
+  const app = host.createApp({ render: () => keepAlive
+    ? Vue.h(Router.RouterView, null, { default: ({ Component }) => Vue.h(Vue.KeepAlive, null, { default: () => Component }) })
+    : Vue.h(Router.RouterView) })
   app.use(router); app.use(i18n)
   app.config.warnHandler = warning => warnings.push(warning)
   await router.push(initialPath); await router.isReady(); app.mount(root); await flush()

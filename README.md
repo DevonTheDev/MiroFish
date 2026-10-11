@@ -148,6 +148,10 @@ cases; it is separate from the selected training-example downloads.
 
 ## Explore saved activity
 
+If Home History cannot load, choose **Retry loading history** after the backend
+is available again. The notice stays visible while the retry is pending, and a
+successful read restores the latest 20 history cards without starting a run.
+
 Open a simulation in History and choose **Saved activity** to inspect its latest
 saved action records. Find a literal phrase in decoded saved content, filter by
 saved outcome, platform, round, agent ID or exact action type, and page through
