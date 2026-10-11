@@ -2334,6 +2334,18 @@
     "empty": "选择文件，查看其记录的元数据，然后点击“打开”以阅读和对比。"
   },
   "savedSimulations": {
+    "pairTitle": "选择两个模拟进行比较",
+    "pairCount": "已选择 {count} 个模拟，共需 2 个",
+    "pairLeft": "左侧",
+    "pairRight": "右侧",
+    "pairEmpty": "尚未选择模拟",
+    "pairSelect": "选择用于比较",
+    "pairSelectLabel": "选择 {id} 用于比较",
+    "pairRemove": "移除选择",
+    "pairRemoveLabel": "从比较选择中移除 {id}",
+    "pairCompare": "比较所选模拟",
+    "pairClear": "清除选择",
+    "pairNote": "第一个选择放在左侧，第二个放在右侧。移除左侧后，右侧移到左侧。筛选、排序和翻页会保留选择；刷新或离开本页会清除选择。比较页面会检查已保存数据的可用性。",
     "title": "已保存的模拟",
     "home": "首页",
     "browseAll": "浏览已保存的模拟",

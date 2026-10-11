@@ -31,6 +31,23 @@
       <p v-if="selection.malformed || (loaded && selection.page !== page)" class="notice" role="status" data-testid="simulations-url-notice">{{ t('savedSimulations.urlNotice') }}</p>
       <p v-if="loading" role="status" data-testid="simulations-loading">{{ t('savedSimulations.loading') }}</p>
       <div v-if="error" class="notice error" role="alert" data-testid="simulations-error"><p>{{ t('savedSimulations.error') }}</p><button type="button" data-testid="simulations-retry" @click="loadCandidates">{{ t('savedSimulations.retry') }}</button></div>
+      <section v-if="loaded" class="panel pair-panel" data-testid="simulations-pair" :aria-label="t('savedSimulations.pairTitle')" aria-describedby="simulations-pair-note">
+        <h2>{{ t('savedSimulations.pairTitle') }}</h2>
+        <p role="status" aria-live="polite" data-testid="simulations-pair-count">{{ t('savedSimulations.pairCount', { count: selectedIds.length }) }}</p>
+        <div class="pair-slots">
+          <div v-for="(side, index) in ['left', 'right']" :key="side" class="pair-slot">
+            <strong>{{ t(`savedSimulations.pair${index ? 'Right' : 'Left'}`) }}</strong>
+            <span v-if="selectedIds[index]" class="pair-id" :data-testid="`simulations-pair-${side}`">{{ selectedIds[index] }}</span>
+            <span v-else class="note">{{ t('savedSimulations.pairEmpty') }}</span>
+            <button v-if="selectedIds[index]" type="button" :data-testid="`simulations-pair-remove-${selectedIds[index]}`" :disabled="!canSelectPair" :onClick="pairActions.remove(selectedIds[index])" :aria-label="t('savedSimulations.pairRemoveLabel', { id: selectedIds[index] })">{{ t('savedSimulations.pairRemove') }}</button>
+          </div>
+        </div>
+        <p id="simulations-pair-note" class="note">{{ t('savedSimulations.pairNote') }}</p>
+        <div class="pair-controls">
+          <button type="button" data-testid="simulations-pair-compare" :disabled="!canComparePair" :onClick="pairActions.open">{{ t('savedSimulations.pairCompare') }}</button>
+          <button type="button" data-testid="simulations-pair-clear" :disabled="!canSelectPair || !selectedIds.length" :onClick="pairActions.clear">{{ t('savedSimulations.pairClear') }}</button>
+        </div>
+      </section>
       <section v-if="loaded" :aria-label="t('savedSimulations.results')">
         <p class="counts" aria-live="polite" data-testid="simulations-counts">{{ t('savedSimulations.counts', { start, end, matched: filtered.length, total: candidates.length, skipped: skippedRecords }) }}</p>
         <p v-if="!filtered.length" class="panel" data-testid="simulations-empty">{{ t(candidates.length ? 'savedSimulations.noMatches' : 'savedSimulations.empty') }}</p>
@@ -40,6 +57,7 @@
             <p class="scenario">{{ candidate.scenario || t('savedSimulations.noScenario') }}</p>
             <dl><dt>{{ t('savedSimulations.project') }}</dt><dd>{{ candidate.project_id || '—' }}</dd><dt>{{ t('savedSimulations.updated') }}</dt><dd>{{ formatDate(candidate.updated_at) }}</dd></dl>
             <div class="row-actions">
+              <button type="button" :data-testid="`simulation-select-${candidate.simulation_id}`" :disabled="!canSelectPair || (!selectedIds.includes(candidate.simulation_id) && selectedIds.length >= 2)" :onClick="selectedIds.includes(candidate.simulation_id) ? pairActions.remove(candidate.simulation_id) : pairActions.add(candidate.simulation_id)" :aria-label="t(selectedIds.includes(candidate.simulation_id) ? 'savedSimulations.pairRemoveLabel' : 'savedSimulations.pairSelectLabel', { id: candidate.simulation_id })">{{ t(selectedIds.includes(candidate.simulation_id) ? 'savedSimulations.pairRemove' : 'savedSimulations.pairSelect') }}</button>
               <RouterLink :to="{ name: 'SavedActivity', params: { simulationId: candidate.simulation_id } }" :data-testid="`simulation-activity-${candidate.simulation_id}`">{{ t('savedSimulations.activity') }}</RouterLink>
               <RouterLink :to="{ name: 'SavedInterviews', params: { simulationId: candidate.simulation_id } }" :data-testid="`simulation-interviews-${candidate.simulation_id}`">{{ t('savedSimulations.interviews') }}</RouterLink>
               <RouterLink :to="{ name: 'SimulationComparison', query: { left: candidate.simulation_id } }" :data-testid="`simulation-compare-${candidate.simulation_id}`">{{ t('savedSimulations.compare') }}</RouterLink>
@@ -73,6 +91,7 @@ const pageSize = 20
 const candidates = ref([]), skippedRecords = ref(0), loaded = ref(false), loading = ref(false), error = ref(false)
 const draftQuery = ref('')
 const downloadRevision = ref(0), downloadError = ref(false), pendingNavigation = ref(null)
+const selectedIds = ref([]), pairRevision = ref(0), catalogGeneration = ref(0)
 let request = null, disposed = false, downloadResource = null
 const selection = computed(() => {
   const { q, status, order, page } = route.query
@@ -111,12 +130,13 @@ async function navigate(q, status, targetPage, order = selection.value.order) {
   if (disposed) return
   const navigation = Symbol()
   pendingNavigation.value = navigation
+  retirePairActions()
   retireDownload()
   draftQuery.value = q
   try {
     await router.push({ name: 'SavedSimulations', query: { ...(q ? { q } : {}), ...(status ? { status } : {}), ...(order ? { order } : {}), ...(targetPage > 1 ? { page: String(targetPage) } : {}) } })
   } finally {
-    if (pendingNavigation.value === navigation) { pendingNavigation.value = null; retireDownload() }
+    if (pendingNavigation.value === navigation) { pendingNavigation.value = null; retirePairActions(); retireDownload() }
   }
 }
 function applySearch() { navigate(draftQuery.value, selection.value.status, 1) }
@@ -135,6 +155,8 @@ function validCatalog(data) {
 }
 async function loadCandidates() {
   if (disposed) return
+  catalogGeneration.value++
+  clearPair()
   retireDownload()
   request?.controller.abort()
   const current = { controller: new AbortController() }
@@ -154,6 +176,46 @@ async function loadCandidates() {
     if (owns()) loading.value = false
   }
 }
+// Pair callbacks belong to the accepted list and this exact interaction state.
+// Keep their lifetime separate from metadata downloads: choosing a pair does
+// not change the applied filters, record ordering or a captured export.
+function retirePairActions() { pairRevision.value++ }
+function clearPair() { retirePairActions(); selectedIds.value = [] }
+const canSelectPair = computed(() => loaded.value && !loading.value && !error.value && !pendingNavigation.value && route.name === 'SavedSimulations')
+const validPair = () => selectedIds.value.length === 2 && selectedIds.value[0] !== selectedIds.value[1] &&
+  selectedIds.value.every(id => candidates.value.some(candidate => candidate.simulation_id === id))
+const canComparePair = computed(() => canSelectPair.value && validPair())
+const pairActions = computed(() => {
+  const revision = pairRevision.value, generation = catalogGeneration.value, source = candidates.value, path = route.fullPath
+  const ready = canSelectPair.value
+  const owns = () => ready && !disposed && canSelectPair.value && revision === pairRevision.value &&
+    generation === catalogGeneration.value && source === candidates.value &&
+    router.currentRoute.value.name === 'SavedSimulations' && router.currentRoute.value.fullPath === path
+  const member = id => source.some(candidate => candidate.simulation_id === id)
+  return {
+    add: id => () => {
+      if (!owns() || !member(id) || selectedIds.value.includes(id) || selectedIds.value.length >= 2) return
+      retirePairActions(); selectedIds.value = [...selectedIds.value, id]
+    },
+    remove: id => () => {
+      if (!owns() || !member(id) || !selectedIds.value.includes(id)) return
+      retirePairActions(); selectedIds.value = selectedIds.value.filter(selected => selected !== id)
+    },
+    clear: () => { if (owns() && selectedIds.value.length) clearPair() },
+    open: async () => {
+      if (!owns() || !validPair()) return
+      const [left, right] = selectedIds.value, navigation = Symbol()
+      pendingNavigation.value = navigation
+      retirePairActions(); retireDownload()
+      try {
+        await router.push({ name: 'SimulationComparison', query: { left, right } })
+      } catch { /* A rejected navigation leaves the current pair available to retry. */ }
+      finally {
+        if (pendingNavigation.value === navigation) { pendingNavigation.value = null; retirePairActions(); retireDownload() }
+      }
+    },
+  }
+})
 function releaseDownload(current = downloadResource) {
   if (!current) return
   if (downloadResource === current) downloadResource = null
@@ -228,16 +290,20 @@ function formatDate(value) {
   if (!time) return '—'
   return new Date(time.milliseconds + Math.floor(time.microseconds / 1000)).toLocaleString(locale.value === 'zh' ? 'zh-CN' : 'en-US', { timeZoneName: 'short' })
 }
-watch(() => route.fullPath, () => { retireDownload(); draftQuery.value = selection.value.q }, { immediate: true, flush: 'sync' })
+watch(() => route.fullPath, () => {
+  if (router.currentRoute.value.name !== 'SavedSimulations') clearPair()
+  else retirePairActions()
+  retireDownload(); draftQuery.value = selection.value.q
+}, { immediate: true, flush: 'sync' })
 loadCandidates()
-onBeforeUnmount(() => { disposed = true; request?.controller.abort(); request = null; retireDownload() })
+onBeforeUnmount(() => { disposed = true; request?.controller.abort(); request = null; clearPair(); retireDownload() })
 </script>
 
 <style scoped>
 .simulations-page { min-height: 100vh; background: #f8f9fb; color: #202329; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; }
 .app-header { min-height: 72px; padding: 0 36px; background: #fff; border-bottom: 1px solid #e5e7eb; display: flex; align-items: center; justify-content: space-between; gap: 20px; }
 .brand { color: #18181b; font-weight: 800; letter-spacing: 2px; font-size: 22px; text-decoration: none; }
-.header-actions, .row-actions, .filter-actions, .pagination { display: flex; align-items: center; flex-wrap: wrap; gap: 16px; }
+.header-actions, .row-actions, .filter-actions, .pagination, .pair-controls { display: flex; align-items: center; flex-wrap: wrap; gap: 16px; }
 a { color: #394555; } main { max-width: 1040px; margin: 0 auto; padding: 40px 24px 60px; }
 .page-heading { margin-bottom: 28px; } .eyebrow { text-transform: uppercase; letter-spacing: 2px; font-size: 12px; font-weight: 700; color: #68707c; }
 h1 { font-size: clamp(26px, 4vw, 36px); margin: 12px 0; } h2 { font-size: 17px; margin: 0; overflow-wrap: anywhere; }
@@ -252,5 +318,9 @@ button { cursor: pointer; } button:disabled { opacity: .45; cursor: default; } b
 .status { background: #eef1f5; padding: 4px 10px; border-radius: 20px; font-size: 12px; white-space: nowrap; }
 .scenario { white-space: pre-wrap; overflow-wrap: anywhere; max-height: 14rem; overflow-y: auto; } dl { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 8px 14px; font-size: 13px; } dt { color: #68707c; } dd { margin: 0; overflow-wrap: anywhere; }
 .row-actions { margin-top: 20px; font-size: 14px; } .pagination { justify-content: center; margin: 24px 0; font-size: 14px; }
+.pair-panel { margin-top: 20px; } .pair-slots { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }
+.pair-slot { display: flex; align-items: start; flex-direction: column; gap: 10px; min-width: 0; padding: 16px; background: #f8f9fb; border-radius: 8px; }
+.pair-id { max-width: 100%; overflow-wrap: anywhere; } .pair-slot button { font-size: 14px; }
+@media (max-width: 600px) { .pair-slots { grid-template-columns: 1fr; } }
 @media (max-width: 600px) { .app-header { padding: 16px; } main { padding: 28px 16px; } .panel { padding: 18px; } .search-form { align-items: stretch; flex-direction: column; } .row-heading { flex-direction: column; gap: 8px; } dl { grid-template-columns: 1fr; gap: 4px; } dd { margin-bottom: 8px; } }
 </style>

@@ -2921,6 +2921,21 @@ records remain discoverable beyond the 20 Home history cards.
   existing readers; opening the catalog does not start a simulation, run
   inference, generate a report or create a capture. Capture preview and save
   remain separate explicit actions in Run captures.
+- **Select for comparison** adds a record to the two-slot panel: first Left,
+  then Right. The panel shows exact IDs even when search, status, ordering or
+  pagination hides those records. Back, Forward and **Reset filters and order**
+  preserve the pair. Remove either choice or clear both; removing Left promotes
+  Right to Left. A third record cannot replace a choice: remove one first.
+  **Compare selected simulations** opens the existing `/compare?left=…&right=…`
+  view only with two different records from the currently loaded catalog.
+  The destination checks saved data availability; saved status does not decide
+  whether a record can be selected. Differences there are Right minus Left.
+  Selection stays in memory, with no new catalog requests or storage writes.
+  Refresh/retry clears it immediately, even if the response contains the same
+  IDs; failed/invalid loads and leaving the page also clear it. Pair controls
+  are unavailable while a control-triggered navigation is pending. A cancelled
+  or failed comparison navigation retains a valid pair for another attempt.
+  Pair selection does not change the matching JSON export or any existing link.
 - **Download matching JSON** saves every matching record across all pages, in
   the currently applied order, without another request. The search draft does
   not apply until Search is selected. This is a metadata catalog export, **not
@@ -2949,14 +2964,16 @@ check. The destination view checks availability. The catalog is a read of saved
 files, not a fixed historical snapshot or a live stream. Refresh reads it again;
 it clears the old list while loading and offers a safe retry on failure.
 
-Frontend verification: `node --test tests/saved-simulations-view.test.js tests/saved-simulations-order.test.js tests/saved-simulations-export.test.js` from
+Frontend verification: `node --test --test-concurrency=1 tests/saved-simulations-pair-selection.test.js tests/saved-simulations-view.test.js tests/saved-simulations-order.test.js tests/saved-simulations-export.test.js tests/simulation-comparison.test.js` from
 `frontend` compiles the real Home, History and Saved simulations components and
 uses the real Vue router with synthetic read-only services. It covers the
 35-record discovery regression, literal searches, filters, URL restoration,
 counts, exact destinations, ordering before pagination, microseconds, invalid
 dates, URL restoration, full-catalog export across more than 40 records, metadata
-projection, raw JSON strings, retained callbacks, download failure/reentry cleanup
-and ignored-abort/unmount/retry cases. These host
+projection, raw JSON strings, hidden/cross-page pair selection, exact Left/Right
+destinations, promotion/removal, duplicate/third-choice rejection, cancelled and
+overlapping navigation, retained callbacks in both template-handler modes,
+download failure/reentry cleanup and ignored-abort/unmount/retry cases. These host
 renderer checks do not replace browser visual/accessibility verification.
 
 ### 已保存的模拟浏览器
@@ -2975,6 +2992,16 @@ renderer checks do not replace browser visual/accessibility verification.
 时间仅识别有效的 `YYYY-MM-DD` 或 `YYYY-MM-DDTHH:mm:ss`，后者可含 1–6 位小数秒
 以及 `Z` 或 `±HH:MM` 偏移；具体范围与限制见上方英文格式说明。排序保留微秒精度。
 无偏移时间按 UTC 解释，与后端的时区假设一致；显示使用本地时区和语言格式。
+
+“选择用于比较”将记录加入双栏面板：第一个放在左侧，第二个放在右侧。即使搜索、
+状态筛选、排序或翻页隐藏了记录，面板仍显示准确的 ID；后退、前进以及“重置筛选
+和排序”也会保留选择。可以移除单个选择或清除全部；移除左侧后，右侧移到左侧。
+选择两个后不能直接加入第三个，需先移除一个。“比较所选模拟”只接受当前目录中
+两个不同的记录，进入现有的 `/compare?left=…&right=…` 页面，由目标页面检查已保存
+数据的可用性；保存状态不会限制选择。比较差值为右侧减左侧。选择只保存在内存中，
+不会新增目录请求或写入存储，也不会改变 JSON 导出或现有链接。刷新或重试开始时
+立即清除选择，即使新响应的 ID 相同；加载失败、无效响应或离开页面也会清除。
+通过控件导航期间不能操作选择；比较导航被取消或失败时，会保留有效选择以便重试。
 
 “下载匹配结果 JSON”按已应用的搜索、状态和排序导出所有页面的匹配记录，不会再次
 请求服务，也不使用尚未提交的搜索文字。这是元数据目录，不能用于恢复模拟；不包含

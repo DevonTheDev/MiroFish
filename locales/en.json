@@ -2334,6 +2334,18 @@
     "empty": "Choose a file, review its recorded metadata, and select Open to read and compare it."
   },
   "savedSimulations": {
+    "pairTitle": "Select a pair to compare",
+    "pairCount": "{count} of 2 simulations selected",
+    "pairLeft": "Left",
+    "pairRight": "Right",
+    "pairEmpty": "No simulation selected",
+    "pairSelect": "Select for comparison",
+    "pairSelectLabel": "Select {id} for comparison",
+    "pairRemove": "Remove selection",
+    "pairRemoveLabel": "Remove {id} from comparison selection",
+    "pairCompare": "Compare selected simulations",
+    "pairClear": "Clear selections",
+    "pairNote": "First choice is Left; second is Right. Removing Left moves Right to Left. Filters, order and pages keep your choices. Refreshing or leaving this page clears them. The comparison view checks saved data availability.",
     "title": "Saved simulations",
     "home": "Home",
     "browseAll": "Browse saved simulations",
