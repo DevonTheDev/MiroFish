@@ -93,6 +93,12 @@ mismatched selected reports fail before agent work. API clients can supply
 The existing context limit still applies; graph searches and interviews use
 current simulation data, not a historical graph snapshot.
 
+When a Step 5 agent interview returns text from both platforms, its single reply
+shows **Twitter:** and **Reddit:** separately. If only one platform returns text,
+that answer appears on its own. Follow-up questions share this conversation:
+both labelled answers enter the same prompt once, within the existing six-message
+history window. The labels do not create independent platform conversations.
+
 ## Monitor local runtime activity
 
 Open **Runtime monitor** from Home to see loaded model settings, resource limits,

@@ -279,7 +279,13 @@
                   </span>
                   <span class="message-time">{{ formatTime(msg.timestamp) }}</span>
                 </div>
-                <div class="message-text" v-html="renderMarkdown(msg.content)"></div>
+                <div v-if="msg.platformReplies" class="message-text platform-replies">
+                  <div v-for="reply in msg.platformReplies" :key="reply.platform" class="platform-reply">
+                    <div class="platform-reply-label">{{ reply.platform === 'twitter' ? 'Twitter:' : 'Reddit:' }}</div>
+                    <div class="platform-reply-text" v-html="renderMarkdown(reply.content)"></div>
+                  </div>
+                </div>
+                <div v-else class="message-text" v-html="renderMarkdown(msg.content)"></div>
               </div>
             </div>
             <div v-if="isSending" class="chat-message assistant">
@@ -608,18 +614,19 @@ const sendMessage = async () => {
     history: chatHistory.value
   }
   chatHistoryCache.value[request.key] = request.history
-  const appendReply = (content) => {
-    request.history.push({ role: 'assistant', content, timestamp: new Date().toISOString() })
+  const appendReply = (content, platformReplies) => {
+    request.history.push({ role: 'assistant', content, timestamp: new Date().toISOString(),
+      ...(platformReplies ? { platformReplies } : {}) })
     chatHistoryCache.value[request.key] = request.history
     if (conversationKey() === request.key) chatHistory.value = request.history
   }
   scrollToBottom(request)
   isSending.value = true
   try {
-    const content = request.target === 'report_agent'
-      ? await sendToReportAgent(message, request) : await sendToAgent(message, request)
+    const reply = request.target === 'report_agent'
+      ? { content: await sendToReportAgent(message, request) } : await sendToAgent(message, request)
     if (!isCurrentView(request)) return
-    appendReply(content)
+    appendReply(reply.content, reply.platformReplies)
     addLog(request.target === 'report_agent' ? t('log.reportAgentReplied')
       : t('log.agentReplied', { name: request.agent.username }))
   } catch (err) {
@@ -665,13 +672,25 @@ const sendToAgent = async (message, request) => {
     const resultsDict = resultData.results || resultData
     let responseContent = null
     if (typeof resultsDict === 'object' && !Array.isArray(resultsDict)) {
+      // Keep one shared conversation turn, while rendering each platform's
+      // Markdown separately. Its canonical text is also the follow-up context.
+      const platformReplies = ['twitter', 'reddit'].map(platform => {
+        const result = resultsDict[`${platform}_${request.agentId}`]
+        return { platform, content: result?.response || result?.answer }
+      }).filter(reply => typeof reply.content === 'string' && reply.content.length > 0)
+      if (platformReplies.length === 2) {
+        return { content: `Twitter:\n${platformReplies[0].content}\n\nReddit:\n${platformReplies[1].content}`,
+          platformReplies }
+      }
+      if (platformReplies.length === 1) return { content: platformReplies[0].content }
+      // Preserve the existing legacy fallback when neither exact key has text.
       const agentResult = resultsDict[`reddit_${request.agentId}`]
         || resultsDict[`twitter_${request.agentId}`] || Object.values(resultsDict)[0]
       if (agentResult) responseContent = agentResult.response || agentResult.answer
     } else if (Array.isArray(resultsDict) && resultsDict.length > 0) {
       responseContent = resultsDict[0].response || resultsDict[0].answer
     }
-    if (responseContent) return responseContent
+    if (responseContent) return { content: responseContent }
     throw new Error(t('step5.noResponse'))
   }
   throw new Error(res.error || t('step5.requestFailed'))
@@ -2018,6 +2037,22 @@ watch(() => [props.reportId, props.simulationId], () => {
   background: #F3F4F6;
   color: #374151;
   border-bottom-left-radius: 4px;
+}
+
+.platform-reply {
+  counter-reset: list-counter;
+}
+
+.platform-reply + .platform-reply {
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid #D1D5DB;
+}
+
+.platform-reply-label {
+  margin-bottom: 6px;
+  font-size: 12px;
+  font-weight: 600;
 }
 
 .message-text :deep(.md-p) {
