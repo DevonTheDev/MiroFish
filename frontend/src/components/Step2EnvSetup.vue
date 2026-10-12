@@ -1566,6 +1566,8 @@ const fetchConfigRealtime = (context = preparationContext, final = false) => sin
         
         // Config is a preview until preparation confirms scripts are ready.
       }
+    } else if (final) {
+      handlePrepareFailure(t('log.loadConfigFailed', { error: res.error || t('common.unknownError') }), context)
     }
   } catch (err) {
     if (!ownsTask(context, observedTaskId) || cancellationBlocked.value || (!final && context.preparedConfirmed)) return
