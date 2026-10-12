@@ -51,6 +51,13 @@ one environment is useful for a smaller local experiment. The shared graph,
 profile/configuration work and model settings still affect resource use.
 See [choosing a platform](docs/LOCAL_MODE.md#choose-a-simulation-platform).
 
+If creation succeeds but opening setup is interrupted, choose **Open created
+simulation** to reopen that accepted simulation. The retry only navigates to its
+existing setup; it does not create another simulation. It remains available while
+the same project's graph metadata reload is pending or fails. Choosing a different
+project or graph, leaving the view successfully, or reloading the page ends this
+in-memory recovery. Existing setup behavior begins after its destination opens.
+
 ## Revisit saved reports
 
 Open **Saved reports** from Home to search earlier saved reports, filter their

@@ -180,8 +180,8 @@
             <select
               data-testid="simulation-platform"
               :aria-label="$t('step1.platformChoice')"
-              :value="selectedPlatform"
-              :disabled="creatingSimulation || createdSimulation"
+              :value="acceptedSimulation?.platform || selectedPlatform"
+              :disabled="creatingSimulation || createdSimulation || !!acceptedSimulation || !!simulationHandoff?.disabled"
               :onChange="creationActions.select"
             >
               <option value="parallel">{{ $t('step1.platformBoth') }}</option>
@@ -193,12 +193,22 @@
           <button
             data-testid="create-simulation"
             class="action-btn"
-            :disabled="!canCreateSimulation || creatingSimulation || createdSimulation"
+            :disabled="!canCreateSimulation || creatingSimulation || createdSimulation || !!acceptedSimulation || !!simulationHandoff?.disabled"
             :onClick="creationActions.create"
           >
             <span v-if="creatingSimulation" class="spinner-sm"></span>
             {{ creatingSimulation ? $t('step1.creating') : $t('step1.enterEnvSetup') + ' ➝' }}
           </button>
+          <template v-if="acceptedSimulation">
+            <p data-testid="created-simulation-status" class="description"
+              :role="simulationHandoff.opening ? 'status' : 'alert'" aria-live="polite">
+              {{ $t(simulationHandoff.opening ? 'step1.openingCreatedSimulation' : 'step1.createdSimulationOpenFailed') }}
+            </p>
+            <button type="button" data-testid="open-created-simulation" class="action-btn"
+              :disabled="simulationHandoff.disabled" :onClick="simulationHandoff.open">
+              {{ $t(simulationHandoff.opening ? 'step1.openingCreatedSimulation' : 'step1.retryOpenSimulation') }}
+            </button>
+          </template>
         </div>
       </div>
     </div>
@@ -221,11 +231,9 @@
 
 <script setup>
 import { computed, ref, watch, nextTick, onUnmounted } from 'vue'
-import { useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { createSimulation } from '../api/simulation'
 
-const router = useRouter()
 const { t } = useI18n()
 
 const props = defineProps({
@@ -235,10 +243,11 @@ const props = defineProps({
   buildProgress: Object,
   graphResult: Object,
   graphData: Object,
+  simulationHandoff: Object,
   systemLogs: { type: Array, default: () => [] }
 })
 
-defineEmits(['next-step'])
+const emit = defineEmits(['next-step', 'simulation-created'])
 
 const selectedOntologyItem = ref(null)
 const logContent = ref(null)
@@ -246,6 +255,7 @@ const creatingSimulation = ref(false)
 
 const selectedPlatform = ref('parallel')
 const createdSimulation = ref(false)
+const acceptedSimulation = computed(() => props.simulationHandoff?.receipt)
 const creationActions = ref({})
 let creationTarget = null
 let mounted = true
@@ -254,14 +264,15 @@ const validId = id => typeof id === 'string' && id.trim().length > 0
 const canCreateSimulation = computed(() => props.currentPhase >= 2 &&
   validId(props.projectData?.project_id) && validId(props.projectData?.graph_id))
 const ownsCreation = target => mounted && target === creationTarget &&
+  props.simulationHandoff?.owner === target.owner && target.owner?.active !== false && !props.simulationHandoff?.disabled &&
   props.projectData?.project_id === target.projectId && props.projectData?.graph_id === target.graphId
 
 // Every target gets fresh handlers as well as a fresh HTTP observer. Comparing
 // IDs alone would allow an old A handler/response to affect a later A view.
-watch(() => [props.projectData?.project_id, props.projectData?.graph_id], ([projectId, graphId]) => {
-  if (creationTarget && creationTarget.projectId === projectId && creationTarget.graphId === graphId) return
+watch(() => [props.projectData?.project_id, props.projectData?.graph_id, props.simulationHandoff?.owner], ([projectId, graphId, owner]) => {
+  if (creationTarget && creationTarget.projectId === projectId && creationTarget.graphId === graphId && creationTarget.owner === owner) return
   creationTarget?.controller.abort()
-  const target = { projectId, graphId, controller: new AbortController(), pending: false, created: false }
+  const target = { projectId, graphId, owner, controller: new AbortController(), pending: false, created: false }
   creationTarget = target
   selectedPlatform.value = 'parallel'
   creatingSimulation.value = false
@@ -269,7 +280,7 @@ watch(() => [props.projectData?.project_id, props.projectData?.graph_id], ([proj
   creationActions.value = {
     select: event => {
       const mode = event?.target?.value
-      if (ownsCreation(target) && !target.pending && !target.created && ['parallel', 'twitter', 'reddit'].includes(mode)) {
+      if (ownsCreation(target) && !target.pending && !target.created && !acceptedSimulation.value && ['parallel', 'twitter', 'reddit'].includes(mode)) {
         selectedPlatform.value = mode
       }
     },
@@ -278,7 +289,7 @@ watch(() => [props.projectData?.project_id, props.projectData?.graph_id], ([proj
 }, { immediate: true, flush: 'sync' })
 
 const handleEnterEnvSetup = async target => {
-  if (!ownsCreation(target) || target.pending || target.created || !canCreateSimulation.value) return
+  if (!ownsCreation(target) || target.pending || target.created || acceptedSimulation.value || !canCreateSimulation.value) return
   const mode = selectedPlatform.value
   if (!['parallel', 'twitter', 'reddit'].includes(mode)) return
   target.pending = true
@@ -296,7 +307,8 @@ const handleEnterEnvSetup = async target => {
     if (res.success && res.data?.simulation_id) {
       target.created = true
       createdSimulation.value = true
-      router.push({ name: 'Simulation', params: { simulationId: res.data.simulation_id } })
+      emit('simulation-created', { owner: target.owner, projectId: target.projectId, graphId: target.graphId,
+        simulationId: res.data.simulation_id, platform: mode })
     } else {
       console.error('创建模拟失败:', res.error)
       alert(t('step1.createSimulationFailed', { error: res.error || t('common.unknownError') }))
@@ -364,7 +376,8 @@ watch(() => props.systemLogs.length, () => {
   color: #222;
   font: inherit;
 }
-.platform-choice select:focus-visible {
+.platform-choice select:focus-visible,
+.action-btn:focus-visible {
   outline: 2px solid #FF5722;
   outline-offset: 2px;
 }

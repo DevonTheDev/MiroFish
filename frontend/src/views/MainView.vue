@@ -60,6 +60,8 @@
           :graphResult="graphResult"
           :graphData="graphData"
           :systemLogs="systemLogs"
+          :simulationHandoff="simulationHandoff"
+          @simulation-created="simulationHandoff.accept"
           @next-step="handleNextStep"
         />
         <!-- Step 2: 环境搭建 -->
@@ -78,8 +80,8 @@
 </template>
 
 <script setup>
-import { ref, computed, watch, onBeforeUnmount } from 'vue'
-import { useRoute, useRouter, onBeforeRouteLeave } from 'vue-router'
+import { ref, shallowRef, computed, watch, onBeforeUnmount } from 'vue'
+import { useRoute, useRouter, onBeforeRouteLeave, onBeforeRouteUpdate } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import GraphPanel from '../components/GraphPanel.vue'
 import Step1GraphBuild from '../components/Step1GraphBuild.vue'
@@ -111,6 +113,104 @@ const ontologyProgress = ref(null)
 const buildProgress = ref(null)
 const graphResult = ref(null)
 const systemLogs = ref([])
+
+// The accepted receipt outlives graph observation, but never its selection.
+// Each recovery carries only data into a fresh action owner, not old callbacks.
+const simulationHandoff = shallowRef({})
+let simulationOwner = null
+let simulationDeparture = null
+const validSimulationId = id => typeof id === 'string' && id.trim().length > 0
+const ownsSimulation = owner => owner === simulationOwner && owner.active
+  && route.name === 'Process' && currentProjectId.value === owner.projectId
+const atAcceptedSimulation = receipt => router.currentRoute.value.name === 'Simulation'
+  && router.currentRoute.value.params.simulationId === receipt.simulationId
+
+const publishSimulationHandoff = owner => {
+  if (owner !== simulationOwner) return
+  simulationHandoff.value = {
+    owner, receipt: owner.receipt, opening: owner.opening,
+    disabled: !owner.active || owner.opening,
+    open: owner.open, accept: owner.accept,
+  }
+}
+
+const openAcceptedSimulation = async (owner, receipt) => {
+  if (!ownsSimulation(owner) || owner.receipt !== receipt || owner.opening || atAcceptedSimulation(receipt)) return
+  const attempt = {}
+  owner.attempt = attempt
+  owner.opening = true
+  publishSimulationHandoff(owner)
+  try {
+    // Vue Router may resolve a failure, reject, or follow a redirect. Only the
+    // actual destination establishes success; retired continuations are inert.
+    await router.push({ name: 'Simulation', params: { simulationId: receipt.simulationId } })
+  } catch {
+    // The route recovery hook renews actions if this attempt retired its owner.
+    // Navigation failure is separate from the already successful create POST.
+  } finally {
+    if (ownsSimulation(owner) && owner.attempt === attempt) {
+      owner.opening = false
+      publishSimulationHandoff(owner)
+    }
+  }
+}
+
+const selectSimulationOwner = (projectId, graphId = null, receipt = null) => {
+  if (simulationOwner) simulationOwner.active = false
+  const owner = { projectId, graphId, receipt, active: true, opening: false, attempt: null }
+  simulationOwner = owner
+  simulationDeparture = null
+  owner.open = () => { if (owner.receipt) return openAcceptedSimulation(owner, owner.receipt) }
+  owner.accept = accepted => {
+    if (!ownsSimulation(owner) || owner.receipt || accepted.owner !== owner
+      || accepted.projectId !== owner.projectId || accepted.graphId !== owner.graphId
+      || projectData.value?.project_id !== owner.projectId || projectData.value?.graph_id !== owner.graphId
+      || !validSimulationId(accepted.simulationId) || !['parallel', 'twitter', 'reddit'].includes(accepted.platform)) return
+    owner.receipt = Object.freeze({ projectId: owner.projectId, graphId: owner.graphId,
+      simulationId: accepted.simulationId, platform: accepted.platform })
+    publishSimulationHandoff(owner)
+    void openAcceptedSimulation(owner, owner.receipt)
+  }
+  publishSimulationHandoff(owner)
+}
+
+const suspendSimulation = to => {
+  if (!simulationOwner) return
+  simulationDeparture = { owner: simulationOwner, to: to.redirectedFrom || to }
+  simulationOwner.active = false
+  publishSimulationHandoff(simulationOwner)
+}
+
+const recoverSimulation = (to, committed) => {
+  const departure = simulationDeparture
+  if (!departure || departure.owner !== simulationOwner
+    || (departure.to !== (to.redirectedFrom || to) && !(committed && router.currentRoute.value === to))) return
+  const owner = simulationOwner
+  if (route.name === 'Process' && currentProjectId.value === owner.projectId) {
+    selectSimulationOwner(owner.projectId, owner.graphId, owner.receipt)
+  } else if (committed) {
+    owner.active = false
+    simulationOwner = null
+    simulationDeparture = null
+    simulationHandoff.value = {}
+  }
+}
+
+// Null/error recovery metadata cannot erase an acknowledged simulation. Valid
+// replacement graph data does retire it, including graph A → B → A.
+watch(projectData, project => {
+  if (!simulationOwner || route.name !== 'Process' || currentProjectId.value !== simulationOwner.projectId
+    || project?.project_id !== simulationOwner.projectId
+    || !validSimulationId(project.graph_id) || project.graph_id === simulationOwner.graphId) return
+  const active = simulationOwner.active
+  const departure = simulationDeparture
+  selectSimulationOwner(project.project_id, project.graph_id)
+  if (!active) {
+    simulationOwner.active = false
+    simulationDeparture = departure ? { owner: simulationOwner, to: departure.to } : null
+    publishSimulationHandoff(simulationOwner)
+  }
+}, { flush: 'sync' })
 
 // Every route selection has its own identity, including A → B → A.
 let viewContext = null
@@ -472,12 +572,14 @@ const refreshGraph = () => {
 }
 
 const selectProject = (id, recovering = false) => {
+  const retained = recovering && simulationOwner?.projectId === id ? simulationOwner : null
   const adoption = !recovering && projectAdoption?.context === viewContext && viewContext?.active
     && projectAdoption.id === id ? projectAdoption : null
   retireView()
   projectAdoption = null
   viewContext = null
   resetProjectState()
+  selectSimulationOwner(id, retained?.graphId, retained?.receipt)
   if (!id || route.name !== 'Process') return
   const context = { id, active: true, controller: new AbortController(), graphRequest: null, task: null, pollTimer: null }
   viewContext = context
@@ -502,8 +604,18 @@ const selectProject = (id, recovering = false) => {
 watch(currentProjectId, id => selectProject(id), { immediate: true, flush: 'sync' })
 
 onBeforeRouteLeave(to => {
+  suspendSimulation(to)
   if (viewContext) viewContext.departure = to.redirectedFrom || to
   retireView()
+})
+// Reused Process updates retire only simulation actions. Graph observation
+// still follows its existing route-selection lifecycle. Global beforeEach runs
+// before this hook, so a fresh click before this hook is new navigation intent.
+onBeforeRouteUpdate(to => {
+  suspendSimulation(to)
+  // If an earlier leave already retired observation, this newer update now
+  // owns its recovery too. Do not retire otherwise-current graph observation.
+  if (viewContext && !viewContext.active) viewContext.departure = to.redirectedFrom || to
 })
 // A leave may abort, redirect, throw, or lose to a newer navigation. Recover
 // only its exact failed attempt or a route that has actually become current.
@@ -518,12 +630,18 @@ const recoverSelectedProject = (to, committed = false) => {
 }
 const removeRouteRecovery = router.afterEach((to, _from, failure) => {
   recoverSelectedProject(to, !failure)
+  recoverSimulation(to, !failure)
 })
 const removeRouteErrorRecovery = router.onError((err, to) => {
   recoverSelectedProject(to)
+  recoverSimulation(to, false)
   console.error(err)
 })
 onBeforeUnmount(() => {
+  if (simulationOwner) simulationOwner.active = false
+  simulationOwner = null
+  simulationDeparture = null
+  simulationHandoff.value = {}
   removeRouteRecovery()
   removeRouteErrorRecovery()
   retireView()

@@ -63,7 +63,11 @@ export function build({ locale = 'en', api: overrides = {} } = {}) {
   }
   const step1 = component('Step1GraphBuild.vue'), step3 = component('Step3Simulation.vue')
   components['../views/MainView.vue'] = { props: ['projectId'], setup(props) {
-    return () => Vue.h(step1, { ...sourceProps, projectData: sourceProps.projectData ?? { project_id: props.projectId, graph_id: 'G' + props.projectId }, systemLogs: [] })
+    const owner = {}
+    return () => Vue.h(step1, { ...sourceProps, projectData: sourceProps.projectData ?? { project_id: props.projectId, graph_id: 'G' + props.projectId }, systemLogs: [],
+      simulationHandoff: { owner }, onSimulationCreated: accepted => {
+        if (accepted.owner === owner) return router.push({ name: 'Simulation', params: { simulationId: accepted.simulationId } })
+      } })
   } }
   components['../views/SimulationRunView.vue'] = { props: ['simulationId'], setup(props) {
     return () => Vue.h(step3, { simulationId: props.simulationId, maxRounds: 7, minutesPerRound: 30, systemLogs: [], onAddLog: message => logs.push(message) })

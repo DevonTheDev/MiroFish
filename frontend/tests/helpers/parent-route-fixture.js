@@ -161,9 +161,18 @@ export function build(options = {}) {
     app.config.globalProperties.$t = key => key
     app.config.globalProperties.$tm = () => []
   }
+  // Observe the real navigation promise without replacing guard execution or
+  // settlement semantics. Tests can await the exact automatic opening attempt.
+  const pushes = []
+  const push = router.push
+  router.push = (...args) => {
+    const promise = push(...args)
+    pushes.push({ args, promise })
+    return promise
+  }
   const host = { type: 'root', children: [], parent: null }
   let mounted = false
-  return { requests, instances, router, intervals, host, warnings, downloads, revoked, objectUrls,
+  return { requests, instances, router, intervals, host, warnings, downloads, revoked, objectUrls, pushes,
     state: path => instances[path].at(-1).setupState,
     child: path => instances[path].at(-1),
     graph: () => instances.graph.at(-1),
