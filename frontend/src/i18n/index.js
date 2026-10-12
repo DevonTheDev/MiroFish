@@ -14,7 +14,15 @@ for (const path in localeFiles) {
   }
 }
 
-const savedLocale = localStorage.getItem('locale') || 'zh'
+let savedLocale = 'zh'
+try {
+  const storedLocale = localStorage.getItem('locale')
+  if (availableLocales.some(locale => locale.key === storedLocale)) {
+    savedLocale = storedLocale
+  }
+} catch {
+  // Browser storage is optional; keep the existing default when unavailable.
+}
 
 const i18n = createI18n({
   legacy: false,
@@ -22,6 +30,10 @@ const i18n = createI18n({
   fallbackLocale: 'zh',
   messages
 })
+
+if (typeof document !== 'undefined') {
+  document.documentElement.lang = savedLocale
+}
 
 export { availableLocales }
 export default i18n

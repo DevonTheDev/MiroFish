@@ -38,7 +38,11 @@ const toggleDropdown = () => {
 
 const switchLocale = (key) => {
   locale.value = key
-  localStorage.setItem('locale', key)
+  try {
+    localStorage.setItem('locale', key)
+  } catch {
+    // The current session can still switch when preference storage is blocked.
+  }
   document.documentElement.lang = key
   open.value = false
 }
