@@ -2289,11 +2289,30 @@ The matching count is separate from the original source and question counts.
 It covers only accepted text and previews: a missing or truncated field may hide
 a match, and searching does not retrieve additional rows. Changing the text starts
 at the first matching page; switching view or question keeps it. New observations,
-refreshes and route changes clear it. No query is stored or sent to the backend.
+refreshes and route changes clear it. Search does not persist the query in
+application storage or send it to the backend.
+
+**Download matching rows TXT** is a separate action shown while a search is active
+(including whitespace-only text) or in question mode. It saves every matching
+record across all client pages of the currently loaded observation/window, using
+the selected exact question when applicable. Zero matches remain downloadable;
+question mode with no complete saved question produces an explicit empty excerpt.
+It does not retrieve other windows, search missing content or count unique
+respondents. The report records the exact captured query and question, original
+source/window facts, accepted/eligible/matched/exported counts and each exported
+record's position in the accepted observation. Question keys identify only local
+groups in that observation. Local-file excerpts record the accepted filename as
+unverified provenance, even when a different replacement file is being previewed.
+
+Matching TXT preserves literal saved records, distinct null/empty/raw/truncated
+states and visible control/backslash/lone-surrogate escapes. Its complete escaped
+UTF-8 output, including query and provenance, must fit within 8 MiB; excess output
+fails as a whole. It is a readable excerpt with fixed English labels, not an
+import format. Use observation JSON to reopen or compare the complete evidence.
 
 Filter edits, refresh, route changes and replacement observations reset the view
-to **All records**. **Download observation JSON**
-exports every accepted record and its source/limit metadata, including records
+to **All records**. **Download observation JSON** and **Download observation TXT**
+export every accepted record and its source/limit metadata, including records
 outside the selected question, local text search and visible page, without reading storage
 again. Editing a filter, changing
 the selected simulation or refreshing retires the previous result and download.
@@ -2383,11 +2402,14 @@ context; missing or truncated prompts remain in All records. Paging and question
 selection do not fetch further records. **Find saved text** also searches the
 opened observation locally. A pending, failed or cancelled file preview keeps
 the prior accepted file and its search; opening a new file or clearing the
-accepted file resets the search. Download exports the entire accepted
-observation, including rows outside the visible page, selected question or search.
-The parsed content is preserved; JSON whitespace can change on download.
+accepted file resets the search. Observation JSON/TXT downloads export the entire
+accepted observation, including rows outside the visible page, selected question
+or search. The separate matching TXT action exports only the captured matching
+rows across all client pages, with the query, selected question and accepted-file
+provenance described above. Parsed observation content is preserved; JSON
+whitespace can change on download.
 
-Only the existing bare version-1 observation format is accepted. The input is
+Only the existing bare version-1 and version-2 observation formats are accepted. The input is
 bounded to 8 MiB, with strict UTF-8 decoding, duplicate-key rejection and bounded
 JSON nesting and value counts. Its declared selection, record identity/order,
 source counts, warning codes, coverage and response limits must agree. Unknown

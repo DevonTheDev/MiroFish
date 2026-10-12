@@ -199,14 +199,23 @@ Select one platform to enable **Older saved replies**. Each click reads a separa
 bounded window below the last returned physical row, preserving the exact agent
 filter. **Refresh newest** starts again at the latest replies. A changed database
 requires this explicit refresh; windows are never silently combined or replaced.
-Downloads record the window boundary and source revision and can be reopened or
-compared locally alongside older version-1 files.
+Observation JSON downloads record the window boundary and source revision and
+can be reopened or compared locally alongside older version-1 files.
 
 Use **Find saved text** to search accepted prompts, replies and raw previews
 across all local pages of the current records or selected-question view. Matching
 is literal and case-insensitive. Source coverage and warnings stay visible;
-missing or truncated text may hide a match. Search is local, and downloads still
-contain the complete accepted observation.
+missing or truncated text may hide a match. Search is local, and **Download
+observation JSON/TXT** still includes the complete accepted observation.
+
+Use the separate **Download matching rows TXT** action during a search or in
+question mode to save all matching rows across every client page of the loaded
+observation/window. It also saves an explicit empty result when nothing matches.
+The excerpt records the captured query, exact selected question, source/window
+facts and counts, plus the accepted filename for an opened local file. It does
+not fetch other windows or establish that the saved source contains no other
+matches. Matching TXT uses the same 8 MiB escaped UTF-8 limit as observation TXT;
+observation JSON remains the format for reopening or comparing saved evidence.
 
 Choose **Open interview file** to reopen an earlier observation JSON in the
 browser. Review the file's saved context before opening its records and exact

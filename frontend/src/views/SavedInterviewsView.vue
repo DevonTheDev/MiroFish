@@ -64,6 +64,10 @@
           <div class="actions"><button type="button" data-testid="interviews-search-clear" :disabled="presentation.query === ''" :onClick="clearSearchHandler(result, presentation)">{{ t('savedInterviews.clearSearch') }}</button></div>
           <p id="interviews-search-count" data-testid="interviews-search-count" role="status" aria-live="polite" aria-atomic="true">{{ t('savedInterviews.searchCount', { count: matchingRows.length, total: visibleRows.length }) }}</p>
           <p v-if="presentation.query !== '' && !matchingRows.length" data-testid="interviews-search-empty" class="notice">{{ t('savedInterviews.searchEmpty') }}</p>
+          <template v-if="presentation.query !== '' || presentation.mode === 'questions'">
+            <div class="actions"><button type="button" data-testid="interviews-download-matches-text" aria-describedby="interviews-matches-scope" :onClick="downloadHandler(result, 'matches-txt', presentation)">{{ t('savedInterviews.downloadMatchesText') }}</button></div>
+            <p id="interviews-matches-scope" data-testid="interviews-matches-scope" class="note">{{ t('savedInterviews.matchesScope', { count: matchingRows.length }) }}</p>
+          </template>
         </section>
         <section v-for="platform in platforms" :key="platform" class="source-section" :data-testid="`interviews-source-${platform}`" :aria-label="t(`comparison.platforms.${platform}`)">
           <div class="panel source-summary"><h2>{{ t(`comparison.platforms.${platform}`) }}</h2><p>{{ t(`${fileMode ? 'savedInterviewFiles' : 'savedInterviews'}.statuses.${result.sources[platform].status}`) }} · {{ t(`${fileMode ? 'savedInterviewFiles' : 'savedInterviews'}.coverage.${result.sources[platform].coverage}`) }}</p><p>{{ t(fileMode ? 'savedInterviewFiles.returned' : 'savedInterviews.returned', { count: result.sources[platform].returned_count }) }}</p>
@@ -94,7 +98,7 @@ import { getSavedInterviews } from '../api/savedInterviews'
 import { buildSavedInterviewQuestions } from '../utils/savedInterviewQuestions'
 import { filterSavedInterviewRecords } from '../utils/savedInterviewSearch.js'
 import { validSavedInterviewObservation as validResponse, validSavedInterviewDecimal as validDecimal, savedInterviewExactKeys as exactKeys } from '../utils/savedInterviewObservation.js'
-import { formatSavedInterviewText } from '../utils/savedInterviewText.js'
+import { formatSavedInterviewText, formatSavedInterviewMatchesText } from '../utils/savedInterviewText.js'
 import { SAVED_INTERVIEW_FILE_MAX_BYTES, readSavedInterviewFile } from '../utils/savedInterviewFiles.js'
 
 const { t } = useI18n(), route = useRoute(), router = useRouter()
@@ -352,28 +356,38 @@ function pageHandler(saved, view, index) {
     if (current() && Number.isInteger(index) && index >= 0 && index < pageCount.value) presentation.value = { ...view, page: index }
   }
 }
-function downloadHandler(saved, format = 'json') {
-  const ownsSaved = observationOwner(saved)
+function downloadHandler(saved, format = 'json', view = null) {
+  const matching = format === 'matches-txt'
+  const ownsSaved = matching ? viewOwner(saved, view) : observationOwner(saved)
+  if (!ownsSaved()) return () => {}
+  const capture = matching ? {
+    mode: view.mode, query: view.query,
+    questionKey: view.mode === 'questions' ? selectedQuestion.value?.key ?? null : null,
+    questionPrompt: view.mode === 'questions' ? selectedQuestion.value?.prompt ?? null : null,
+    origin: fileMode.value ? 'accepted local file' : 'accepted saved-storage observation',
+    filename: fileMode.value ? acceptedFile.value.filename : null,
+    eligibleRows: [...visibleRows.value], matchingRows: [...matchingRows.value],
+  } : null
   return () => {
     if (!ownsSaved()) return
     const generation = downloadGeneration + 1
     revokeDownload()
     // Revoking the previous URL may start a newer attempt synchronously.
     if (downloadGeneration !== generation || !ownsSaved()) return
-    const attempt = { url: null, anchor: null }
+    const attempt = { url: null, anchor: null, view: matching ? view : null }
     activeDownload = attempt; error.value = ''
     const current = () => activeDownload === attempt && downloadGeneration === generation && ownsSaved()
     let finished = false
     try {
-      const body = format === 'txt' ? formatSavedInterviewText(saved) : JSON.stringify(saved, null, 2) + '\n'
+      const body = matching ? formatSavedInterviewMatchesText(saved, capture) : format === 'txt' ? formatSavedInterviewText(saved) : JSON.stringify(saved, null, 2) + '\n'
       if (!current()) return
-      const blob = new Blob([body], { type: format === 'txt' ? 'text/plain;charset=utf-8' : 'application/json;charset=utf-8' })
+      const blob = new Blob([body], { type: format !== 'json' ? 'text/plain;charset=utf-8' : 'application/json;charset=utf-8' })
       if (!current()) return
       attempt.url = URL.createObjectURL(blob)
       if (!current()) return
       attempt.anchor = document.createElement('a')
       if (!current()) return
-      attempt.anchor.href = attempt.url; attempt.anchor.download = `${saved.simulation_id}-saved-interviews.${format}`
+      attempt.anchor.href = attempt.url; attempt.anchor.download = matching ? `${saved.simulation_id}-saved-interview-matches.txt` : `${saved.simulation_id}-saved-interviews.${format}`
       document.body.appendChild(attempt.anchor)
       if (!current()) return
       attempt.anchor.click()
@@ -388,6 +402,10 @@ function downloadHandler(saved, format = 'json') {
     }
   }
 }
+
+watch(presentation, view => {
+  if (activeDownload?.view && activeDownload.view !== view) revokeDownload()
+}, { flush: 'sync' })
 
 watch(() => route.fullPath, () => {
   const navigation = pendingNavigation; pendingNavigation = null
