@@ -10,7 +10,7 @@ import * as content from '../../src/utils/content.js'
 // Compile the unchanged interaction script AND template. Real Vue reactivity,
 // model bindings, survey controls and answer rendering run in a custom host.
 // Browser geometry/document listeners and unrelated report reads are seams.
-export function buildSurvey(api, { locale = 'en' } = {}) {
+export function buildSurvey(api, { locale = 'en', props: initialProps = {} } = {}) {
   const warnings = [], emitted = [], listeners = new Set()
   let instance
   const previousDocument = globalThis.document
@@ -64,8 +64,9 @@ export function buildSurvey(api, { locale = 'en' } = {}) {
     parentNode: target => target.parent, nextSibling: target => target.parent?.children[target.parent.children.indexOf(target) + 1] ?? null,
     patchProp: (target, key, _previous, value) => { target.props[key] = value },
   })
-  const app = renderer.createApp(component, { reportId: 'report_fixture', simulationId: 'sim_single',
-    onAddLog: message => emitted.push(message) })
+  const props = Vue.reactive({ reportId: 'report_fixture', simulationId: 'sim_single', ...initialProps })
+  const app = renderer.createApp({ render: () => Vue.h(component, { ...props,
+    onAddLog: message => emitted.push(message) }) })
   const messages = Object.fromEntries(['en', 'zh'].map(language => [language,
     JSON.parse(readFileSync(new URL('../../../locales/' + language + '.json', import.meta.url), 'utf8'))]))
   const i18n = I18n.createI18n({ legacy: false, locale, fallbackLocale: 'en', messages })
@@ -77,7 +78,7 @@ export function buildSurvey(api, { locale = 'en' } = {}) {
     const visit = target => [...(predicate(target) ? [target] : []), ...target.children.flatMap(visit)]
     return visit(host)
   }
-  return { host, warnings, emitted, listeners, all, i18n, find: predicate => all(predicate)[0],
+  return { host, props, warnings, emitted, listeners, all, i18n, find: predicate => all(predicate)[0],
     state: () => instance.setupState, close: () => {
       app.unmount()
       if (previousDocument === undefined) delete globalThis.document

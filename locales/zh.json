@@ -293,6 +293,10 @@
   "step5": {
     "interactiveTools": "Interactive Tools",
     "agentsAvailable": "{count} agents available",
+    "profilesLoading": "正在加载个体档案…",
+    "profilesLoadFailed": "无法加载个体档案",
+    "retryProfiles": "重试加载档案",
+    "profilesEmpty": "暂无可用的个体档案",
     "chatWithReportAgent": "与Report Agent对话",
     "chatWithAgent": "与世界中任意个体对话",
     "selectChatTarget": "选择对话对象",

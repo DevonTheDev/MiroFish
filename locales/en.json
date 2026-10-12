@@ -293,6 +293,10 @@
   "step5": {
     "interactiveTools": "Interactive Tools",
     "agentsAvailable": "{count} agents available",
+    "profilesLoading": "Loading agent profiles…",
+    "profilesLoadFailed": "Could not load agent profiles",
+    "retryProfiles": "Retry loading profiles",
+    "profilesEmpty": "No agent profiles available",
     "chatWithReportAgent": "Chat with Report Agent",
     "chatWithAgent": "Chat with any individual in the world",
     "selectChatTarget": "Select chat target",

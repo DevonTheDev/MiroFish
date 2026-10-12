@@ -86,7 +86,16 @@
           </svg>
           <div class="action-bar-text">
             <span class="action-bar-title">{{ $t('step5.interactiveTools') }}</span>
-            <span class="action-bar-subtitle mono">{{ $t('step5.agentsAvailable', { count: profiles.length }) }}</span>
+            <span v-if="profileLoadState === 'ready'" class="action-bar-subtitle mono">{{ $t('step5.agentsAvailable', { count: profiles.length }) }}</span>
+            <span v-else-if="profileLoadState === 'loading' || profileLoadState === 'empty'"
+              class="action-bar-subtitle profile-catalogue-status" role="status" aria-live="polite"
+            >{{ $t(profileLoadState === 'loading' ? 'step5.profilesLoading' : 'step5.profilesEmpty') }}</span>
+            <span v-else-if="profileLoadState === 'error'" class="profile-catalogue-error" role="alert"
+            >{{ $t('step5.profilesLoadFailed') }}</span>
+            <!-- Pass the captured callback; a cached @click wrapper would read a newer retry. -->
+            <button v-if="profileRetry" type="button" class="profiles-retry-btn"
+              :disabled="profileLoadState === 'loading'" v-on="{ click: profileRetry }"
+            >{{ $t('step5.retryProfiles') }}</button>
           </div>
         </div>
           <div class="action-bar-tabs">
@@ -464,6 +473,9 @@ const generatedSections = ref({})
 const collapsedSections = ref(new Set())
 const currentSectionIndex = ref(null)
 const profiles = ref([])
+const profileLoadState = ref('idle')
+const profileRetry = ref(null)
+let profileRequest = null
 
 // Every async result belongs to one report/simulation context, even on A→B→A.
 let viewGeneration = 0
@@ -830,17 +842,44 @@ const loadAgentLogs = async (context) => {
 }
 
 const loadProfiles = async (context) => {
-  if (!context.simulationId || !isCurrentView(context)) return
-  
+  if (!context.reportId || !context.simulationId || !isCurrentView(context) || profileRequest
+    || profileLoadState.value === 'ready' || profileLoadState.value === 'empty') return
+  const request = {}
+  profileRequest = request
+  profileLoadState.value = 'loading'
+
   try {
     const res = await getSimulationProfilesRealtime(context.simulationId, undefined, context.signal)
-    if (!isCurrentView(context)) return
-    if (res.success && res.data) {
-      profiles.value = res.data.profiles || []
-      addLog(t('log.loadedProfiles', { count: profiles.value.length }))
+    if (!isCurrentView(context) || profileRequest !== request) return
+    if (res?.success !== true || !res.data || typeof res.data !== 'object'
+      || Array.isArray(res.data) || !Array.isArray(res.data.profiles)) {
+      throw new Error(res?.error || 'Invalid agent profiles response')
     }
+    // Indices identify chat/survey targets. Reject an invalid row without
+    // filtering, sorting or replacing sparse but valid profile records.
+    for (const profile of res.data.profiles) {
+      if (!profile || typeof profile !== 'object' || Array.isArray(profile)) {
+        throw new Error('Invalid agent profile record')
+      }
+    }
+    profiles.value = res.data.profiles
+    profileLoadState.value = profiles.value.length ? 'ready' : 'empty'
+    profileRetry.value = null
+    addLog(t('log.loadedProfiles', { count: profiles.value.length }))
   } catch (err) {
-    if (isCurrentView(context)) addLog(t('log.loadProfilesFailed', { error: err.message }))
+    if (!isCurrentView(context) || profileRequest !== request) return
+    profileLoadState.value = 'error'
+    // The rendered handler belongs to this failure and view generation.
+    // A retained old button cannot retry a newer view or an accepted catalogue.
+    const retry = () => {
+      if (profileRetry.value === retry && profileLoadState.value === 'error' && isCurrentView(context)) {
+        loadProfiles(context)
+      }
+    }
+    profileRetry.value = retry
+    addLog(t('log.loadProfilesFailed', { error: err?.message || String(err) }))
+  } finally {
+    if (isCurrentView(context) && profileRequest === request) profileRequest = null
   }
 }
 
@@ -873,6 +912,9 @@ watch(() => [props.reportId, props.simulationId], () => {
   collapsedSections.value = new Set()
   currentSectionIndex.value = null
   profiles.value = []
+  profileLoadState.value = 'idle'
+  profileRetry.value = null
+  profileRequest = null
   activeTab.value = 'chat'
   chatTarget.value = 'report_agent'
   showAgentDropdown.value = false
@@ -1287,6 +1329,28 @@ watch(() => [props.reportId, props.simulationId], () => {
 
 .action-bar-subtitle.mono {
   font-family: 'JetBrains Mono', 'SF Mono', monospace;
+}
+
+.profile-catalogue-error {
+  color: #B91C1C;
+  font-size: 12px;
+}
+
+.profiles-retry-btn {
+  align-self: flex-start;
+  padding: 4px 8px;
+  border: 1px solid #D1D5DB;
+  border-radius: 4px;
+  background: #FFFFFF;
+  color: #374151;
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.profiles-retry-btn:disabled {
+  opacity: 0.6;
+  cursor: wait;
 }
 
 .action-bar-tabs {
