@@ -58,6 +58,8 @@
           :projectData="projectData"
           :graphData="graphData"
           :systemLogs="systemLogs"
+          :reportHandoff="reportHandoff"
+          @report-run-started="selectReportRun"
           @go-back="handleGoBack"
           @next-step="handleNextStep"
           @add-log="addLog"
@@ -69,7 +71,7 @@
 </template>
 
 <script setup>
-import { ref, computed, watch, onBeforeUnmount } from 'vue'
+import { ref, shallowRef, computed, watch, onBeforeUnmount } from 'vue'
 import { useRoute, useRouter, onBeforeRouteLeave } from 'vue-router'
 import GraphPanel from '../components/GraphPanel.vue'
 import Step3Simulation from '../components/Step3Simulation.vue'
@@ -126,6 +128,133 @@ const statusText = computed(() => {
 })
 
 const isSimulating = computed(() => currentStatus.value === 'processing')
+
+// An accepted report belongs to this mounted run selection, independently of
+// metadata observation. Aborted navigation retires viewContext, not this receipt.
+const reportHandoff = shallowRef({})
+let reportOwner = null
+let reportDeparture = null
+const reportNavigationOrder = new WeakMap()
+let latestReportNavigation = 0
+const validReportId = id => typeof id === 'string' && id.trim().length > 0
+const ownsReport = owner => !!owner && owner === reportOwner && owner.active
+  && route.name === 'SimulationRun' && owner.id === currentSimulationId.value
+  && owner.id === route.params.simulationId
+const atAcceptedReport = receipt => router.currentRoute.value.name === 'Report'
+  && router.currentRoute.value.params.reportId === receipt.reportId
+const canOpenReport = (owner, actions) => ownsReport(owner)
+  && owner.actions === actions && actions.active && !owner.attempt
+
+const publishReportHandoff = owner => {
+  if (owner !== reportOwner) return
+  reportHandoff.value = {
+    owner, actions: owner.actions, receipt: owner.receipt,
+    opening: !!owner.attempt, failed: owner.failed,
+    disabled: !owner.active || !owner.actions.active || !!owner.attempt,
+    accept: owner.accept, open: owner.actions.open,
+  }
+}
+
+const openAcceptedReport = async (owner, actions) => {
+  if (!canOpenReport(owner, actions) || !owner.receipt || atAcceptedReport(owner.receipt)) return
+  const receipt = owner.receipt
+  const attempt = { root: null }
+  owner.attempt = attempt
+  owner.failed = false
+  publishReportHandoff(owner)
+  // This inert, exact-root guard outlives unmount only while this push is
+  // pending. Vue Router can follow an old guard redirect before cancellation.
+  const removeRetiredRedirect = router.beforeEach(to => {
+    if (attempt.root && to.redirectedFrom === attempt.root
+      && (!ownsReport(owner) || reportNavigationOrder.get(attempt.root) < latestReportNavigation)) return false
+  })
+  try {
+    // A fulfilled router promise can still mean abort, cancellation or redirect.
+    // Only the committed Report route establishes that this receipt was opened.
+    await router.push({ name: 'Report', params: { reportId: receipt.reportId } })
+  } catch {
+    // Acceptance succeeded. Keep navigation errors separate from generation.
+  } finally {
+    removeRetiredRedirect()
+    if (ownsReport(owner) && owner.actions === actions && actions.active && owner.attempt === attempt) {
+      owner.attempt = null
+      owner.failed = !atAcceptedReport(receipt)
+      publishReportHandoff(owner)
+    }
+  }
+}
+
+const renewReportActions = owner => {
+  if (owner.actions) owner.actions.active = false
+  const actions = { active: true }
+  actions.open = () => openAcceptedReport(owner, actions)
+  owner.actions = actions
+}
+
+const retireReportRun = () => {
+  if (reportOwner) {
+    reportOwner.active = false
+    reportOwner.actions.active = false
+  }
+  reportOwner = null
+  reportDeparture = null
+  reportHandoff.value = {}
+}
+
+const selectReportRun = ({ simulationId, run }) => {
+  if (!run || simulationId !== currentSimulationId.value || simulationId !== route.params.simulationId
+    || route.name !== 'SimulationRun') return
+  retireReportRun()
+  const owner = { id: simulationId, run, active: true, receipt: null, attempt: null, failed: false }
+  reportOwner = owner
+  renewReportActions(owner)
+  owner.accept = accepted => {
+    if (!ownsReport(owner) || owner.receipt || accepted.owner !== owner || accepted.run !== owner.run
+      || accepted.simulationId !== owner.id || !validReportId(accepted.reportId)) return
+    owner.receipt = Object.freeze({ simulationId: owner.id, reportId: accepted.reportId })
+    publishReportHandoff(owner)
+    // A response during a pending departure retains its receipt without taking
+    // over navigation. Only a later explicit action opens it after recovery.
+    if (owner.actions === accepted.actions && owner.actions.active) void openAcceptedReport(owner, owner.actions)
+  }
+  publishReportHandoff(owner)
+}
+
+const suspendReport = to => {
+  const owner = reportOwner
+  if (!owner) return
+  const root = to.redirectedFrom || to
+  // A held older guard can redirect after newer navigation began. Vue Router
+  // re-enters guards with that old root; it must not become the newest owner.
+  if (reportNavigationOrder.has(root) && reportNavigationOrder.get(root) < latestReportNavigation) return false
+  if (!reportNavigationOrder.has(root)) reportNavigationOrder.set(root, ++latestReportNavigation)
+  if (owner.attempt && !owner.attempt.root && to.name === 'Report' && to.params.reportId === owner.receipt.reportId) {
+    owner.attempt.root = root
+  }
+  reportDeparture = { owner, to: root }
+  owner.actions.active = false
+  publishReportHandoff(owner)
+}
+
+const recoverReport = (to, committed = false) => {
+  const departure = reportDeparture
+  if (!departure || departure.owner !== reportOwner
+    || (departure.to !== (to.redirectedFrom || to) && !(committed && router.currentRoute.value === to))) return
+  const owner = reportOwner
+  if (ownsReport(owner)) {
+    if (owner.attempt) owner.failed = !atAcceptedReport(owner.receipt)
+    owner.attempt = null
+    reportDeparture = null
+    renewReportActions(owner)
+    publishReportHandoff(owner)
+  } else if (committed) retireReportRun()
+}
+
+// beforeEach observes query-only navigation before component update guards and
+// before later beforeEach/beforeResolve guards can hold the newest departure.
+const removeReportDeparture = router.beforeEach(to => suspendReport(to))
+const removeReportRecovery = router.afterEach((to, _from, failure) => recoverReport(to, !failure))
+const removeReportErrorRecovery = router.onError((_error, to) => recoverReport(to))
 
 // A new identity owns every selection, including A → B → A in a reused view.
 let viewContext = null
@@ -220,8 +349,7 @@ const handleGoBack = async () => {
 }
 
 const handleNextStep = () => {
-  // Step3Simulation 组件会直接处理报告生成和路由跳转
-  // 这个方法仅作为备用
+  // Report opening is owned by the accepted handoff above.
   addLog(t('log.enterStep4'))
 }
 
@@ -318,6 +446,7 @@ const stopGraphRefresh = (context = viewContext) => {
 }
 
 watch(currentSimulationId, id => {
+  retireReportRun()
   retireView()
   viewContext = null
   projectData.value = null
@@ -342,8 +471,17 @@ watch(isSimulating, running => {
   else stopGraphRefresh()
 })
 
-onBeforeRouteLeave(() => retireView())
-onBeforeUnmount(() => retireView())
+onBeforeRouteLeave(to => {
+  if (suspendReport(to) === false) return false
+  retireView()
+})
+onBeforeUnmount(() => {
+  retireReportRun()
+  removeReportDeparture()
+  removeReportRecovery()
+  removeReportErrorRecovery()
+  retireView()
+})
 </script>
 
 <style scoped>

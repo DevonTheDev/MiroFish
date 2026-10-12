@@ -70,7 +70,22 @@ export function build({ locale = 'en', api: overrides = {} } = {}) {
       } })
   } }
   components['../views/SimulationRunView.vue'] = { props: ['simulationId'], setup(props) {
-    return () => Vue.h(step3, { simulationId: props.simulationId, maxRounds: 7, minutesPerRound: 30, systemLogs: [], onAddLog: message => logs.push(message) })
+    // Controlled parent boundary only; actual recovery and router ownership are
+    // exercised by report-navigation-recovery through the real run parent.
+    const reportHandoff = Vue.shallowRef({})
+    const selectReportRun = ({ simulationId, run }) => {
+      if (reportHandoff.value.owner) reportHandoff.value.owner.active = false
+      const owner = { active: true }, actions = { active: true }
+      reportHandoff.value = { owner, actions, accept: accepted => {
+        if (owner.active && accepted.owner === owner && accepted.run === run
+          && accepted.simulationId === simulationId && simulationId === props.simulationId) {
+          return router.push({ name: 'Report', params: { reportId: accepted.reportId } })
+        }
+      } }
+    }
+    Vue.onBeforeUnmount(() => { if (reportHandoff.value.owner) reportHandoff.value.owner.active = false })
+    return () => Vue.h(step3, { simulationId: props.simulationId, maxRounds: 7, minutesPerRound: 30, systemLogs: [],
+      reportHandoff: reportHandoff.value, onReportRunStarted: selectReportRun, onAddLog: message => logs.push(message) })
   } }
   const router = evaluate(readFileSync(new URL('../../src/router/index.js', import.meta.url), 'utf8'))
   const node = (type, text = '') => ({ type, text, props: {}, children: [], parent: null, style: {},

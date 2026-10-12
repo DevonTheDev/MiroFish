@@ -94,7 +94,7 @@
       <div class="action-controls">
         <button 
           class="action-btn primary"
-          :disabled="phase !== 2 || isGeneratingReport"
+          :disabled="phase !== 2 || isGeneratingReport || !!reportHandoff?.receipt || !!reportHandoff?.disabled"
           data-testid="generate-report"
           :onClick="runActions.report"
         >
@@ -103,6 +103,17 @@
           <span v-if="!isGeneratingReport" class="arrow-icon">→</span>
         </button>
       </div>
+    </div>
+
+    <div v-if="reportHandoff?.receipt" class="report-recovery">
+      <p data-testid="report-opening-status" :role="reportHandoff.failed ? 'alert' : 'status'" aria-live="polite">
+        {{ $t(reportHandoff.opening ? 'step3.openingReport' : reportHandoff.failed ? 'step3.reportOpeningFailed' : 'step3.reportAccepted') }}
+      </p>
+      <span data-testid="accepted-report-id" class="accepted-report-id">{{ reportHandoff.receipt.reportId }}</span>
+      <button class="action-btn primary" data-testid="open-accepted-report"
+        :disabled="reportHandoff.disabled" :onClick="reportHandoff.open">
+        {{ $t(reportHandoff.opening ? 'step3.openingReport' : 'step3.openReport') }}
+      </button>
     </div>
 
     <!-- Main Content: Selected Platform Timeline -->
@@ -289,7 +300,6 @@
 
 <script setup>
 import { ref, computed, watch, onMounted, onUnmounted, nextTick } from 'vue'
-import { useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import {
   startSimulation,
@@ -310,12 +320,11 @@ const props = defineProps({
   },
   projectData: Object,
   graphData: Object,
-  systemLogs: Array
+  systemLogs: Array,
+  reportHandoff: Object
 })
 
-const emit = defineEmits(['go-back', 'next-step', 'add-log', 'update-status'])
-
-const router = useRouter()
+const emit = defineEmits(['go-back', 'next-step', 'add-log', 'update-status', 'report-run-started'])
 
 // State
 const isGeneratingReport = ref(false)
@@ -446,11 +455,13 @@ const doStartSimulation = () => {
   retireRun()
   const context = {
     id: props.simulationId, platform: null,
+    reportRun: Object.freeze({}),
     requests: {}, started: false, terminal: null, detailRevision: 0,
     actions: new AbortController(), polling: new AbortController(),
   }
   runContext = context
-  runActions.value = { report: () => { if (ownsView(context)) return handleNextStep() } }
+  emit('report-run-started', { simulationId: context.id, run: context.reportRun })
+  bindReportAction(context)
   return singleFlight(context, 'start', async () => {
     isStarting.value = true
     startError.value = null
@@ -700,9 +711,15 @@ const formatActionTime = (timestamp) => {
   }
 }
 
-const handleNextStep = () => {
-  const context = runContext
-  if (!ownsView(context) || phase.value !== 2) return Promise.resolve()
+const bindReportAction = context => {
+  const handoff = props.reportHandoff
+  runActions.value = { report: () => handleNextStep(context, handoff) }
+}
+
+const handleNextStep = (context = runContext, handoff = props.reportHandoff) => {
+  if (!ownsView(context) || phase.value !== 2 || context.reportAccepted || !handoff?.accept
+    || handoff.owner !== props.reportHandoff?.owner || handoff.actions !== props.reportHandoff?.actions
+    || !handoff.owner.active || !handoff.actions.active || props.reportHandoff.receipt) return Promise.resolve()
   if (isGeneratingReport.value || context.requests.report) {
     addLog(t('log.reportRequestSent'))
     return context.requests.report
@@ -718,12 +735,12 @@ const handleNextStep = () => {
       }, context.actions.signal)
       if (!ownsView(context)) return
     
-      if (res.success && res.data) {
+      if (res.success && typeof res.data?.report_id === 'string' && res.data.report_id.trim().length > 0) {
         const reportId = res.data.report_id
+        context.reportAccepted = true
+        isGeneratingReport.value = false
         addLog(t('log.reportGenTaskStarted', { reportId }))
-      
-        // 跳转到报告页面
-        router.push({ name: 'Report', params: { reportId } })
+        handoff.accept({ owner: handoff.owner, actions: handoff.actions, run: context.reportRun, simulationId: context.id, reportId })
       } else {
         addLog(t('log.reportGenFailed', { error: res.error || t('common.unknownError') }))
         isGeneratingReport.value = false
@@ -735,6 +752,10 @@ const handleNextStep = () => {
     }
   })
 }
+
+watch(() => props.reportHandoff?.actions, () => {
+  if (ownsView(runContext)) bindReportAction(runContext)
+}, { flush: 'sync' })
 
 // Scroll log to bottom
 const logContent = ref(null)
@@ -765,6 +786,21 @@ onUnmounted(() => {
 </script>
 
 <style scoped>
+.report-recovery {
+  flex-shrink: 0;
+  padding: 12px 24px;
+  border-bottom: 1px solid #EAEAEA;
+  background: #FAFAFA;
+  font-size: 12px;
+}
+
+.report-recovery p { margin: 0 0 6px; }
+.accepted-report-id {
+  display: block;
+  overflow-wrap: anywhere;
+  margin-bottom: 8px;
+}
+
 .platform-notice {
   align-self: center;
   max-width: 38rem;

@@ -8,7 +8,7 @@ import { parse, compileScript } from '@vue/compiler-sfc'
 import { computed, effectScope, nextTick, reactive, ref, watch } from 'vue'
 
 // Complete actual setup script, real Vue effects; only HTTP, lifecycle hooks,
-// router navigation and timers are boundaries. No template/browser claim.
+// accepted-report handoff and timers are boundaries. No template/browser claim.
 const source = await readFile(new URL('../src/components/Step3Simulation.vue', import.meta.url), 'utf8')
 const { descriptor } = parse(source)
 const parsed = compileScript(descriptor, { id: 'simulation-polling-tests' })
@@ -21,7 +21,7 @@ const settle = async () => { for (let i = 0; i < 10; i++) { await Promise.resolv
 const names = ['startSimulation', 'stopSimulation', 'getRunStatus', 'getRunStatusDetail', 'generateReport']
 function harness(simulationId = 'A', maxRounds) {
   const props = reactive({ simulationId, maxRounds, minutesPerRound: 30, projectData: {}, graphData: {}, systemLogs: [] })
-  const scope = effectScope(), intervals = new Map(), mounted = [], unmounted = [], emitted = [], warnings = [], routes = []
+  const scope = effectScope(), intervals = new Map(), mounted = [], unmounted = [], emitted = [], warnings = [], handoffs = []
   const requests = Object.fromEntries(names.map(name => [name, []]))
   const api = Object.fromEntries(names.map(name => [name, (...args) => new Promise((resolve, reject) => {
     // Abort is deliberately ignored here to test stale continuation ownership.
@@ -30,14 +30,21 @@ function harness(simulationId = 'A', maxRounds) {
   let nextTimer = 1
   const state = scope.run(() => vm.runInNewContext(setup, {
     ref, computed, watch, nextTick, AbortController, ...api,
-    defineProps: () => props, defineEmits: () => (...args) => emitted.push(args),
-    useI18n: () => ({ t: key => key }), useRouter: () => ({ push: route => routes.push(route) }),
+    defineProps: () => props, defineEmits: () => (...args) => {
+      emitted.push(args)
+      if (args[0] === 'report-run-started') {
+        if (props.reportHandoff) props.reportHandoff.owner.active = false
+        props.reportHandoff = { owner: { active: true }, actions: { active: true },
+          accept: accepted => handoffs.push(accepted) }
+      }
+    },
+    useI18n: () => ({ t: key => key }),
     onMounted: callback => mounted.push(callback), onUnmounted: callback => unmounted.push(callback),
     setInterval: (callback, ms) => { const id = nextTimer++; intervals.set(id, { callback, ms }); return id },
     clearInterval: id => intervals.delete(id), console: { warn: (...args) => warnings.push(args) },
   }))
   let closed = false
-  return { state, props, requests, intervals, emitted, warnings, routes,
+  return { state, props, requests, intervals, emitted, warnings, handoffs,
     mount: async () => { mounted.forEach(callback => callback()); await settle() },
     tick: async ms => { [...intervals.values()].filter(timer => timer.ms === ms).forEach(timer => timer.callback()); await settle() },
     close: () => { if (!closed) { closed = true; unmounted.forEach(callback => callback()); scope.stop() } },
@@ -252,11 +259,11 @@ for (const rejected of [false, true]) test(`retired report ${rejected ? 'failure
   if (rejected) h.requests.generateReport[0].reject(new Error('retired report'))
   else h.requests.generateReport[0].resolve({ success: true, data: { report_id: 'old-report' } })
   await settle()
-  assert.equal(h.routes.length, 0); assert.equal(JSON.stringify(h.emitted), before)
+  assert.equal(h.handoffs.length, 0); assert.equal(JSON.stringify(h.emitted), before)
   assert.equal(h.requests.generateReport[0].signal?.aborted, true)
 })
 
-test('completed view submits one report with original payload and navigates normally', async () => {
+test('completed view submits one report with original payload and hands acceptance to its owner', async () => {
   const h = harness(); try {
     await running(h); await completed(h)
     h.state.handleNextStep(); h.state.handleNextStep(); await settle()
@@ -265,8 +272,12 @@ test('completed view submits one report with original payload and navigates norm
     assert.equal(request.args[0].simulation_id, 'A'); assert.equal(request.args[0].force_regenerate, true)
     assert.equal(request.signal?.aborted, false, 'completed polling must not retire view actions')
     request.resolve({ success: true, data: { report_id: 'current-report' } }); await settle()
-    assert.equal(h.routes.length, 1); assert.equal(h.routes[0].name, 'Report')
-    assert.equal(h.routes[0].params.reportId, 'current-report')
+    assert.equal(h.handoffs.length, 1)
+    assert.equal(h.handoffs[0].reportId, 'current-report')
+    assert.equal(h.handoffs[0].simulationId, 'A')
+    assert.equal(h.handoffs[0].owner, h.props.reportHandoff.owner)
+    assert.equal(h.handoffs[0].actions, h.props.reportHandoff.actions)
+    assert.equal(h.handoffs[0].run, h.emitted.find(([name]) => name === 'report-run-started')[1].run)
     h.state.handleNextStep(); await settle(); assert.equal(h.requests.generateReport.length, 1)
   } finally { h.close() }
 })
@@ -278,16 +289,16 @@ test('report failure releases only the current request for explicit retry', asyn
     assert.equal(h.state.isGeneratingReport.value, false)
     h.state.handleNextStep(); await settle(); assert.equal(h.requests.generateReport.length, 2)
     h.requests.generateReport[1].resolve({ success: false, error: 'reported failure' }); await settle()
-    assert.equal(h.state.isGeneratingReport.value, false); assert.equal(h.routes.length, 0)
+    assert.equal(h.state.isGeneratingReport.value, false); assert.equal(h.handoffs.length, 0)
   } finally { h.close() }
 })
 
-test('explicit retry after a lost report response opens the server-owned active job', async () => {
+test('explicit retry after a lost report response hands off the server-owned active job', async () => {
   const h = harness(); try {
     await running(h); await completed(h); h.state.handleNextStep(); await settle()
     h.requests.generateReport[0].reject(new Error('response lost after server admission')); await settle()
     assert.equal(h.state.isGeneratingReport.value, false)
-    assert.equal(h.routes.length, 0)
+    assert.equal(h.handoffs.length, 0)
     h.state.handleNextStep(); h.state.handleNextStep(); await settle()
     assert.equal(h.requests.generateReport.length, 2)
     assert.equal(h.requests.generateReport[1].args[0].force_regenerate, true)
@@ -295,9 +306,9 @@ test('explicit retry after a lost report response opens the server-owned active 
       simulation_id: 'A', report_id: 'original-active-report', task_id: 'original-task',
       status: 'generating', already_generated: false, already_running: true
     } }); await settle()
-    assert.equal(h.routes.length, 1)
-    assert.equal(h.routes[0].name, 'Report')
-    assert.equal(h.routes[0].params.reportId, 'original-active-report')
+    assert.equal(h.handoffs.length, 1)
+    assert.equal(h.handoffs[0].reportId, 'original-active-report')
+    assert.equal(h.handoffs[0].simulationId, 'A')
     h.state.handleNextStep(); await settle()
     assert.equal(h.requests.generateReport.length, 2)
   } finally { h.close() }
@@ -311,7 +322,7 @@ test('explicit same-ID restart retires old report and detail ownership', async (
     assert.equal(h.requests.startSimulation.length, 2)
     assert.equal(h.state.isGeneratingReport.value, false)
     oldReport.resolve({ success: true, data: { report_id: 'previous-run' } }); await settle()
-    assert.equal(h.routes.length, 0); assert.equal(h.state.phase.value, 0)
+    assert.equal(h.handoffs.length, 0); assert.equal(h.state.phase.value, 0)
     assert.equal(oldReport.signal?.aborted, true)
     if (h.requests.getRunStatusDetail[0]) h.requests.getRunStatusDetail[0].resolve(detail(action('previous-run')))
     await settle(); assert.equal(h.state.allActions.value.length, 0)
@@ -390,9 +401,9 @@ for (const rejected of [false, true]) test(`old A report ${rejected ? 'error' : 
     else old.resolve({ success: true, data: { report_id: 'old-A' } })
     await settle()
     assert.equal(h.state.isGeneratingReport.value, true)
-    assert.equal(h.routes.length, 0); assert.equal(JSON.stringify(h.emitted), before)
+    assert.equal(h.handoffs.length, 0); assert.equal(JSON.stringify(h.emitted), before)
     h.requests.generateReport[1].resolve({ success: true, data: { report_id: 'new-A' } }); await settle()
-    assert.equal(h.routes[0].params.reportId, 'new-A')
+    assert.equal(h.handoffs[0].reportId, 'new-A')
   } finally { h.close() }
 })
 
