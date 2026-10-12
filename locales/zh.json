@@ -330,6 +330,8 @@
     "closeHint": "关闭提示"
   },
   "history": {
+    "openDetails": "打开模拟详情：{title}（{id}）",
+    "detailsLabel": "模拟详情：{title}（{id}）",
     "title": "推演记录",
     "graphBuild": "图谱构建",
     "envSetup": "环境搭建",

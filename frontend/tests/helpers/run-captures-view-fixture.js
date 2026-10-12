@@ -30,8 +30,16 @@ export function deferredApi() {
 // The real Vue renderer mounts compiled scripts AND templates through the real
 // application router. This host is deliberately not browser/visual validation.
 function renderer() {
-  const node = (type, text = '') => ({ type, text, props: {}, children: [], parent: null,
-    listeners: {}, addEventListener(event, callback) { this.listeners[event] = callback } })
+  const node = (type, text = '') => Vue.markRaw({ type, text, props: {}, children: [], parent: null,
+    listeners: {}, addEventListener(event, callback) { this.listeners[event] = callback },
+    // Match real host element identity/connection for Home pointer route tests.
+    get isConnected() {
+      let current = this
+      while (current.parent) current = current.parent
+      return current.type === 'root' || current.type === 'body'
+    },
+    contains(target) { for (let current = target; current; current = current.parent) if (current === this) return true; return false },
+  })
   const root = node('root'), body = node('body')
   const remove = child => {
     if (child.parent) child.parent.children.splice(child.parent.children.indexOf(child), 1)

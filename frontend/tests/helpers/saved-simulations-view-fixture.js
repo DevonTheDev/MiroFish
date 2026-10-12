@@ -32,9 +32,46 @@ export function deferredApi() {
 
 // The real Vue renderer mounts compiled scripts AND templates through the real
 // application router. This host is deliberately not browser/visual validation.
-function renderer() {
-  const node = (type, text = '') => ({ type, text, props: {}, children: [], parent: null,
-    listeners: {}, addEventListener(event, callback) { this.listeners[event] = callback } })
+function renderer(focusContract = false) {
+  const focusCalls = [], listenerLog = [], leaves = [], documentListeners = new Map()
+  const document = {
+    activeElement: null,
+    addEventListener(type, callback) {
+      if (!documentListeners.has(type)) documentListeners.set(type, new Set())
+      documentListeners.get(type).add(callback); listenerLog.push({ action: 'add', type, callback })
+    },
+    removeEventListener(type, callback) {
+      documentListeners.get(type)?.delete(callback); listenerLog.push({ action: 'remove', type, callback })
+    },
+    dispatchFocus(target) {
+      document.activeElement = target
+      for (const callback of [...(documentListeners.get('focusin') ?? [])]) callback({ target })
+    },
+  }
+  const node = (type, text = '') => {
+    const value = { type, text, props: {}, children: [], parent: null,
+      listeners: {}, addEventListener(event, callback) { this.listeners[event] = callback },
+      get isConnected() {
+        let current = this
+        while (current.parent) current = current.parent
+        return current.type === 'root' || current.type === 'body'
+      },
+      contains(target) { for (let current = target; current; current = current.parent) if (current === this) return true; return false },
+    }
+    if (focusContract) Object.assign(value, {
+      ownerDocument: document,
+      focus(options) { focusCalls.push({ target: this, options }); document.dispatchFocus(this) },
+      querySelectorAll(selector) {
+        assert.equal(selector, 'button:not([disabled])', 'synthetic contract only models enabled dialog buttons')
+        const found = []
+        const visit = target => { if (target.type === 'button' && !target.props.disabled) found.push(target); target.children.forEach(visit) }
+        this.children.forEach(visit); return found
+      },
+    })
+    // Real host elements are opaque to Vue reactivity. Keep synthetic template
+    // refs identical to the raw event targets rather than proxying their tree.
+    return Vue.markRaw(value)
+  }
   const root = node('root'), body = node('body')
   const remove = child => {
     if (child.parent) child.parent.children.splice(child.parent.children.indexOf(child), 1)
@@ -60,10 +97,16 @@ function renderer() {
     patchProp: (target, key, _previous, value) => { target.props[key] = value },
     querySelector: selector => selector === 'body' ? body : null,
   })
-  return { host, root, body }
+  return { host, root, body, focus: focusContract ? { document, focusCalls, listenerLog, leaves,
+    listenerCount: () => documentListeners.get('focusin')?.size ?? 0,
+    completeLeave(index = 0) {
+      const leave = leaves[index]; assert.ok(leave, 'missing explicitly modeled leave completion')
+      leave.callback?.(leave.element)
+    },
+  } : null }
 }
 
-export async function mountSavedSimulations({ api, initialPath = '/simulations', locale = 'en', cacheHandlers = false, keepAlive = false, downloadHooks = {} } = {}) {
+export async function mountSavedSimulations({ api, initialPath = '/simulations', locale = 'en', cacheHandlers = false, keepAlive = false, downloadHooks = {}, focusContract = false } = {}) {
   const requests = api ? null : deferredApi()
   api ??= requests.api
   const warnings = []
@@ -92,9 +135,20 @@ export async function mountSavedSimulations({ api, initialPath = '/simulations',
     fetch(...args) { networkCalls.push(args); throw Error('Forbidden network call') },
     localStorage: { setItem(...args) { storageWrites.push(args); throw Error('Forbidden storage write') } },
   }
-  const { host, root, body } = renderer()
+  const { host, root, body, focus } = renderer(focusContract)
   const stub = { render: () => Vue.h('fixture-boundary') }
-  const passThrough = { inheritAttrs: false, setup: (_props, { slots }) => () => slots.default?.() }
+  const passThrough = { inheritAttrs: false, setup: (_props, { slots, attrs }) => {
+    let previous = null
+    return () => {
+      const children = slots.default?.()
+      if (focus) {
+        const current = children?.find(child => child.type !== Vue.Comment) ?? null
+        if (previous && !current) focus.leaves.push({ element: previous.el, callback: attrs.onAfterLeave })
+        previous = current
+      }
+      return children
+    }
+  } }
   const modules = {
     vue: { ...Vue, Transition: passThrough },
     'vue-router': { ...Router, createWebHistory: Router.createMemoryHistory },
@@ -151,7 +205,7 @@ export async function mountSavedSimulations({ api, initialPath = '/simulations',
   const find = predicate => all(predicate)[0]
   const byId = id => find(node => node.props['data-testid'] === id)
   const text = (target = root) => (target.type === '#comment' ? '' : target.text ?? '') + (target.children ?? []).map(text).join(' ')
-  return { root, body, router, i18n, warnings, requests, flush, waitFor, all, find, byId, text,
+  return { root, body, router, i18n, warnings, requests, flush, waitFor, all, find, byId, text, focus,
     downloads, anchors, revoked, blobs, networkCalls, storageWrites, downloadHooks,
     async click(id) {
       const target = byId(id); assert.ok(target, `missing clickable control ${id}`)

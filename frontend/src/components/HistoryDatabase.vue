@@ -14,7 +14,7 @@
     <div class="section-header">
       <div class="section-line"></div>
       <span class="section-title">{{ $t('history.title') }}</span>
-      <button type="button" class="history-compare-btn" data-testid="history-simulations" @click="router.push({ name: 'SavedSimulations' })">{{ $t('savedSimulations.browseAll') }}</button>
+      <button ref="browseAllButton" type="button" class="history-compare-btn" data-testid="history-simulations" @click="router.push({ name: 'SavedSimulations' })">{{ $t('savedSimulations.browseAll') }}</button>
       <button type="button" class="history-compare-btn" data-testid="history-compare" @click="goToComparison()">{{ $t('comparison.historyEntry') }}</button>
       <button type="button" class="history-compare-btn" data-testid="history-captures" @click="goToCaptures()">{{ $t('runCaptures.historyEntry') }}</button>
       <button type="button" class="history-compare-btn" data-testid="history-interview-files-link" @click="router.push({ name: 'SavedInterviewFiles' })">{{ $t('savedInterviewFiles.entry') }}</button>
@@ -27,11 +27,18 @@
         v-for="(project, index) in projects" 
         :key="project.simulation_id"
         class="project-card"
+        role="button"
+        tabindex="0"
+        aria-haspopup="dialog"
+        :aria-label="$t('history.openDetails', { title: getSimulationTitle(project.simulation_requirement), id: project.simulation_id })"
         :class="{ expanded: isExpanded, hovering: hoveringCard === index }"
         :style="getCardStyle(index)"
         @mouseenter="hoveringCard = index"
         @mouseleave="hoveringCard = null"
-        @click="navigateToProject(project)"
+        @click="navigateToProject(project, $event)"
+        @keydown="handleCardKeydown(project, $event)"
+        @keyup="handleCardKeyup(project, $event)"
+        @blur="clearCardPress()"
       >
         <!-- 卡片头部：simulation_id 和 功能可用状态 -->
         <div class="card-header">
@@ -116,9 +123,11 @@
 
     <!-- 历史回放详情弹窗 -->
     <Teleport to="body">
-      <Transition name="modal">
-        <div v-if="selectedProject" class="modal-overlay" @click.self="closeModal">
-          <div class="modal-content">
+      <Transition name="modal" @after-leave="finishModalLeave">
+        <div v-if="selectedProject" ref="modalOverlay" class="modal-overlay" @click.self="closeModal()">
+          <div ref="dialogContent" class="modal-content" role="dialog" aria-modal="true" tabindex="-1"
+            :aria-label="$t('history.detailsLabel', { title: getSimulationTitle(selectedProject.simulation_requirement), id: selectedProject.simulation_id })"
+            @keydown="handleDialogKeydown">
             <!-- 弹窗头部 -->
             <div class="modal-header">
               <div class="modal-title-section">
@@ -128,7 +137,7 @@
                 </span>
                 <span class="modal-create-time">{{ formatDate(selectedProject.created_at) }} {{ formatTime(selectedProject.created_at) }}</span>
               </div>
-              <button class="modal-close" @click="closeModal">×</button>
+              <button type="button" class="modal-close" :aria-label="$t('common.close')" @click="closeModal()">×</button>
             </div>
 
             <!-- 弹窗内容 -->
@@ -162,6 +171,7 @@
             <!-- 导航按钮 -->
             <div class="modal-actions">
               <button 
+                type="button"
                 class="modal-btn btn-project" 
                 @click="goToProject"
                 :disabled="!selectedProject.project_id"
@@ -171,6 +181,7 @@
                 <span class="btn-text">{{ $t('history.step1Button') }}</span>
               </button>
               <button 
+                type="button"
                 class="modal-btn btn-simulation" 
                 @click="goToSimulation"
               >
@@ -179,6 +190,7 @@
                 <span class="btn-text">{{ $t('history.step2Button') }}</span>
               </button>
               <button 
+                type="button"
                 class="modal-btn btn-report" 
                 @click="goToReport"
                 :disabled="!selectedProject.report_id"
@@ -206,7 +218,7 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted, onUnmounted, onActivated, watch, nextTick } from 'vue'
+import { ref, computed, onMounted, onUnmounted, onActivated, onDeactivated, watch, nextTick } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { getSimulationHistory } from '../api/simulation'
@@ -224,6 +236,15 @@ const isExpanded = ref(false)
 const hoveringCard = ref(null)
 const historyContainer = ref(null)
 const selectedProject = ref(null)  // 当前选中的项目（用于弹窗）
+const modalOverlay = ref(null)
+const dialogContent = ref(null)
+const browseAllButton = ref(null)
+let activePage = true
+let focusEpoch = 0
+let armedCard = null
+let dialogOpener = null
+let pendingFocusReturn = null
+let removeFocusListener = null
 let observer = null
 let isAnimating = false  // 动画锁，防止闪烁
 let expandDebounceTimer = null  // 防抖定时器
@@ -416,34 +437,142 @@ const truncateFilename = (filename, maxLength) => {
   return truncatedName + ext
 }
 
-// 打开项目详情弹窗
-const navigateToProject = (simulation) => {
+const clearCardPress = () => { armedCard = null }
+const isActiveHistory = (epoch = focusEpoch) => activePage && route.path === '/' &&
+  epoch === focusEpoch && historyContainer.value?.isConnected
+const isHistoryCard = card => card?.isConnected && historyContainer.value?.contains(card)
+const ownsDialog = epoch => isActiveHistory(epoch) && selectedProject.value &&
+  modalOverlay.value?.isConnected && dialogContent.value?.isConnected &&
+  modalOverlay.value.contains(dialogContent.value)
+const releaseFocusListener = () => {
+  removeFocusListener?.()
+  removeFocusListener = null
+}
+const hasActivationModifier = event => event.ctrlKey || event.altKey || event.metaKey ||
+  event.shiftKey || event.isComposing
+
+// Selection is synchronous; focus belongs only to this rendered Home session.
+const navigateToProject = (simulation, event) => {
+  clearCardPress()
+  if (!isActiveHistory() || selectedProject.value) return
+  const card = event?.currentTarget
+  if (card && !isHistoryCard(card)) return
+  dialogOpener = card || null
+  pendingFocusReturn = null
+  releaseFocusListener()
+  const epoch = ++focusEpoch
   selectedProject.value = simulation
+  nextTick(() => {
+    if (!ownsDialog(epoch)) return
+    const content = dialogContent.value
+    const overlay = modalOverlay.value
+    const document = content.ownerDocument
+    if (!document) return
+    const containFocus = event => {
+      if (!ownsDialog(epoch) || dialogContent.value !== content || modalOverlay.value !== overlay) return
+      if (!content.contains(event.target)) content.focus({ preventScroll: true })
+    }
+    document.addEventListener('focusin', containFocus)
+    removeFocusListener = () => document.removeEventListener('focusin', containFocus)
+    content.focus({ preventScroll: true })
+  })
 }
 
-// 关闭弹窗
-const closeModal = () => {
+const handleCardKeydown = (simulation, event) => {
+  if (armedCard && armedCard !== event.currentTarget) clearCardPress()
+  if (!isActiveHistory() || event.target !== event.currentTarget || !isHistoryCard(event.currentTarget)) return
+  if (hasActivationModifier(event)) { clearCardPress(); return }
+  if (event.key === 'Enter') {
+    event.preventDefault()
+    event.stopPropagation()
+    if (!event.repeat) navigateToProject(simulation, event)
+  } else if (event.key === ' ') {
+    event.preventDefault()
+    if (!event.repeat) armedCard = event.currentTarget
+  }
+}
+
+const handleCardKeyup = (simulation, event) => {
+  const matchesPress = armedCard === event.currentTarget
+  if (event.key === ' ' || hasActivationModifier(event) || !matchesPress) clearCardPress()
+  if (!isActiveHistory() || event.target !== event.currentTarget || !isHistoryCard(event.currentTarget) ||
+    hasActivationModifier(event)) return
+  if (event.key === ' ' && matchesPress) navigateToProject(simulation, event)
+}
+
+const handleDialogKeydown = event => {
+  const content = dialogContent.value
+  if (!ownsDialog(focusEpoch) || event.currentTarget !== content || !content.contains(event.target)) return
+  if (event.key === 'Escape') {
+    if (event.repeat || hasActivationModifier(event)) return
+    event.preventDefault()
+    event.stopPropagation()
+    closeModal()
+  } else if (event.key === 'Tab' && !event.ctrlKey && !event.altKey && !event.metaKey && !event.isComposing) {
+    const buttons = Array.from(content.querySelectorAll('button:not([disabled])'))
+    const active = content.ownerDocument.activeElement
+    let destination = null
+    if (!buttons.length) destination = content
+    else if (active === content) destination = event.shiftKey ? buttons.at(-1) : buttons[0]
+    else if (event.shiftKey && active === buttons[0]) destination = buttons.at(-1)
+    else if (!event.shiftKey && active === buttons.at(-1)) destination = buttons[0]
+    if (destination) {
+      event.preventDefault()
+      event.stopPropagation()
+      destination.focus({ preventScroll: true })
+    }
+  }
+}
+
+const closeModal = ({ restoreFocus = true } = {}) => {
+  // A second user dismissal during the leave transition keeps its one return.
+  if (!selectedProject.value && restoreFocus) { clearCardPress(); return }
+  const overlay = modalOverlay.value
+  const canReturn = restoreFocus && selectedProject.value && ownsDialog(focusEpoch)
+  const opener = dialogOpener
+  const epoch = ++focusEpoch
+  releaseFocusListener()
+  clearCardPress()
+  dialogOpener = null
+  pendingFocusReturn = canReturn ? { epoch, overlay, opener } : null
+  selectedProject.value = null
+}
+
+const finishModalLeave = overlay => {
+  const pending = pendingFocusReturn
+  if (!pending || pending.overlay !== overlay || !isActiveHistory(pending.epoch) || selectedProject.value) return
+  pendingFocusReturn = null
+  const destination = isHistoryCard(pending.opener) ? pending.opener : browseAllButton.value
+  if (destination?.isConnected && historyContainer.value.contains(destination)) destination.focus?.({ preventScroll: true })
+}
+
+const retireDialogFocus = () => {
+  ++focusEpoch
+  releaseFocusListener()
+  clearCardPress()
+  dialogOpener = null
+  pendingFocusReturn = null
   selectedProject.value = null
 }
 
 const goToSavedInterviews = (simulationId) => {
   router.push({ name: 'SavedInterviews', params: { simulationId } })
-  closeModal()
+  closeModal({ restoreFocus: false })
 }
 
 const goToSavedActivity = (simulationId) => {
   router.push({ name: 'SavedActivity', params: { simulationId } })
-  closeModal()
+  closeModal({ restoreFocus: false })
 }
 
 const goToCaptures = (simulationId) => {
   router.push({ name: 'RunCaptures', query: simulationId ? { simulation: simulationId } : {} })
-  closeModal()
+  closeModal({ restoreFocus: false })
 }
 
 const goToComparison = (simulationId) => {
   router.push({ name: 'SimulationComparison', query: simulationId ? { left: simulationId } : {} })
-  closeModal()
+  closeModal({ restoreFocus: false })
 }
 
 // 导航到图谱构建页面（Project）
@@ -453,7 +582,7 @@ const goToProject = () => {
       name: 'Process',
       params: { projectId: selectedProject.value.project_id }
     })
-    closeModal()
+    closeModal({ restoreFocus: false })
   }
 }
 
@@ -464,7 +593,7 @@ const goToSimulation = () => {
       name: 'Simulation',
       params: { simulationId: selectedProject.value.simulation_id }
     })
-    closeModal()
+    closeModal({ restoreFocus: false })
   }
 }
 
@@ -475,7 +604,7 @@ const goToReport = () => {
       name: 'Report',
       params: { reportId: selectedProject.value.report_id }
     })
-    closeModal()
+    closeModal({ restoreFocus: false })
   }
 }
 
@@ -587,7 +716,11 @@ const initObserver = () => {
 // 监听路由变化，当返回首页时重新加载数据
 watch(() => route.path, (newPath) => {
   if (newPath === '/') {
+    activePage = true
     loadHistory()
+  } else {
+    activePage = false
+    retireDialogFocus()
   }
 })
 
@@ -604,10 +737,18 @@ onMounted(async () => {
 
 // 如果使用 keep-alive，在组件激活时重新加载数据
 onActivated(() => {
+  activePage = route.path === '/'
   loadHistory()
 })
 
+onDeactivated(() => {
+  activePage = false
+  retireDialogFocus()
+})
+
 onUnmounted(() => {
+  activePage = false
+  retireDialogFocus()
   // 清理 Intersection Observer
   if (observer) {
     observer.disconnect()
@@ -624,7 +765,12 @@ onUnmounted(() => {
 <style scoped>
 .history-compare-btn { cursor: pointer; border: 1px solid #cbd1d9; border-radius: 6px; padding: 9px 14px; background: #fff; color: #354153; font: inherit; font-size: 12px; white-space: nowrap; }
 .history-compare-btn:hover { background: #f1f4f8; }
-.history-compare-btn:focus-visible { outline: 3px solid #5b8bc9; outline-offset: 3px; }
+.history-compare-btn:focus-visible,
+.project-card:focus-visible,
+.modal-content:focus-visible,
+.modal-close:focus-visible,
+.modal-btn:focus-visible { outline: 3px solid #5b8bc9; outline-offset: 3px; }
+.project-card:focus-visible { z-index: 1000 !important; }
 .history-error { position: relative; display: flex; flex-direction: column; align-items: center; gap: 14px; padding: 24px 20px; color: #a23f3f; text-align: center; }
 .history-error p { margin: 0; }
 .history-error .history-compare-btn { min-height: 44px; white-space: normal; }

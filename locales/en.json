@@ -331,6 +331,8 @@
   },
   "history": {
     "title": "Simulation History",
+    "openDetails": "Open simulation details: {title} ({id})",
+    "detailsLabel": "Simulation details: {title} ({id})",
     "graphBuild": "Graph Build",
     "envSetup": "Env Setup",
     "analysisReport": "Analysis Report",
