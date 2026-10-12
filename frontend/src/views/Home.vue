@@ -257,6 +257,7 @@ const triggerFileInput = () => {
 // 处理文件选择
 const handleFileSelect = (event) => {
   const selectedFiles = Array.from(event.target.files)
+  event.target.value = ''
   addFiles(selectedFiles)
 }
 
