@@ -1,4 +1,11 @@
 {
+  "notFound": {
+    "title": "Page not found",
+    "description": "This address does not match a MiroFish page. Choose where to go next.",
+    "navigation": "Recovery navigation",
+    "home": "Home",
+    "savedSimulations": "Saved simulations"
+  },
   "common": {
     "confirm": "Confirm",
     "cancel": "Cancel",

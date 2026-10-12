@@ -22,6 +22,7 @@ import SavedReportFilesView from '../views/SavedReportFilesView.vue'
 
 import RunCapturesView from '../views/RunCapturesView.vue'
 import RunCaptureFilesView from '../views/RunCaptureFilesView.vue'
+import NotFoundView from '../views/NotFoundView.vue'
 
 const routes = [
   { path: '/simulations', name: 'SavedSimulations', component: SavedSimulationsView },
@@ -135,6 +136,11 @@ const routes = [
     name: 'Interaction',
     component: InteractionView,
     props: true
+  },
+  {
+    path: '/:pathMatch(.*)*',
+    name: 'NotFound',
+    component: NotFoundView
   }
 ]
 

@@ -149,14 +149,17 @@ export function build(options = {}) {
     components['../components/Step1GraphBuild.vue'] = component(graphChild)
     components['../views/MainView.vue'] = component(graphView)
   }
+  for (const path of options.extraViews ?? []) components['../' + path] = component(path)
   const router = evaluate(readFileSync(new URL('../../src/router/index.js', import.meta.url), 'utf8'))
   const appSource = readFileSync(new URL('../../src/App.vue', import.meta.url), 'utf8')
   assert.equal(parse(appSource).descriptor.template.content.trim(), '<router-view />')
   const app = renderer().createApp({ render: () => Vue.h(Router.RouterView) })
   app.use(router)
+  let i18n
   if (options.locale) {
     const messages = Object.fromEntries(['en', 'zh'].map(locale => [locale, JSON.parse(readFileSync(new URL('../../../locales/' + locale + '.json', import.meta.url), 'utf8'))]))
-    app.use(createI18n({ legacy: false, locale: options.locale, fallbackLocale: 'en', messages }))
+    i18n = createI18n({ legacy: false, locale: options.locale, fallbackLocale: 'en', messages })
+    app.use(i18n)
   } else {
     app.config.globalProperties.$t = key => key
     app.config.globalProperties.$tm = () => []
@@ -172,7 +175,7 @@ export function build(options = {}) {
   }
   const host = { type: 'root', children: [], parent: null }
   let mounted = false
-  return { requests, instances, router, intervals, host, warnings, downloads, revoked, objectUrls, pushes,
+  return { requests, instances, router, i18n, intervals, host, warnings, downloads, revoked, objectUrls, pushes,
     state: path => instances[path].at(-1).setupState,
     child: path => instances[path].at(-1),
     graph: () => instances.graph.at(-1),

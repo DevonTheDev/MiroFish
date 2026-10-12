@@ -10,6 +10,19 @@ PC's RAM, disk, compute and electricity. Small-model accuracy is not equivalent
 to a large hosted model. Generated simulations are exploratory, not validated
 forecasts or a basis for consequential decisions.
 
+## Recover from an unknown page address
+
+Once the frontend is loaded, an address that does not match a page shows
+**Page not found**, with explicit **Home** and **Saved simulations** links. The
+page keeps the current URL, does not display its path or query details, and makes
+no API or model requests. Choose a link to navigate; Back and Forward retain the
+normal navigation history. The message and links follow the selected language.
+
+This only handles unknown frontend routes. A valid project, simulation or report
+route whose backend record is missing keeps its existing page behavior. Serving
+the app for a directly opened URL still depends on the host; this change does
+not configure server fallback or change HTTP responses.
+
 ## Switch projects during graph building
 
 Step 1 follows the selected project route. Switching projects clears the previous

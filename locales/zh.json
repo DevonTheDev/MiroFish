@@ -1,4 +1,11 @@
 {
+  "notFound": {
+    "title": "未找到页面",
+    "description": "此地址不对应任何 MiroFish 页面。请选择接下来要前往的页面。",
+    "navigation": "页面导航",
+    "home": "首页",
+    "savedSimulations": "已保存的模拟"
+  },
   "common": {
     "confirm": "确认",
     "cancel": "取消",
