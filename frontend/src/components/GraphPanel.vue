@@ -14,6 +14,30 @@
       </div>
     </div>
     
+    <section v-if="graphData" class="node-search" :aria-label="$t('graph.searchNodes')">
+      <label class="node-search-label">
+        <span>{{ $t('graph.searchNodes') }}</span>
+        <input class="node-search-input" type="search" maxlength="200"
+          :value="nodeQuery" @input="updateNodeQuery" :placeholder="$t('graph.searchPlaceholder')" />
+      </label>
+      <p class="node-search-status" role="status" aria-live="polite">
+        {{ searchSnapshot.emptyGraph ? $t('graph.searchEmptyGraph')
+          : searchSnapshot.blank ? $t('graph.searchPrompt')
+          : !searchSnapshot.results.length ? $t('graph.searchNoMatches') : '' }}
+      </p>
+      <ul v-if="searchSnapshot.results.length" class="node-search-results">
+        <li v-for="result in searchSnapshot.results" :key="result.index">
+          <button type="button" class="node-search-result" :disabled="!searchReady" @click="activateSearchResult(result)">
+            <span class="node-search-name">{{ result.raw.name }}</span>
+            <span class="node-search-type">{{ result.raw.labels?.find(label => label !== 'Entity') || 'Entity' }}</span>
+            <span v-if="result.raw.uuid" class="node-search-uuid">{{ result.raw.uuid }}</span>
+            <span class="node-search-position">{{ $t('graph.searchPosition', { position: result.index + 1 }) }}</span>
+          </button>
+        </li>
+      </ul>
+      <p v-if="searchSnapshot.hasMore" class="node-search-more">{{ $t('graph.searchNarrowQuery') }}</p>
+    </section>
+
     <div class="graph-container" ref="graphContainer">
       <!-- 图谱可视化 -->
       <div v-if="graphData" class="graph-view">
@@ -255,6 +279,44 @@ const showEdgeLabels = ref(true) // 默认显示边标签
 const expandedSelfLoops = ref(new Set()) // 展开的自环项
 const showSimulationFinishedHint = ref(false) // 模拟结束后的提示
 const wasSimulating = ref(false) // 追踪之前是否在模拟中
+const nodeQuery = ref('')
+const searchReady = ref(false)
+const graphRevision = ref(0)
+let activateRenderedNode = null
+let detailOpenedBySearch = false
+let renderTicket = 0
+let disposed = false
+
+const graphIdentity = data => typeof data?.graph_id === 'string' && data.graph_id.trim()
+  ? data.graph_id : null
+let lastGraphIdentity = graphIdentity(props.graphData)
+
+const updateNodeQuery = event => {
+  nodeQuery.value = event.target.value.slice(0, 200)
+}
+
+const searchSnapshot = computed(() => {
+  const records = props.graphData?.nodes || []
+  const query = nodeQuery.value.trim().toLowerCase()
+  const results = []
+  let hasMore = false
+  const revision = graphRevision.value
+  if (query) {
+    for (let index = 0; index < records.length; index++) {
+      const raw = records[index]
+      if (typeof raw.name !== 'string' || !raw.name || !raw.name.toLowerCase().includes(query)) continue
+      if (results.length === 20) { hasMore = true; break }
+      results.push({ index, raw, revision })
+    }
+  }
+  return { results, hasMore, blank: !query, emptyGraph: !records.length }
+})
+
+const activateSearchResult = result => {
+  if (disposed || result.revision !== graphRevision.value
+    || props.graphData?.nodes?.[result.index] !== result.raw) return
+  activateRenderedNode?.(result)
+}
 
 // 关闭模拟结束提示
 const dismissFinishedHint = () => {
@@ -317,6 +379,7 @@ const formatDateTime = (dateStr) => {
 }
 
 const closeDetailPanel = () => {
+  detailOpenedBySearch = false
   selectedItem.value = null
   expandedSelfLoops.value = new Set() // 重置展开状态
 }
@@ -325,13 +388,19 @@ let currentSimulation = null
 let linkLabelsRef = null
 let linkLabelBgRef = null
 
-const renderGraph = () => {
-  if (!graphSvg.value || !props.graphData) return
-  
-  // 停止之前的仿真
-  if (currentSimulation) {
-    currentSimulation.stop()
-  }
+const retireRenderedGraph = () => {
+  activateRenderedNode = null
+  searchReady.value = false
+  currentSimulation?.stop()
+  currentSimulation = null
+  linkLabelsRef = null
+  linkLabelBgRef = null
+}
+
+const renderGraph = (revision, ticket) => {
+  if (disposed || ticket !== renderTicket || revision !== graphRevision.value
+    || !graphSvg.value || !props.graphData) return
+  retireRenderedGraph()
   
   const container = graphContainer.value
   const width = container.clientWidth
@@ -353,7 +422,8 @@ const renderGraph = () => {
   const nodeMap = {}
   nodesData.forEach(n => nodeMap[n.uuid] = n)
   
-  const nodes = nodesData.map(n => ({
+  const nodes = nodesData.map((n, sourceIndex) => ({
+    sourceIndex,
     id: n.uuid,
     name: n.name || 'Unnamed',
     type: n.labels?.find(l => l !== 'Entity') || 'Entity',
@@ -584,6 +654,7 @@ const renderGraph = () => {
       // 高亮当前选中的边
       d3.select(event.target).attr('stroke', '#3498db').attr('stroke-width', 3)
       
+      detailOpenedBySearch = false
       selectedItem.value = {
         type: 'edge',
         data: d.rawData
@@ -609,6 +680,7 @@ const renderGraph = () => {
       link.filter(l => l === d).attr('stroke', '#3498db').attr('stroke-width', 3)
       d3.select(event.target).attr('fill', 'rgba(52, 152, 219, 0.1)')
       
+      detailOpenedBySearch = false
       selectedItem.value = {
         type: 'edge',
         data: d.rawData
@@ -637,6 +709,7 @@ const renderGraph = () => {
       link.filter(l => l === d).attr('stroke', '#3498db').attr('stroke-width', 3)
       d3.select(event.target).attr('fill', '#3498db')
       
+      detailOpenedBySearch = false
       selectedItem.value = {
         type: 'edge',
         data: d.rawData
@@ -697,22 +770,7 @@ const renderGraph = () => {
     )
     .on('click', (event, d) => {
       event.stopPropagation()
-      // 重置所有节点样式
-      node.attr('stroke', '#fff').attr('stroke-width', 2.5)
-      linkGroup.selectAll('path').attr('stroke', '#C0C0C0').attr('stroke-width', 1.5)
-      // 高亮选中节点
-      d3.select(event.target).attr('stroke', '#E91E63').attr('stroke-width', 4)
-      // 高亮与此节点相连的边
-      link.filter(l => l.source.id === d.id || l.target.id === d.id)
-        .attr('stroke', '#E91E63')
-        .attr('stroke-width', 2.5)
-      
-      selectedItem.value = {
-        type: 'node',
-        data: d.rawData,
-        entityType: d.type,
-        color: getColor(d.type)
-      }
+      selectRenderedNode(d, event.target)
     })
     .on('mouseenter', (event, d) => {
       if (!selectedItem.value || selectedItem.value.data?.uuid !== d.rawData.uuid) {
@@ -724,6 +782,31 @@ const renderGraph = () => {
         d3.select(event.target).attr('stroke', '#fff').attr('stroke-width', 2.5)
       }
     })
+
+  // Both entry points use the original circle selection behavior. Resolve search
+  // by source position and raw record, since UUIDs need not identify one circle.
+  const selectRenderedNode = (d, target, fromSearch = false) => {
+    if (disposed || ticket !== renderTicket || revision !== graphRevision.value
+      || props.graphData?.nodes?.[d.sourceIndex] !== d.rawData) return
+    node.attr('stroke', '#fff').attr('stroke-width', 2.5)
+    linkGroup.selectAll('path').attr('stroke', '#C0C0C0').attr('stroke-width', 1.5)
+    d3.select(target).attr('stroke', '#E91E63').attr('stroke-width', 4)
+    link.filter(l => l.source.id === d.id || l.target.id === d.id)
+      .attr('stroke', '#E91E63')
+      .attr('stroke-width', 2.5)
+    detailOpenedBySearch = fromSearch
+    selectedItem.value = {
+      type: 'node', data: d.rawData, entityType: d.type, color: getColor(d.type)
+    }
+  }
+  activateRenderedNode = result => {
+    if (result.revision !== revision || ticket !== renderTicket) return
+    const rendered = nodes[result.index]
+    if (!rendered || rendered.rawData !== result.raw) return
+    const circle = node.filter(d => d === rendered).node()
+    if (circle) selectRenderedNode(rendered, circle, true)
+  }
+  searchReady.value = true
 
   // Node Labels
   const nodeLabels = nodeGroup.selectAll('text')
@@ -775,6 +858,7 @@ const renderGraph = () => {
   
   // 点击空白处关闭详情面板
   svg.on('click', () => {
+    detailOpenedBySearch = false
     selectedItem.value = null
     node.attr('stroke', '#fff').attr('stroke-width', 2.5)
     linkGroup.selectAll('path').attr('stroke', '#C0C0C0').attr('stroke-width', 1.5)
@@ -783,9 +867,22 @@ const renderGraph = () => {
   })
 }
 
-watch(() => props.graphData, () => {
-  nextTick(renderGraph)
-}, { deep: true })
+const requestGraphRender = () => {
+  retireRenderedGraph()
+  const ticket = ++renderTicket
+  const revision = graphRevision.value
+  nextTick(() => renderGraph(revision, ticket))
+}
+
+watch(() => props.graphData, data => {
+  // Invalidate before a queued render can run, including in-place data changes.
+  graphRevision.value++
+  const identity = graphIdentity(data)
+  if (!identity || identity !== lastGraphIdentity) nodeQuery.value = ''
+  lastGraphIdentity = identity
+  if (detailOpenedBySearch || !data) closeDetailPanel()
+  requestGraphRender()
+}, { deep: true, flush: 'sync' })
 
 // 监听边标签显示开关
 watch(showEdgeLabels, (newVal) => {
@@ -798,18 +895,23 @@ watch(showEdgeLabels, (newVal) => {
 })
 
 const handleResize = () => {
-  nextTick(renderGraph)
+  requestGraphRender()
 }
 
 onMounted(() => {
   window.addEventListener('resize', handleResize)
+  requestGraphRender()
 })
 
 onUnmounted(() => {
+  disposed = true
+  renderTicket++
+  graphRevision.value++
+  nodeQuery.value = ''
+  lastGraphIdentity = null
+  closeDetailPanel()
+  retireRenderedGraph()
   window.removeEventListener('resize', handleResize)
-  if (currentSimulation) {
-    currentSimulation.stop()
-  }
 })
 </script>
 
@@ -823,6 +925,35 @@ onUnmounted(() => {
   background-size: 24px 24px;
   overflow: hidden;
 }
+
+.node-search {
+  position: absolute;
+  top: 60px;
+  left: 20px;
+  width: 280px;
+  max-width: calc(100% - 40px);
+  max-height: calc(100% - 190px);
+  overflow-y: auto;
+  padding: 10px;
+  box-sizing: border-box;
+  border: 1px solid #E0E0E0;
+  border-radius: 8px;
+  background: rgba(255,255,255,0.97);
+  z-index: 10;
+  font-size: 12px;
+}
+
+.node-search-label { display: grid; gap: 6px; color: #333; font-weight: 600; }
+.node-search-input { width: 100%; min-width: 0; box-sizing: border-box; padding: 7px; border: 1px solid #BBB; border-radius: 4px; }
+.node-search-status, .node-search-more { margin: 8px 0 0; color: #666; }
+.node-search-status:empty { display: none; }
+.node-search-results { list-style: none; margin: 8px 0 0; padding: 0; }
+.node-search-result { display: flex; flex-wrap: wrap; gap: 4px 8px; width: 100%; padding: 8px; margin-top: 4px; text-align: left; border: 1px solid #DDD; border-radius: 4px; background: #FFF; color: #444; cursor: pointer; overflow-wrap: anywhere; }
+.node-search-result:disabled { opacity: 0.6; cursor: default; }
+.node-search-name { width: 100%; font-weight: 600; }
+.node-search-uuid { width: 100%; font-family: monospace; }
+.node-search-position { color: #666; }
+.node-search-input:focus-visible, .node-search-result:focus-visible { outline: 2px solid #004E89; outline-offset: 2px; }
 
 .panel-header {
   position: absolute;

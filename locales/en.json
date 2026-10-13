@@ -335,6 +335,13 @@
     "selectAgentFirst": "Please select a simulated individual first"
   },
   "graph": {
+    "searchNodes": "Find a node",
+    "searchPlaceholder": "Search full node names",
+    "searchPrompt": "Enter part of a node name.",
+    "searchEmptyGraph": "This graph has no nodes yet.",
+    "searchNoMatches": "No matching node names.",
+    "searchNarrowQuery": "Showing the first 20 matches. Narrow your search to see others.",
+    "searchPosition": "Source position {position}",
     "reportMetadataLoading": "Loading graph…",
     "reportMetadataUnavailable": "Graph unavailable",
     "reportMetadataHint": "We couldn’t load the information needed to open this report’s graph. You can keep using the report while you try again.",

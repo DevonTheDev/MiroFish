@@ -36,6 +36,20 @@ save selected agents, profile mode and a round cap to a small JSON file, then
 explicitly apply those choices to a fresh setup on the same project and graph.
 Opening a preset does not prepare or start a simulation.
 
+## Find a node in the graph
+
+Use **Find a node** in a graph preview to search full node names. Matching is
+literal and case-insensitive; only whitespace around the query is ignored.
+Queries are limited to 200 UTF-16 units. The first 20 matching node records appear
+in their current source order, with a prompt to narrow the query when another
+match exists. Names, types, available UUIDs and source positions distinguish
+results, including duplicate names or IDs. Selecting a result opens the same
+node details and highlights as clicking its circle.
+
+The query survives refreshes of the same identified graph. Changing graphs or
+removing the graph clears it, and refreshed data closes details opened through
+search. Search examines the loaded graph only; it makes no additional requests.
+
 ## Choose one or both simulation platforms
 
 When a graph build finishes, setup becomes available after its completed project

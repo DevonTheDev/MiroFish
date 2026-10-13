@@ -335,6 +335,13 @@
     "selectAgentFirst": "请先选择一个模拟个体"
   },
   "graph": {
+    "searchNodes": "查找节点",
+    "searchPlaceholder": "搜索完整节点名称",
+    "searchPrompt": "输入节点名称的一部分。",
+    "searchEmptyGraph": "此图谱尚无节点。",
+    "searchNoMatches": "没有匹配的节点名称。",
+    "searchNarrowQuery": "仅显示前 20 个匹配结果。请缩小搜索范围以查看其他节点。",
+    "searchPosition": "源列表位置 {position}",
     "reportMetadataLoading": "正在加载图谱…",
     "reportMetadataUnavailable": "图谱暂不可用",
     "reportMetadataHint": "无法加载打开此报告图谱所需的信息。重试期间仍可继续查看和使用报告。",

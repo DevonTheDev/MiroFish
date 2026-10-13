@@ -72,7 +72,7 @@ export async function settle() {
   for (let i = 0; i < 4; i++) { await Promise.resolve(); await Vue.nextTick() }
 }
 
-export function mountGraphPanel(t) {
+export function mountGraphPanel(t, { messages = {}, deferGraphRedraw = false, initialGraph = null } = {}) {
   // D3's touch detection needs a browser navigator, absent in supported Node 20.
   if (typeof globalThis.navigator === 'undefined') {
     Object.defineProperty(globalThis, 'navigator', { configurable: true, value: { maxTouchPoints: 0 } })
@@ -88,7 +88,11 @@ export function mountGraphPanel(t) {
     addEventListener: (_type, fn) => windowListeners.add(fn),
     removeEventListener: (_type, fn) => windowListeners.delete(fn),
   } }
-  const modules = { vue: Vue, d3 }
+  const redraws = []
+  const modules = { vue: deferGraphRedraw ? { ...Vue, nextTick: callback => {
+    if (callback) { redraws.push(callback); return Promise.resolve() }
+    return Vue.nextTick()
+  } } : Vue, d3 }
   for (const statement of parseJavaScript(code, { sourceType: 'module' }).program.body
     .filter(node => node.type === 'ImportDeclaration').reverse()) {
     const dependency = modules[statement.source.value]
@@ -111,19 +115,32 @@ export function mountGraphPanel(t) {
     parentNode: node => node.parentNode, nextSibling: node => node.nextSibling,
     patchProp: (node, key, _old, value) => { node.props[key] = value },
   })
-  const props = Vue.reactive({ graphData: null, loading: false, currentPhase: 2, isSimulating: false })
-  const app = renderer.createApp({ render: () => Vue.h(GraphPanel, { ...props, onRefresh: () => emitted.push('refresh') }) })
-  app.config.globalProperties.$t = key => key
+  const props = Vue.reactive({ graphData: initialGraph, loading: false, currentPhase: 2, isSimulating: false })
+  const app = renderer.createApp({ render: () => Vue.h(GraphPanel, { ...props,
+    onRefresh: () => emitted.push('refresh'), onToggleMaximize: () => emitted.push('toggle-maximize') }) })
+  app.config.globalProperties.$t = (key, values = {}) => {
+    const message = key.split('.').reduce((value, part) => value?.[part], messages) ?? key
+    return message.replace(/\{(\w+)\}/g, (_match, name) => String(values[name] ?? ''))
+  }
   app.config.warnHandler = message => warnings.push(message)
   const host = element('root')
   app.mount(host)
+  let closed = false
+  const close = () => { if (!closed) { closed = true; app.unmount() } }
   t.after(() => {
-    app.unmount()
+    close()
     assert.equal(windowListeners.size, 0, 'unmount removes its resize listener')
     assert.deepEqual(warnings, [], 'mount and updates have no Vue warnings')
   })
   return {
-    host, props, emitted,
+    host, props, emitted, close,
+    takeRedraws: () => redraws.splice(0),
+    resize() { for (const listener of windowListeners) listener() },
+    async input(value) {
+      const input = host.querySelector('.node-search-input')
+      assert.ok(input, 'the search input exists')
+      input.dispatchEvent({ type: 'input', target: { value } }); await settle()
+    },
     find: selector => host.querySelector(selector),
     async load(graphData) { props.graphData = graphData; await settle() },
     async click(node) { assert.ok(node, 'the rendered target exists'); node.dispatchEvent({ type: 'click' }); await settle() },
