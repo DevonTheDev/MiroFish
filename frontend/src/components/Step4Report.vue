@@ -28,25 +28,38 @@
                 'is-pending': !isSectionCompleted(idx + 1) && currentSectionIndex !== idx + 1
               }"
             >
-              <div class="section-header-row" @click="toggleSectionCollapse(idx)" :class="{ 'clickable': isSectionCompleted(idx + 1) }">
+              <h3 v-if="isSectionCompleted(idx + 1)" class="section-heading">
+                <button
+                  type="button"
+                  class="section-header-row section-toggle"
+                  :aria-expanded="!collapsedSections.has(idx)"
+                  :aria-controls="`${sectionIdPrefix}-${idx}`"
+                  @click="toggleSectionCollapse(idx)"
+                >
+                  <span class="section-number">{{ String(idx + 1).padStart(2, '0') }}</span>
+                  <span class="section-title">{{ section.title }}</span>
+                  <svg
+                    class="collapse-icon"
+                    :class="{ 'is-collapsed': collapsedSections.has(idx) }"
+                    viewBox="0 0 24 24"
+                    width="20"
+                    height="20"
+                    fill="none"
+                    stroke="currentColor"
+                    stroke-width="2"
+                    aria-hidden="true"
+                    focusable="false"
+                  >
+                    <polyline points="6 9 12 15 18 9"></polyline>
+                  </svg>
+                </button>
+              </h3>
+              <div v-else class="section-header-row">
                 <span class="section-number">{{ String(idx + 1).padStart(2, '0') }}</span>
                 <h3 class="section-title">{{ section.title }}</h3>
-                <svg 
-                  v-if="isSectionCompleted(idx + 1)" 
-                  class="collapse-icon" 
-                  :class="{ 'is-collapsed': collapsedSections.has(idx) }"
-                  viewBox="0 0 24 24" 
-                  width="20" 
-                  height="20" 
-                  fill="none" 
-                  stroke="currentColor" 
-                  stroke-width="2"
-                >
-                  <polyline points="6 9 12 15 18 9"></polyline>
-                </svg>
               </div>
               
-              <div class="section-body" v-show="!collapsedSections.has(idx)">
+              <div :id="`${sectionIdPrefix}-${idx}`" class="section-body" v-show="!collapsedSections.has(idx)">
                 <!-- Completed Content -->
                 <div v-if="generatedSections[idx + 1]" class="generated-content" v-html="renderMarkdown(generatedSections[idx + 1])"></div>
                 
@@ -390,7 +403,7 @@
 </template>
 
 <script setup>
-import { ref, computed, watch, onMounted, onUnmounted, nextTick, h, reactive } from 'vue'
+import { ref, computed, watch, onMounted, onUnmounted, nextTick, h, reactive, getCurrentInstance } from 'vue'
 import { useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { getAgentLog, getConsoleLog } from '../api/report'
@@ -425,6 +438,7 @@ const generatedSections = ref({})
 const expandedContent = ref(new Set())
 const expandedLogs = ref(new Set())
 const collapsedSections = ref(new Set())
+const sectionIdPrefix = `report-section-${getCurrentInstance().uid}`
 const isComplete = ref(false)
 const startTime = ref(null)
 const leftPanel = ref(null)
@@ -2367,12 +2381,29 @@ watch(() => props.reportId, (newId) => {
   border-radius: 8px;
 }
 
-.section-header-row.clickable {
+.section-heading {
+  margin: 0;
+  font: inherit;
+}
+
+.section-toggle {
+  width: calc(100% + 24px);
+  box-sizing: border-box;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
   cursor: pointer;
 }
 
-.section-header-row.clickable:hover {
+.section-toggle:hover {
   background-color: #F9FAFB;
+}
+
+.section-toggle:focus-visible {
+  outline: 2px solid #4B5563;
+  outline-offset: 2px;
 }
 
 .collapse-icon {

@@ -615,3 +615,169 @@ for (const locale of ['en', 'zh']) {
     } finally { h.close() }
   })
 }
+
+const findWithin = (node, predicate) => predicate(node) ? node
+  : node.children?.map(child => findWithin(child, predicate)).find(Boolean)
+const reportSection = (h, index) => h.find(node => node.props?.class === 'sections-list')
+  .children.filter(node => String(node.props?.class).split(' ').includes('report-section-item'))[index]
+const sectionButton = (h, index) => findWithin(reportSection(h, index), node => node.type === 'button')
+const sectionBody = (h, index) => findWithin(reportSection(h, index), node => node.props?.class === 'section-body')
+const allRequestCounts = h => Object.fromEntries(Object.entries(h.requests).map(([name, calls]) => [name, calls.length]))
+const sectionLog = (index, content, action = 'section_complete') => ({
+  action, timestamp: `2026-10-13T00:00:0${index}Z`, section_index: index, details: { content },
+})
+async function showSections(h, titles, logs, id = 'A') {
+  pending(h, 'getAgentLog', id).resolve(ok({ from_line: 0, logs: [
+    { action: 'planning_complete', timestamp: '2026-10-13T00:00:00Z', details: {
+      outline: { title: `${id} report`, summary: 'Section disclosure test', sections: titles.map(title => ({ title })) },
+    } },
+    ...logs,
+  ] })); await settle()
+}
+
+// These host tests cover rendered semantics, bindings and application state.
+// Native keyboard activation, focus rendering and screen-reader output need a browser.
+test('report section completed heading exposes a native disclosure button', async () => {
+  const h = build()
+  try {
+    await h.mount()
+    await showSections(h, ['Results'], [sectionLog(1, 'Completed content')])
+    const button = sectionButton(h, 0), body = sectionBody(h, 0)
+    assert.ok(button, 'completed section must expose a native disclosure button')
+    assert.equal(button.props.type, 'button')
+    assert.equal(button.parent.type, 'h3')
+    assert.ok(textContent(button).includes('Results'))
+    assert.ok(textContent(button).includes('01'))
+    assert.equal(button.props['aria-expanded'], true)
+    assert.equal(typeof button.props['aria-controls'], 'string')
+    assert.ok(button.props['aria-controls'].length > 0)
+    assert.equal(button.props['aria-controls'], body.props.id)
+    assert.notEqual(body.style.display, 'none')
+    assert.equal(button.parent.props.onClick, undefined, 'heading must not duplicate the button handler')
+    assert.equal(findWithin(button, node => node.type === 'svg').props['aria-hidden'], 'true')
+    assert.deepEqual(allRequestCounts(h), { getAgentLog: 1, getConsoleLog: 1, getReport: 1 })
+    assert.equal(h.warnings.length, 0)
+  } finally { h.close() }
+})
+
+test('report section disclosure preserves missing empty whitespace and content-only eligibility', async () => {
+  const h = build()
+  try {
+    await h.mount()
+    await showSections(h, ['Missing', 'Empty', 'Whitespace', 'Completed', 'Content only'], [
+      sectionLog(2, ''), sectionLog(3, ' \n\t '), sectionLog(4, 'Ready'),
+      sectionLog(5, 'Still generating', 'section_content'),
+    ])
+    for (const index of [0, 1, 4]) {
+      const section = reportSection(h, index)
+      assert.equal(sectionButton(h, index), undefined)
+      assert.equal(findWithin(section, node => typeof node.props?.onClick === 'function'), undefined)
+      assert.ok(findWithin(section, node => node.type === 'h3'))
+      assert.ok(findWithin(section, node => node.props?.class === 'section-number'))
+      assert.notEqual(sectionBody(h, index).style.display, 'none')
+    }
+    for (const index of [2, 3]) {
+      assert.equal(sectionButton(h, index).props['aria-expanded'], true)
+      assert.equal(sectionButton(h, index).props['aria-controls'], sectionBody(h, index).props.id)
+    }
+    assert.equal(h.child().setupState.generatedSections[3], ' \n\t ')
+    assert.equal(h.child().setupState.generatedSections[5], undefined)
+    const before = allRequestCounts(h)
+    sectionButton(h, 2).props.onClick(); await settle()
+    assert.equal(sectionButton(h, 2).props['aria-expanded'], false)
+    assert.equal(sectionBody(h, 2).style.display, 'none')
+    assert.equal(sectionButton(h, 3).props['aria-expanded'], true)
+    assert.deepEqual(allRequestCounts(h), before)
+    assert.equal(h.warnings.length, 0)
+  } finally { h.close() }
+})
+
+test('report section buttons collapse and reopen independently without report side effects', async () => {
+  const h = build()
+  try {
+    await h.mount()
+    await showSections(h, ['First', 'Second'], [
+      sectionLog(1, '**First content**'), sectionLog(2, '<script>unsafe</script> Second content'),
+      { action: 'report_complete', timestamp: '2026-10-13T00:00:03Z', details: {} },
+    ])
+    const child = h.child(), before = allRequestCounts(h), beforeRoute = snapshot(h)
+    const beforeReport = JSON.stringify({ sections: child.setupState.generatedSections, logs: child.setupState.agentLogs })
+    const bodies = [sectionBody(h, 0), sectionBody(h, 1)]
+    const ids = bodies.map(body => body.props.id)
+    const html = bodies.map(body => findWithin(body, node => node.props?.class === 'generated-content').props.innerHTML)
+    assert.notEqual(ids[0], ids[1])
+    assert.match(html[1], /&lt;script&gt;unsafe&lt;\/script&gt;/)
+    for (const [clicked, expanded] of [[0, [false, true]], [1, [false, false]], [0, [true, false]], [1, [true, true]]]) {
+      sectionButton(h, clicked).props.onClick(); await settle()
+      for (const index of [0, 1]) {
+        assert.equal(sectionBody(h, index), bodies[index], 'v-show retains the existing body')
+        assert.equal(sectionButton(h, index).props['aria-expanded'], expanded[index])
+        assert.equal(sectionButton(h, index).props['aria-controls'], ids[index])
+        assert.equal(sectionBody(h, index).style.display === 'none', !expanded[index])
+        assert.equal(findWithin(bodies[index], node => node.props?.class === 'generated-content').props.innerHTML, html[index])
+      }
+    }
+    assert.equal(JSON.stringify({ sections: child.setupState.generatedSections, logs: child.setupState.agentLogs }), beforeReport)
+    assert.equal(snapshot(h), beforeRoute)
+    assert.deepEqual(allRequestCounts(h), before)
+    assert.equal(h.router.currentRoute.value.fullPath, '/report/A')
+    assert.equal(h.intervals.size, 0)
+    assert.equal(child.setupState.isComplete, true)
+    assert.equal(h.warnings.length, 0)
+  } finally { h.close() }
+})
+
+test('report section collapse survives same-ID queries and resets on report changes', async () => {
+  const h = build()
+  try {
+    await h.mount()
+    await showSections(h, ['A section'], [sectionLog(1, 'A content')])
+    const child = h.child(), body = sectionBody(h, 0), id = body.props.id
+    sectionButton(h, 0).props.onClick(); await settle()
+    const before = allRequestCounts(h), intervals = [...h.intervals.keys()]
+    await h.navigate('A?tab=graph')
+    assert.equal(h.child(), child)
+    assert.equal(sectionBody(h, 0), body)
+    assert.equal(sectionButton(h, 0).props['aria-controls'], id)
+    assert.equal(sectionButton(h, 0).props['aria-expanded'], false)
+    assert.equal(body.style.display, 'none')
+    assert.deepEqual(allRequestCounts(h), before)
+    assert.deepEqual([...h.intervals.keys()], intervals)
+    await h.navigate('B')
+    assert.equal(h.child(), child)
+    assert.equal(child.setupState.collapsedSections.size, 0)
+    assert.equal(h.find(node => node.props?.class === 'sections-list'), undefined)
+    assert.deepEqual(allRequestCounts(h), { getAgentLog: 2, getConsoleLog: 2, getReport: 2 })
+    await showSections(h, ['B section'], [sectionLog(1, 'B content')], 'B')
+    assert.equal(sectionButton(h, 0).props['aria-expanded'], true)
+    assert.notEqual(sectionBody(h, 0).style.display, 'none')
+    assert.equal(sectionButton(h, 0).props['aria-controls'], sectionBody(h, 0).props.id)
+    assert.equal(child.setupState.generatedSections[1], 'B content')
+    assert.deepEqual(allRequestCounts(h), { getAgentLog: 2, getConsoleLog: 2, getReport: 2 })
+    assert.equal(h.intervals.size, 2)
+    assert.equal(h.warnings.length, 0)
+  } finally { h.close() }
+})
+
+test('report section body IDs are unique across mounted report instances', async () => {
+  const first = build(), second = build()
+  try {
+    await first.mount(); await second.mount()
+    for (const h of [first, second]) {
+      await showSections(h, ['First', 'Second'], [sectionLog(1, 'One'), sectionLog(2, 'Two')])
+    }
+    const ids = [first, second].flatMap(h => [0, 1].map(index => {
+      const id = sectionBody(h, index).props.id
+      assert.equal(sectionButton(h, index).props['aria-controls'], id)
+      return id
+    }))
+    assert.equal(new Set(ids).size, 4)
+    sectionButton(first, 0).props.onClick(); await settle()
+    assert.equal(sectionButton(first, 0).props['aria-expanded'], false)
+    assert.equal(sectionButton(second, 0).props['aria-expanded'], true)
+    for (const h of [first, second]) {
+      assert.deepEqual(allRequestCounts(h), { getAgentLog: 1, getConsoleLog: 1, getReport: 1 })
+      assert.equal(h.warnings.length, 0)
+    }
+  } finally { first.close(); second.close() }
+})
