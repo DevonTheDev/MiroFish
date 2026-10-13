@@ -149,6 +149,13 @@
             </svg>
           </button>
 
+          <template v-if="canOpenSavedReport">
+            <RouterLink :to="{ name: 'SavedReports', query: { report_id: props.reportId } }">
+              {{ $t('step4.openSavedReport') }}
+            </RouterLink>
+            <p>{{ $t('step4.savedReportNote') }}</p>
+          </template>
+
           <div class="workflow-divider"></div>
         </div>
 
@@ -404,7 +411,7 @@
 
 <script setup>
 import { ref, computed, watch, onMounted, onUnmounted, nextTick, h, reactive, getCurrentInstance } from 'vue'
-import { useRouter } from 'vue-router'
+import { useRouter, RouterLink } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { getAgentLog, getConsoleLog } from '../api/report'
 import { renderMarkdown, renderInlineText } from '../utils/content.js'
@@ -440,6 +447,10 @@ const expandedLogs = ref(new Set())
 const collapsedSections = ref(new Set())
 const sectionIdPrefix = `report-section-${getCurrentInstance().uid}`
 const isComplete = ref(false)
+const canOpenSavedReport = computed(() => isComplete.value
+  && typeof props.reportId === 'string'
+  && props.reportId.length >= 1 && props.reportId.length <= 128
+  && !/[^A-Za-z0-9_-]/.test(props.reportId))
 const startTime = ref(null)
 const leftPanel = ref(null)
 const rightPanel = ref(null)

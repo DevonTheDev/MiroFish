@@ -95,6 +95,14 @@ in-memory recovery. Existing setup behavior begins after its destination opens.
 
 ## Revisit saved reports
 
+After the current report completes in Step 4, **Open saved report** opens its
+reader in Saved reports, below the catalogue, with Markdown and observation JSON
+downloads. It reads the currently saved data by report ID, even when that report
+is not on the first catalogue page. The link does not pin a completion snapshot:
+saved metadata or content may still be changing, unavailable, or missing. Existing
+catalogue/detail reads start when the destination opens. **Enter Deep Interaction**
+remains available.
+
 Open **Saved reports** from Home to search earlier saved reports, filter their
 saved status, read Markdown without the original simulation/graph/logs, and
 download the exact displayed snapshot. Modern and legacy report files are

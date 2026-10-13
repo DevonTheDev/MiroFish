@@ -251,6 +251,8 @@
   "step4": {
     "generatingSection": "Generating {title}...",
     "goToInteraction": "Enter Deep Interaction",
+    "openSavedReport": "Open saved report",
+    "savedReportNote": "Reads the currently saved report. Markdown and observation downloads are available there.",
     "waitingForReportAgent": "Waiting for Report Agent...",
     "collapse": "Collapse ▲",
     "expandAll": "Show all {count} ▼",

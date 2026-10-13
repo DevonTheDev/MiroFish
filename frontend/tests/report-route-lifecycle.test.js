@@ -80,7 +80,7 @@ const complete = id => ok({ from_line: 0, logs: [{ action: 'report_complete', ti
 const translations = Object.fromEntries(['en', 'zh'].map(locale => [locale,
   JSON.parse(readFileSync(new URL('../../locales/' + locale + '.json', import.meta.url), 'utf8'))]))
 
-function build({ locale } = {}) {
+function build({ locale, reportProps } = {}) {
   const translate = (key, params) => locale
     ? key.split('.').reduce((value, segment) => value?.[segment], translations[locale]) ?? key
     : key + (params ? JSON.stringify(params) : '')
@@ -139,7 +139,8 @@ function build({ locale } = {}) {
   components['../components/Step4Report.vue'] = component(childPath)
   components['../views/ReportView.vue'] = component(viewPath)
   const router = evaluate(routerSource)
-  const app = renderer().createApp({ render: () => Vue.h(Router.RouterView) })
+  const app = renderer().createApp({ render: () => reportProps
+    ? Vue.h(components['../components/Step4Report.vue'], reportProps) : Vue.h(Router.RouterView) })
   app.use(router)
   app.config.globalProperties.$t = translate
   app.config.globalProperties.$tm = () => []
@@ -780,4 +781,141 @@ test('report section body IDs are unique across mounted report instances', async
       assert.equal(h.warnings.length, 0)
     }
   } finally { first.close(); second.close() }
+})
+
+
+const savedReportLink = h => h.find(node => node.type === 'a' && node.props.href?.startsWith('/reports?'))
+const anchorClick = (overrides = {}) => ({ button: 0, defaultPrevented: false,
+  preventDefault() { this.defaultPrevented = true }, ...overrides })
+
+for (const locale of ['en', 'zh']) test(`completed saved report link uses current identity and localized native anchor in ${locale}`, async () => {
+  const h = build({ locale })
+  try {
+    await h.mount()
+    assert.equal(savedReportLink(h), undefined, 'pending report has no saved-report link')
+    await h.navigate('A?tab=graph&report_id=unrelated&revision=old&metadata_revision=old#old')
+    const before = allRequestCounts(h)
+    pending(h, 'getAgentLog').resolve(complete('A')); await settle()
+    const link = savedReportLink(h)
+    assert.ok(link)
+    assert.equal(link.props.href, '/reports?report_id=A')
+    assert.equal(textContent(link).trim(), locale === 'en' ? 'Open saved report' : '打开已保存的报告')
+    const note = h.find(node => node.type === 'p' && textContent(node).includes(locale === 'en'
+      ? 'Reads the currently saved report.' : '读取当前保存的报告'))
+    assert.equal(textContent(note).trim(), locale === 'en'
+      ? 'Reads the currently saved report. Markdown and observation downloads are available there.'
+      : '读取当前保存的报告，可在该页面下载 Markdown 和观测 JSON。')
+    assert.equal(link.props.role, undefined)
+    assert.equal(link.props.tabindex, undefined)
+    assert.equal(link.props.onKeydown, undefined)
+    assert.equal(link.props.target, undefined)
+    assert.equal(typeof link.props.onClick, 'function')
+    assert.ok(h.find(node => node.type === 'button' && node.props.class === 'next-step-btn'))
+    await h.navigate('A?tab=other')
+    assert.equal(savedReportLink(h), link)
+    assert.equal(link.props.href, '/reports?report_id=A')
+    assert.deepEqual(allRequestCounts(h), before, 'showing the link and same-ID query changes issue no extra requests')
+    assert.deepEqual(h.warnings, [])
+  } finally { h.close() }
+})
+
+test('completed saved report link resets when a completed report is replaced', async () => {
+  const h = build()
+  try {
+    await h.mount(); pending(h, 'getAgentLog').resolve(complete('A')); await settle()
+    assert.equal(savedReportLink(h).props.href, '/reports?report_id=A')
+    const child = h.child()
+    await h.navigate('B')
+    assert.equal(h.child(), child)
+    assert.equal(h.child().setupState.isComplete, false)
+    assert.equal(savedReportLink(h), undefined)
+    pending(h, 'getReport', 'B').reject(new Error('graph metadata unavailable')); await settle()
+    assert.equal(savedReportLink(h), undefined)
+    pending(h, 'getAgentLog', 'B').resolve(complete('B')); await settle()
+    assert.equal(savedReportLink(h).props.href, '/reports?report_id=B')
+  } finally { h.close() }
+})
+
+test('completed saved report link rejects stale completion through A to B to A', async () => {
+  for (const target of ['B', 'A']) {
+    const h = build()
+    try {
+      await h.mount(); const oldA = pending(h, 'getAgentLog')
+      await h.navigate('B'); const oldB = pending(h, 'getAgentLog', 'B')
+      if (target === 'A') await h.navigate('A')
+      oldA.resolve(complete('A')); await settle()
+      assert.equal(savedReportLink(h), undefined)
+      assert.equal(h.child().setupState.isComplete, false)
+      assert.equal(oldA.signal.aborted, true)
+      if (target === 'A') {
+        oldB.resolve(complete('B')); await settle()
+        assert.equal(savedReportLink(h), undefined)
+        assert.equal(oldB.signal.aborted, true)
+      }
+      pending(h, 'getAgentLog', target).resolve(complete(target)); await settle()
+      assert.equal(savedReportLink(h).props.href, '/reports?report_id=' + target)
+    } finally { h.close() }
+  }
+})
+
+test('completed saved report link accepts only unnormalized ASCII IDs of length 1 through 128', async () => {
+  const valid = ['A', '_', '-', 'aZ09_-', 'R'.repeat(128)]
+  const invalid = [undefined, null, 7, true, ['A'], { reportId: 'A' }, '', 'R'.repeat(129),
+    ' A', 'A ', 'A\t', 'A\n', 'A\r', 'A\r\n', 'A\u2028', 'A\u2029', 'A\0', 'é', '报告', 'Ａ',
+    '../A', 'A/B', 'A\\B', 'A?x', 'A#x', 'A%20', 'A.B']
+  for (const reportId of [...valid, ...invalid]) {
+    const h = build({ reportProps: { reportId } })
+    try {
+      await h.mount()
+      // Isolate the defensive ID gate even for props that cannot start polling.
+      // Route-owned completion and reset behavior are exercised above separately.
+      h.child().setupState.reportOutline = { title: 'Current report', sections: [] }
+      h.child().setupState.isComplete = true
+      await settle()
+      const link = savedReportLink(h)
+      if (valid.includes(reportId)) assert.equal(link?.props.href, '/reports?report_id=' + reportId)
+      else assert.equal(link, undefined, `must reject raw ID ${JSON.stringify(reportId)}`)
+    } finally { h.close() }
+  }
+})
+
+test('completed saved report link preserves modified-click default behavior without extra requests', async () => {
+  const h = build()
+  try {
+    await h.mount(); pending(h, 'getAgentLog').resolve(complete('A')); await settle()
+    const link = savedReportLink(h), before = allRequestCounts(h)
+    for (const modifier of [{ ctrlKey: true }, { metaKey: true }, { shiftKey: true }, { altKey: true }, { button: 1 }]) {
+      const event = anchorClick(modifier)
+      await link.props.onClick(event); await settle()
+      assert.equal(event.defaultPrevented, false)
+      assert.equal(h.router.currentRoute.value.fullPath, '/report/A')
+    }
+    assert.deepEqual(allRequestCounts(h), before)
+    assert.equal(savedReportLink(h), link)
+    assert.deepEqual(h.warnings, [])
+  } finally { h.close() }
+})
+
+test('completed saved report link navigates to the unpinned reader and retires Step4 requests', async () => {
+  const h = build()
+  try {
+    await h.mount()
+    const oldMetadata = pending(h, 'getReport'), oldConsole = pending(h, 'getConsoleLog')
+    pending(h, 'getAgentLog').resolve(complete('A')); await settle()
+    const link = savedReportLink(h), child = h.child(), before = allRequestCounts(h)
+    const event = anchorClick()
+    await link.props.onClick(event); await settle()
+    assert.equal(event.defaultPrevented, true)
+    assert.equal(h.router.currentRoute.value.name, 'SavedReports')
+    assert.equal(h.router.currentRoute.value.fullPath, '/reports?report_id=A')
+    assert.deepEqual(h.router.currentRoute.value.query, { report_id: 'A' })
+    assert.equal(child.isUnmounted, true)
+    assert.ok(oldMetadata.signal.aborted && oldConsole.signal.aborted)
+    assert.equal(h.intervals.size, 0)
+    oldMetadata.resolve(replyFor('getReport', 'A'))
+    oldConsole.resolve(ok({ from_line: 0, logs: ['retired console'] })); await settle()
+    assert.equal(savedReportLink(h), undefined)
+    assert.deepEqual(allRequestCounts(h), before)
+    assert.deepEqual(h.warnings, [])
+  } finally { h.close() }
 })

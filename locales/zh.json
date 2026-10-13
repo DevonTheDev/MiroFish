@@ -251,6 +251,8 @@
   "step4": {
     "generatingSection": "正在生成{title}...",
     "goToInteraction": "进入深度互动",
+    "openSavedReport": "打开已保存的报告",
+    "savedReportNote": "读取当前保存的报告，可在该页面下载 Markdown 和观测 JSON。",
     "waitingForReportAgent": "Waiting for Report Agent...",
     "collapse": "收起 ▲",
     "expandAll": "展开全部 {count} 条 ▼",
