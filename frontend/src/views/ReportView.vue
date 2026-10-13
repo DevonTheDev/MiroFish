@@ -64,7 +64,7 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted, watch } from 'vue'
+import { ref, computed, onMounted, onBeforeUnmount, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import GraphPanel from '../components/GraphPanel.vue'
@@ -95,6 +95,17 @@ const graphLoading = ref(false)
 const systemLogs = ref([])
 const currentStatus = ref('processing') // processing | completed | error
 
+// Each selected report owns its entire metadata/graph chain, including A → B → A.
+let viewContext = null
+const ownsView = context => !!context && context.active && context === viewContext
+  && context.id === currentReportId.value && context.id === route.params.reportId
+
+const retireView = () => {
+  if (!viewContext) return
+  viewContext.active = false
+  viewContext.controller.abort()
+}
+
 // --- Computed Layout Styles ---
 const leftPanelStyle = computed(() => {
   if (viewMode.value === 'graph') return { width: '100%', opacity: 1, transform: 'translateX(0)' }
@@ -120,7 +131,8 @@ const statusText = computed(() => {
 })
 
 // --- Helpers ---
-const addLog = (msg) => {
+const addLog = (msg, context = viewContext) => {
+  if (!ownsView(context)) return
   const time = new Date().toLocaleTimeString('en-US', { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' }) + '.' + new Date().getMilliseconds().toString().padStart(3, '0')
   systemLogs.value.push({ time, msg })
   if (systemLogs.value.length > 200) {
@@ -129,6 +141,7 @@ const addLog = (msg) => {
 }
 
 const updateStatus = (status) => {
+  if (!ownsView(viewContext)) return
   currentStatus.value = status
 }
 
@@ -142,79 +155,92 @@ const toggleMaximize = (target) => {
 }
 
 // --- Data Logic ---
-const loadReportData = async () => {
+const loadReportData = async (context) => {
+  if (!ownsView(context)) return
   try {
-    addLog(t('log.loadReportData', { id: currentReportId.value }))
+    addLog(t('log.loadReportData', { id: context.id }), context)
 
     // 获取 report 信息以获取 simulation_id
-    const reportRes = await getReport(currentReportId.value)
+    const reportRes = await getReport(context.id, context.controller.signal)
+    if (!ownsView(context)) return
     if (reportRes.success && reportRes.data) {
       const reportData = reportRes.data
       simulationId.value = reportData.simulation_id
 
       if (simulationId.value) {
         // 获取 simulation 信息
-        const simRes = await getSimulation(simulationId.value)
+        const simRes = await getSimulation(reportData.simulation_id, context.controller.signal)
+        if (!ownsView(context)) return
         if (simRes.success && simRes.data) {
           const simData = simRes.data
 
           // 获取 project 信息
           if (simData.project_id) {
-            const projRes = await getProject(simData.project_id)
+            const projRes = await getProject(simData.project_id, context.controller.signal)
+            if (!ownsView(context)) return
             if (projRes.success && projRes.data) {
               projectData.value = projRes.data
-              addLog(t('log.projectLoadSuccess', { id: projRes.data.project_id }))
+              addLog(t('log.projectLoadSuccess', { id: projRes.data.project_id }), context)
 
               // 获取 graph 数据
               if (projRes.data.graph_id) {
-                await loadGraph(projRes.data.graph_id)
+                await loadGraph(projRes.data.graph_id, context)
               }
             }
           }
         }
       }
     } else {
-      addLog(t('log.getReportInfoFailed', { error: reportRes.error || t('common.unknownError') }))
+      addLog(t('log.getReportInfoFailed', { error: reportRes.error || t('common.unknownError') }), context)
     }
   } catch (err) {
-    addLog(t('log.loadException', { error: err.message }))
+    if (ownsView(context)) addLog(t('log.loadException', { error: err.message }), context)
   }
 }
 
-const loadGraph = async (graphId) => {
+const loadGraph = async (graphId, context) => {
+  if (!ownsView(context)) return
   graphLoading.value = true
   
   try {
-    const res = await getGraphData(graphId)
+    const res = await getGraphData(graphId, context.controller.signal)
+    if (!ownsView(context)) return
     if (res.success) {
       graphData.value = res.data
-      addLog(t('log.graphDataLoadSuccess'))
+      addLog(t('log.graphDataLoadSuccess'), context)
     }
   } catch (err) {
-    addLog(t('log.graphLoadFailed', { error: err.message }))
+    if (ownsView(context)) addLog(t('log.graphLoadFailed', { error: err.message }), context)
   } finally {
-    graphLoading.value = false
+    if (ownsView(context)) graphLoading.value = false
   }
 }
 
 const refreshGraph = () => {
-  if (projectData.value?.graph_id) {
-    loadGraph(projectData.value.graph_id)
+  if (ownsView(viewContext) && projectData.value?.graph_id) {
+    loadGraph(projectData.value.graph_id, viewContext)
   }
 }
 
 // Watch route params
 watch(() => route.params.reportId, (newId) => {
-  if (newId && newId !== currentReportId.value) {
-    currentReportId.value = newId
-    loadReportData()
-  }
+  retireView()
+  currentReportId.value = newId
+  simulationId.value = null
+  projectData.value = null
+  graphData.value = null
+  graphLoading.value = false
+  systemLogs.value = []
+  currentStatus.value = 'processing'
+  viewContext = newId ? { id: newId, active: true, controller: new AbortController() } : null
+  if (viewContext) loadReportData(viewContext)
 }, { immediate: true })
 
 onMounted(() => {
   addLog(t('log.reportViewInit'))
-  loadReportData()
 })
+
+onBeforeUnmount(retireView)
 </script>
 
 <style scoped>
