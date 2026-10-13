@@ -35,18 +35,53 @@
       </div>
     </header>
 
+    <section
+      v-if="metadataStatus === 'loading' || metadataStatus === 'unavailable'"
+      class="graph-metadata-panel"
+      data-testid="graph-metadata"
+      :aria-busy="metadataStatus === 'loading'"
+    >
+      <div
+        data-testid="graph-metadata-message"
+        :role="metadataStatus === 'unavailable' ? 'alert' : 'status'"
+        :aria-live="metadataStatus === 'unavailable' ? 'assertive' : 'polite'"
+        aria-atomic="true"
+      >
+        <p class="graph-metadata-title">
+          {{ $t(metadataStatus === 'loading' ? 'graph.reportMetadataLoading' : 'graph.reportMetadataUnavailable') }}
+        </p>
+        <p v-if="metadataStatus === 'unavailable'" class="graph-metadata-hint">
+          {{ $t('graph.reportMetadataHint') }}
+        </p>
+      </div>
+      <!-- Bind the route callback directly, without a cached ref lookup. -->
+      <button
+        type="button"
+        class="graph-metadata-retry"
+        data-testid="retry-graph-metadata"
+        :disabled="metadataStatus === 'loading'"
+        v-on="{ click: retryMetadata }"
+      >{{ $t('graph.reportMetadataRetry') }}</button>
+    </section>
+
     <!-- Main Content Area -->
     <main class="content-area">
       <!-- Left Panel: Graph -->
       <div class="panel-wrapper left" :style="leftPanelStyle">
-        <GraphPanel 
-          :graphData="graphData"
-          :loading="graphLoading"
-          :currentPhase="4"
-          :isSimulating="false"
-          @refresh="refreshGraph"
-          @toggle-maximize="toggleMaximize('graph')"
-        />
+        <div
+          class="report-graph-content"
+          data-testid="report-graph-content"
+          :hidden="metadataStatus !== 'ready'"
+        >
+          <GraphPanel 
+            :graphData="graphData"
+            :loading="graphLoading"
+            :currentPhase="4"
+            :isSimulating="false"
+            @refresh="refreshGraph"
+            @toggle-maximize="toggleMaximize('graph')"
+          />
+        </div>
       </div>
 
       <!-- Right Panel: Step4 报告生成 -->
@@ -92,6 +127,8 @@ const simulationId = ref(null)
 const projectData = ref(null)
 const graphData = ref(null)
 const graphLoading = ref(false)
+const metadataStatus = ref('idle') // idle | loading | unavailable | ready
+const retryMetadata = ref(null)
 const systemLogs = ref([])
 const currentStatus = ref('processing') // processing | completed | error
 
@@ -155,46 +192,44 @@ const toggleMaximize = (target) => {
 }
 
 // --- Data Logic ---
+const requireMetadata = (response, relation) => {
+  const data = response?.data
+  if (response?.success !== true || !data || typeof data !== 'object' || Array.isArray(data)
+    || typeof data[relation] !== 'string' || !data[relation].trim()) {
+    throw new Error(response?.error || t('graph.reportMetadataUnavailable'))
+  }
+  return data
+}
+
 const loadReportData = async (context) => {
-  if (!ownsView(context)) return
+  if (!ownsView(context) || context.metadataPending || metadataStatus.value === 'ready') return
+  context.metadataPending = true
+  metadataStatus.value = 'loading'
   try {
     addLog(t('log.loadReportData', { id: context.id }), context)
 
-    // 获取 report 信息以获取 simulation_id
     const reportRes = await getReport(context.id, context.controller.signal)
     if (!ownsView(context)) return
-    if (reportRes.success && reportRes.data) {
-      const reportData = reportRes.data
-      simulationId.value = reportData.simulation_id
+    const reportData = requireMetadata(reportRes, 'simulation_id')
+    simulationId.value = reportData.simulation_id
 
-      if (simulationId.value) {
-        // 获取 simulation 信息
-        const simRes = await getSimulation(reportData.simulation_id, context.controller.signal)
-        if (!ownsView(context)) return
-        if (simRes.success && simRes.data) {
-          const simData = simRes.data
+    const simRes = await getSimulation(reportData.simulation_id, context.controller.signal)
+    if (!ownsView(context)) return
+    const simData = requireMetadata(simRes, 'project_id')
 
-          // 获取 project 信息
-          if (simData.project_id) {
-            const projRes = await getProject(simData.project_id, context.controller.signal)
-            if (!ownsView(context)) return
-            if (projRes.success && projRes.data) {
-              projectData.value = projRes.data
-              addLog(t('log.projectLoadSuccess', { id: projRes.data.project_id }), context)
-
-              // 获取 graph 数据
-              if (projRes.data.graph_id) {
-                await loadGraph(projRes.data.graph_id, context)
-              }
-            }
-          }
-        }
-      }
-    } else {
-      addLog(t('log.getReportInfoFailed', { error: reportRes.error || t('common.unknownError') }), context)
-    }
+    const projRes = await getProject(simData.project_id, context.controller.signal)
+    if (!ownsView(context)) return
+    const project = requireMetadata(projRes, 'graph_id')
+    projectData.value = project
+    addLog(t('log.projectLoadSuccess', { id: project.project_id }), context)
+    metadataStatus.value = 'ready'
+    await loadGraph(project.graph_id, context)
   } catch (err) {
-    if (ownsView(context)) addLog(t('log.loadException', { error: err.message }), context)
+    if (!ownsView(context)) return
+    metadataStatus.value = 'unavailable'
+    addLog(t('log.loadException', { error: err.message }), context)
+  } finally {
+    context.metadataPending = false
   }
 }
 
@@ -230,10 +265,16 @@ watch(() => route.params.reportId, (newId) => {
   projectData.value = null
   graphData.value = null
   graphLoading.value = false
+  metadataStatus.value = 'idle'
+  retryMetadata.value = null
   systemLogs.value = []
   currentStatus.value = 'processing'
-  viewContext = newId ? { id: newId, active: true, controller: new AbortController() } : null
-  if (viewContext) loadReportData(viewContext)
+  viewContext = newId ? { id: newId, active: true, metadataPending: false, controller: new AbortController() } : null
+  if (viewContext) {
+    const context = viewContext
+    retryMetadata.value = () => loadReportData(context)
+    loadReportData(context)
+  }
 }, { immediate: true })
 
 onMounted(() => {
@@ -358,6 +399,51 @@ onBeforeUnmount(retireView)
 
 @keyframes pulse { 50% { opacity: 0.5; } }
 
+.graph-metadata-panel {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  flex-shrink: 0;
+  gap: 12px;
+  padding: 12px 24px;
+  border-bottom: 1px solid #EAEAEA;
+  background: #F8F9FA;
+  color: #333;
+}
+
+.graph-metadata-title {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.graph-metadata-hint {
+  margin: 4px 0 0;
+  font-size: 13px;
+}
+
+.graph-metadata-retry {
+  border: 1px solid #666;
+  border-radius: 4px;
+  padding: 8px 12px;
+  background: #FFF;
+  color: #333;
+  font: inherit;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.graph-metadata-retry:focus-visible {
+  outline: 2px solid #2563EB;
+  outline-offset: 2px;
+}
+
+.graph-metadata-retry:disabled {
+  opacity: 0.6;
+  cursor: wait;
+}
+
 /* Content */
 .content-area {
   flex: 1;
@@ -371,6 +457,14 @@ onBeforeUnmount(retireView)
   overflow: hidden;
   transition: width 0.4s cubic-bezier(0.25, 0.8, 0.25, 1), opacity 0.3s ease, transform 0.3s ease;
   will-change: width, opacity, transform;
+}
+
+.report-graph-content {
+  height: 100%;
+}
+
+.report-graph-content[hidden] {
+  display: none;
 }
 
 .panel-wrapper.left {

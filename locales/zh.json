@@ -335,6 +335,10 @@
     "selectAgentFirst": "请先选择一个模拟个体"
   },
   "graph": {
+    "reportMetadataLoading": "正在加载图谱…",
+    "reportMetadataUnavailable": "图谱暂不可用",
+    "reportMetadataHint": "无法加载打开此报告图谱所需的信息。重试期间仍可继续查看和使用报告。",
+    "reportMetadataRetry": "重试加载图谱",
     "panelTitle": "Graph Relationship Visualization",
     "refreshGraph": "刷新图谱",
     "graphMemoryRealtime": "GraphRAG长短期记忆实时更新中",

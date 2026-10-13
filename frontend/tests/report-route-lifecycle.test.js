@@ -34,7 +34,7 @@ const hostVue = { ...Vue, TransitionGroup: { ...Vue.TransitionGroup,
   props: { ...Vue.TransitionGroup.props, css: { default: false } } } }
 
 function renderer() {
-  const node = (type, text = '') => ({ type, text, props: {}, children: [], parent: null })
+  const node = (type, text = '') => ({ type, text, props: {}, style: {}, children: [], parent: null })
   const remove = child => {
     if (!child.parent) return
     const index = child.parent.children.indexOf(child)
@@ -77,7 +77,13 @@ const replyFor = (stage, id) => ok({
 }[stage])
 const complete = id => ok({ from_line: 0, logs: [{ action: 'report_complete', timestamp: id, details: {} }] })
 
-function build() {
+const translations = Object.fromEntries(['en', 'zh'].map(locale => [locale,
+  JSON.parse(readFileSync(new URL('../../locales/' + locale + '.json', import.meta.url), 'utf8'))]))
+
+function build({ locale } = {}) {
+  const translate = (key, params) => locale
+    ? key.split('.').reduce((value, segment) => value?.[segment], translations[locale]) ?? key
+    : key + (params ? JSON.stringify(params) : '')
   const requests = {}, instances = {}, intervals = new Map(), warnings = []
   let nextTimer = 1
   const api = new Proxy({}, { get(_target, name) {
@@ -100,7 +106,7 @@ function build() {
   const components = { '../components/GraphPanel.vue': graph,
     '../components/LanguageSwitcher.vue': boundary }
   const modules = { vue: hostVue, 'vue-router': { ...Router, createWebHistory: Router.createMemoryHistory },
-    'vue-i18n': { useI18n: () => ({ t: (key, params) => key + (params ? JSON.stringify(params) : '') }) },
+    'vue-i18n': { useI18n: () => ({ t: translate }) },
     '../utils/content.js': Content }
   function evaluate(source, returnName = 'component') {
     const ast = parseJavaScript(source, { sourceType: 'module' })
@@ -135,7 +141,7 @@ function build() {
   const router = evaluate(routerSource)
   const app = renderer().createApp({ render: () => Vue.h(Router.RouterView) })
   app.use(router)
-  app.config.globalProperties.$t = key => key
+  app.config.globalProperties.$t = translate
   app.config.globalProperties.$tm = () => []
   app.config.warnHandler = message => warnings.push(message)
   const host = { type: 'root', children: [] }
@@ -173,7 +179,7 @@ async function loaded(h, id = 'A') {
 }
 const messages = h => Array.from(h.state().systemLogs, log => log.msg)
 const snapshot = h => JSON.stringify({ simulationId: h.state().simulationId, project: h.state().projectData,
-  graph: h.state().graphData, loading: h.state().graphLoading, status: h.state().currentStatus,
+  graph: h.state().graphData, loading: h.state().graphLoading, metadata: h.state().metadataStatus, status: h.state().currentStatus,
   logs: messages(h), childReport: h.child().props.reportId, childSimulation: h.child().props.simulationId })
 const chainCounts = h => stages.map(stage => h.calls(stage).length)
 const status = h => h.find(node => String(node.props?.class).includes('status-indicator'))
@@ -363,3 +369,249 @@ test('report route actual Step4 ignores stale completion, completes B and opens 
     assert.equal(h.warnings.length, 0)
   } finally { h.close() }
 })
+
+
+const graphContent = h => h.find(node => node.props?.['data-testid'] === 'report-graph-content')
+const metadataPanel = h => h.find(node => node.props?.['data-testid'] === 'graph-metadata')
+const metadataRetry = h => h.find(node => node.props?.['data-testid'] === 'retry-graph-metadata')
+const metadataMessage = h => h.find(node => node.props?.['data-testid'] === 'graph-metadata-message')
+const textContent = node => [node.text ?? '', ...(node.children ?? [])
+  .filter(child => child.type !== '#comment').map(textContent)].join(' ')
+const onlyReads = h => assert.ok(Object.keys(h.requests).every(name => name.startsWith('get')))
+
+// Exact baseline witness: a current report metadata rejection must expose a
+// visible, usable recovery action while the actual Step4 stays mounted.
+test('graph metadata failure exposes a retry in the default workbench', async () => {
+  const h = build()
+  try {
+    await h.mount()
+    const child = h.child()
+    pending(h, 'getReport').reject(new Error('metadata unavailable')); await settle()
+    assert.ok(metadataPanel(h), 'graph metadata failure must be visible in the default workbench')
+    assert.equal(graphContent(h).props.hidden, true, 'hide the unrelated ontology-waiting graph placeholder')
+    assert.equal(metadataMessage(h).props.role, 'alert')
+    assert.equal(metadataRetry(h).props.disabled, false)
+    assert.equal(h.state().viewMode, 'workbench')
+    assert.equal(h.child(), child)
+    assert.equal(h.child().isUnmounted, false)
+    assert.equal(h.state().currentStatus, 'processing')
+    assert.equal(h.calls('getAgentLog').length, 1)
+    assert.equal(h.calls('getConsoleLog').length, 1)
+    onlyReads(h)
+  } finally { h.close() }
+})
+
+test('graph metadata pending and retry are single flight and a failed retry stays usable', async () => {
+  const h = build()
+  try {
+    await h.mount()
+    const child = h.child(), initial = pending(h, 'getReport')
+    assert.equal(graphContent(h).props.hidden, true)
+    const retry = metadataRetry(h).props.onClick
+    assert.equal(metadataMessage(h).props.role, 'status')
+    assert.equal(metadataPanel(h).props['aria-busy'], true)
+    assert.equal(metadataRetry(h).props.disabled, true)
+    retry(); retry(); await settle()
+    assert.equal(h.calls('getReport').length, 1)
+    initial.reject(new Error('initial failure')); await settle()
+    retry(); retry(); await settle()
+    assert.equal(h.calls('getReport').length, 2)
+    assert.equal(metadataMessage(h).props.role, 'status')
+    assert.equal(metadataRetry(h).props.disabled, true)
+    pending(h, 'getReport').reject(new Error('retry failure')); await settle()
+    assert.equal(metadataMessage(h).props.role, 'alert')
+    assert.equal(metadataRetry(h).props.disabled, false)
+    retry(); await settle(); await loaded(h)
+    assertCurrent(h, 'A')
+    assert.equal(metadataPanel(h), undefined)
+    assert.equal(graphContent(h).props.hidden, false)
+    assert.equal(h.child(), child)
+    assert.equal(h.calls('getAgentLog').length, 1)
+    assert.equal(h.calls('getConsoleLog').length, 1)
+    const counts = chainCounts(h)
+    retry(); await settle()
+    assert.deepEqual(chainCounts(h), counts, 'captured retry cannot reload ready metadata')
+    onlyReads(h)
+  } finally { h.close() }
+})
+
+const metadataFailures = [
+  ['rejection', request => request.reject(new Error('metadata read failed'))],
+  ['unsuccessful response', request => request.resolve({ success: false, error: 'unavailable' })],
+  ['null response', request => request.resolve(null)],
+  ['missing data', request => request.resolve({ success: true })],
+  ['malformed data', request => request.resolve(ok('invalid'))],
+  ['missing relation', request => request.resolve(ok({ graph_id: 'must-not-bypass-the-chain' }))],
+  ['invalid relation', (request, stage) => request.resolve(ok({
+    [{ getReport: 'simulation_id', getSimulation: 'project_id', getProject: 'graph_id' }[stage]]: '   ',
+  }))],
+]
+for (const stage of stages.slice(0, 3)) for (const [kind, fail] of metadataFailures) {
+  // The project missing-relation case must not accidentally supply graph_id.
+  test(`graph metadata ${stage} ${kind} is recoverable without changing report status`, async () => {
+    const h = build()
+    try {
+      await h.mount(); const request = await reach(h, stage), counts = chainCounts(h)
+      if (stage === 'getProject' && kind === 'missing relation') request.resolve(ok({ project_id: 'PA' }))
+      else fail(request, stage)
+      await settle()
+      assert.equal(metadataMessage(h).props.role, 'alert')
+      assert.equal(metadataRetry(h).props.disabled, false)
+      assert.deepEqual(chainCounts(h), counts, 'invalid metadata must not continue downstream')
+      assert.equal(h.state().currentStatus, 'processing')
+      assert.equal(h.graph().props.loading, false)
+      metadataRetry(h).props.onClick(); await settle(); await loaded(h)
+      assert.equal(metadataPanel(h), undefined)
+      assertCurrent(h, 'A'); onlyReads(h)
+      assert.equal(h.warnings.length, 0)
+    } finally { h.close() }
+  })
+}
+
+for (const target of ['B', 'A', 'unmount']) {
+  test(`graph metadata captured retry is retired after ${target === 'A' ? 'A to B to A' : target}`, async () => {
+    const h = build()
+    try {
+      await h.mount(); pending(h, 'getReport').reject(new Error('first failure')); await settle()
+      const retry = metadataRetry(h).props.onClick
+      if (target === 'unmount') h.close()
+      else {
+        await h.navigate('B')
+        if (target === 'A') await h.navigate('A')
+        pending(h, 'getReport', target).reject(new Error('current failure')); await settle()
+      }
+      const before = snapshot(h), counts = chainCounts(h)
+      retry(); retry(); await settle()
+      assert.equal(snapshot(h), before)
+      assert.deepEqual(chainCounts(h), counts, 'retired retry cannot start the new route metadata chain')
+    } finally { h.close() }
+  })
+}
+
+for (const stage of stages.slice(0, 3)) for (const target of ['B', 'A', 'unmount']) for (const reject of [false, true]) {
+  test(`graph metadata retry late ${stage} ${reject ? 'rejection' : 'success'} is ignored after ${target}`, async () => {
+    const h = build()
+    try {
+      await h.mount(); pending(h, 'getReport').reject(new Error('first failure')); await settle()
+      metadataRetry(h).props.onClick(); await settle()
+      const old = await reach(h, stage)
+      if (target === 'unmount') h.close()
+      else {
+        await h.navigate('B')
+        if (target === 'A') await h.navigate('A')
+        pending(h, 'getReport', target).reject(new Error('current failure')); await settle()
+      }
+      const before = snapshot(h), counts = chainCounts(h)
+      await finishOld(h, old, stage, reject)
+      assert.equal(snapshot(h), before)
+      assert.deepEqual(chainCounts(h), counts)
+      assert.equal(old.signal.aborted, true)
+      if (target !== 'unmount') assert.equal(metadataMessage(h).props.role, 'alert')
+    } finally { h.close() }
+  })
+}
+
+for (const retrying of [false, true]) {
+  test(`graph metadata ${retrying ? 'retry' : 'failure'} preserves Step4 completion, content, logs and interaction navigation`, async () => {
+    const h = build()
+    try {
+      await h.mount(); const child = h.child()
+      pending(h, 'getConsoleLog').resolve(ok({ from_line: 0, logs: ['Current report console'] })); await settle()
+      pending(h, 'getReport').reject(new Error('parent metadata unavailable')); await settle()
+      if (retrying) { metadataRetry(h).props.onClick(); await settle() }
+      pending(h, 'getAgentLog').resolve(ok({ from_line: 0, logs: [
+        { action: 'planning_complete', timestamp: '2026-10-13T00:00:00Z', details: {
+          outline: { title: 'Current report title', summary: 'Current summary', sections: [{ title: 'Results' }] } } },
+        { action: 'section_complete', timestamp: '2026-10-13T00:00:01Z', section_index: 1,
+          details: { content: 'Preserved report content' } },
+        { action: 'report_complete', timestamp: '2026-10-13T00:00:02Z', details: {} },
+      ] })); await settle()
+      assert.equal(h.child().setupState.isComplete, true)
+      assert.equal(h.state().currentStatus, 'completed')
+      const reportBefore = JSON.stringify({ outline: child.setupState.reportOutline,
+        sections: child.setupState.generatedSections, logs: child.setupState.agentLogs,
+        console: child.setupState.consoleLogs }), logsBefore = messages(h)
+      metadataRetry(h).props.onClick(); await settle()
+      if (!retrying) { pending(h, 'getReport').reject(new Error('retry still unavailable')); await settle() }
+      assert.equal(h.child(), child)
+      assert.equal(h.state().currentStatus, 'completed')
+      assert.match(status(h).props.class, /completed/)
+      assert.equal(JSON.stringify({ outline: child.setupState.reportOutline,
+        sections: child.setupState.generatedSections, logs: child.setupState.agentLogs,
+        console: child.setupState.consoleLogs }), reportBefore)
+      assert.deepEqual(messages(h).slice(0, logsBefore.length), logsBefore)
+      assert.equal(h.calls('getAgentLog').length, 1)
+      assert.equal(h.calls('getConsoleLog').length, 1)
+      assert.equal(h.intervals.size, 0)
+      const content = h.find(node => node.props?.class === 'generated-content')
+      assert.match(content.props.innerHTML, /Preserved report content/)
+      assert.equal(h.find(node => node.type === 'h1').text, 'Current report title')
+      const button = h.find(node => node.props?.class === 'next-step-btn')
+      const navigated = new Promise(resolve => {
+        const remove = h.router.afterEach(to => { if (to.name === 'Interaction') { remove(); resolve() } })
+      })
+      button.props.onClick(); await navigated; await settle()
+      assert.equal(h.router.currentRoute.value.fullPath, '/interaction/A')
+      assert.equal(child.isUnmounted, true)
+      assert.equal(h.calls('getReport').at(-1).signal.aborted, true)
+      onlyReads(h)
+      assert.equal(h.warnings.length, 0)
+    } finally { h.close() }
+  })
+}
+
+test('graph data failure after metadata recovery keeps graph-only Refresh', async () => {
+  const h = build()
+  try {
+    await h.mount(); pending(h, 'getReport').reject(new Error('metadata unavailable')); await settle()
+    metadataRetry(h).props.onClick(); await settle()
+    const graph = await reach(h, 'getGraphData')
+    assert.equal(metadataPanel(h), undefined)
+    assert.equal(graphContent(h).props.hidden, false)
+    assert.equal(h.graph().props.loading, true)
+    graph.reject(new Error('graph unavailable')); await settle()
+    assert.equal(metadataPanel(h), undefined)
+    const counts = chainCounts(h)
+    h.graph().emit('refresh'); await settle()
+    assert.deepEqual(chainCounts(h).slice(0, 3), counts.slice(0, 3))
+    assert.equal(h.calls('getGraphData').length, counts[3] + 1)
+    pending(h, 'getGraphData').resolve(replyFor('getGraphData', 'A')); await settle()
+    assertCurrent(h, 'A'); onlyReads(h)
+  } finally { h.close() }
+})
+
+for (const locale of ['en', 'zh']) {
+  test(`graph metadata loading, unavailable and retry labels are localized and accessible (${locale})`, async () => {
+    const h = build({ locale }), strings = translations[locale].graph
+    try {
+      await h.mount()
+      assert.equal(metadataMessage(h).props.role, 'status')
+      assert.equal(metadataMessage(h).props['aria-live'], 'polite')
+      assert.equal(metadataMessage(h).props['aria-atomic'], 'true')
+      assert.ok(textContent(metadataMessage(h)).includes(strings.reportMetadataLoading))
+      assert.equal(metadataRetry(h).text, strings.reportMetadataRetry)
+      assert.equal(metadataRetry(h).props.type, 'button')
+      assert.equal(metadataRetry(h).props.disabled, true)
+      pending(h, 'getReport').reject(new Error('private internal error')); await settle()
+      assert.equal(metadataMessage(h).props.role, 'alert')
+      assert.equal(metadataMessage(h).props['aria-live'], 'assertive')
+      assert.ok(textContent(metadataMessage(h)).includes(strings.reportMetadataUnavailable))
+      assert.ok(textContent(metadataMessage(h)).includes(strings.reportMetadataHint))
+      assert.ok(!textContent(metadataMessage(h)).includes('private internal error'))
+      assert.equal(metadataPanel(h).props['aria-busy'], false)
+      assert.equal(metadataRetry(h).props.disabled, false)
+      for (const mode of ['graph', 'split', 'workbench']) {
+        h.state().viewMode = mode; await settle()
+        assert.ok(metadataPanel(h), 'recovery remains visible in ' + mode)
+        assert.equal(metadataPanel(h).parent, h.find(node => node.type === 'main').parent,
+          'recovery is outside either independently hidden content panel')
+        assert.equal(graphContent(h).props.hidden, true)
+      }
+      metadataRetry(h).props.onClick(); await settle()
+      assert.equal(metadataMessage(h).props.role, 'status')
+      assert.equal(metadataRetry(h).props.disabled, true)
+      await loaded(h)
+      assert.equal(metadataPanel(h), undefined)
+    } finally { h.close() }
+  })
+}

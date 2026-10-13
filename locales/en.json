@@ -335,6 +335,10 @@
     "selectAgentFirst": "Please select a simulated individual first"
   },
   "graph": {
+    "reportMetadataLoading": "Loading graph…",
+    "reportMetadataUnavailable": "Graph unavailable",
+    "reportMetadataHint": "We couldn’t load the information needed to open this report’s graph. You can keep using the report while you try again.",
+    "reportMetadataRetry": "Retry loading graph",
     "panelTitle": "Graph Relationship Visualization",
     "refreshGraph": "Refresh Graph",
     "graphMemoryRealtime": "GraphRAG short/long-term memory updating in real-time",
