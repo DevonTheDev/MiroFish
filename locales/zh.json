@@ -1034,6 +1034,13 @@
     },
     "doctorLink": "查看本地模式与 CLI doctor 说明 ↗"
   },
+  "savedReportCopy": {
+    "label": "复制保存的 Markdown",
+    "pending": "正在复制保存的 Markdown…",
+    "success": "已复制保存的 Markdown。",
+    "unavailable": "此处剪贴板访问不可用。请使用“下载 Markdown”。",
+    "failed": "无法复制保存的 Markdown。请重试或使用“下载 Markdown”。"
+  },
   "savedReportSearch": {
     "label": "在此报告中查找",
     "matchCase": "区分大小写",

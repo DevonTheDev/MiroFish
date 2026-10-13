@@ -126,6 +126,21 @@ download the exact displayed snapshot. Modern and legacy report files are
 supported. This view reads local saved files without calling models or starting
 new work. See the [saved report library guide](docs/LOCAL_MODE.md#revisit-saved-reports).
 
+**Copy saved Markdown**, at the top of the shared reader below the existing
+download controls, copies the whole accepted body in Saved reports and Open
+report files. It passes the exact saved string to the browser clipboard API,
+including whitespace, line endings, Unicode and literal markup, without metadata
+or search limits. A nonempty available body can be copied regardless of saved
+generation status; the existing 8 MiB body admission limit still applies. Empty
+or unavailable bodies cannot be copied. Clipboard access may be unavailable or
+denied; Markdown and observation JSON downloads remain available alternatives.
+Success is shown only after the clipboard write resolves. Only one write can be
+pending at a time, even after closing or replacing the reader. Changing the
+accepted source or leaving the reader retires its feedback but cannot cancel an
+already submitted write. A pending write has no timeout, queue, fallback or
+automatic retry. Search, language changes and an unaccepted replacement file's
+selection, loading, preview or cancellation preserve the accepted copy operation.
+
 Use **Download observation JSON** to retain a report's exact accepted text and
 recorded context, then choose **Open report files** from Home or the report
 library to reopen it locally. Preview the file before opening it, search its

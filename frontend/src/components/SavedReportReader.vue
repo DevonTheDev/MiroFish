@@ -1,5 +1,9 @@
 <template>
   <div class="saved-reader">
+    <div class="copy-controls">
+      <button type="button" data-testid="copy-saved-markdown" :disabled="!searchable || savedReportClipboardBusy" :onClick="copyAction">{{ t('savedReportCopy.label') }}</button>
+      <p data-testid="copy-saved-markdown-status" role="status" aria-live="polite" aria-atomic="true">{{ copyMessage }}</p>
+    </div>
     <div class="find-controls" :aria-label="t('savedReportSearch.label')">
       <label for="report-find">{{ t('savedReportSearch.label') }}</label>
       <textarea id="report-find" data-testid="report-find" rows="2" :value="state.query" :disabled="!searchable" :aria-invalid="String(state.tooLong)" aria-describedby="report-find-note report-find-status" :onInput="actions.input" />
@@ -24,10 +28,12 @@
 import { computed, shallowRef, watch, nextTick, onBeforeUnmount } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { boundReportQuery, createReportSearchIndex, findReportPassages } from '../utils/savedReportSearch.js'
+import { acquireSavedReportClipboard, savedReportClipboardBusy } from '../utils/savedReportClipboard.js'
 
 const props = defineProps({ source: { type: Object, required: true }, isCurrent: { type: Function, required: true } })
 const { t, locale } = useI18n()
 const state = shallowRef(null)
+const copyOwner = shallowRef(null), copyStatus = shallowRef('')
 const elements = new Map()
 let disposed = false
 let searchIndex = null
@@ -40,8 +46,43 @@ function owns(snapshot) {
 watch(() => props.source, source => {
   elements.clear()
   searchIndex = null
+  copyOwner.value = { source }; copyStatus.value = ''
   state.value = { source, query: '', tooLong: false, matchCase: false, result: { matches: [], more: false }, current: 0 }
 }, { immediate: true, flush: 'sync' })
+function ownsCopy(owner) {
+  // Search and locale changes do not retire the accepted body. Parent ownership
+  // does retire it immediately, including before a committed route unmounts us.
+  return !disposed && copyOwner.value === owner && props.source === owner.source && props.isCurrent(owner.source)
+}
+async function copyMarkdown(owner) {
+  if (!ownsCopy(owner)) return
+  const markdown = owner.source.markdown_content
+  if (!owner.source.content_available || markdown === '') return
+  const release = acquireSavedReportClipboard()
+  if (!release) return
+  const feedback = status => { if (ownsCopy(owner)) copyStatus.value = status }
+  try {
+    if (!ownsCopy(owner)) return
+    feedback('pending')
+    // Acquire the shared lock before any host getter can reenter. Do not await
+    // before writeText: it must run in this explicit click's activation stack.
+    const navigator = globalThis.navigator
+    if (!ownsCopy(owner)) return
+    const clipboard = navigator?.clipboard
+    if (!ownsCopy(owner)) return
+    const writeText = clipboard?.writeText
+    if (!ownsCopy(owner)) return
+    if (typeof writeText !== 'function') { feedback('unavailable'); return }
+    await Reflect.apply(writeText, clipboard, [markdown])
+    feedback('success')
+  } catch { feedback('failed') }
+  finally { release() }
+}
+const copyAction = computed(() => {
+  const owner = copyOwner.value
+  return () => copyMarkdown(owner)
+})
+const copyMessage = computed(() => ownsCopy(copyOwner.value) && copyStatus.value ? t(`savedReportCopy.${copyStatus.value}`) : '')
 function rememberMatch(index, element) {
   if (element) elements.set(index, element)
   else elements.delete(index)
@@ -106,5 +147,6 @@ onBeforeUnmount(() => { disposed = true; searchIndex = null; elements.clear() })
 </script>
 
 <style scoped>
+.copy-controls { margin-top: 16px; }.copy-controls p:empty { margin: 0; }
 .find-controls { margin-top: 20px; padding: 16px; border: 1px solid #d7dde5; border-radius: 8px; background: #f8f9fb; }label { display: block; font-size: 14px; font-weight: 600; margin-bottom: 8px; }textarea { box-sizing: border-box; width: 100%; min-height: 44px; resize: vertical; border: 1px solid #c8cfd9; border-radius: 6px; padding: 10px; font: inherit; color: #202329; background: #fff; }.find-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin-top: 10px; }.case-control { display: flex; align-items: center; gap: 8px; margin: 0 10px 0 0; min-height: 44px; }input[type=checkbox] { width: 18px; height: 18px; }button { cursor: pointer; border: 1px solid #c8cfd9; border-radius: 7px; padding: 10px 14px; min-height: 44px; font: inherit; font-size: 14px; color: #28323f; background: #fff; }button:hover:enabled { background: #edf1f6; }button:disabled, textarea:disabled, input:disabled { opacity: .55; cursor: not-allowed; }button:focus-visible, textarea:focus-visible, input:focus-visible, pre:focus-visible { outline: 3px solid #5b8bc9; outline-offset: 3px; }.note { color: #68707c; font-size: 13px; line-height: 1.6; }.notice { padding: 14px; border-radius: 8px; background: #edf1f6; }[role=status] { margin-bottom: 0; line-height: 1.6; }pre { white-space: pre-wrap; overflow-wrap: anywhere; word-break: break-word; font: 13px/1.65 monospace; max-height: 720px; overflow-y: auto; tab-size: 4; }mark { background: #fff0a6; color: #202329; }mark.current { background: #254f83; color: #fff; outline: 2px solid #254f83; text-decoration: underline; text-underline-offset: 2px; }
 </style>

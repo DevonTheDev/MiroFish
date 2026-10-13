@@ -1034,6 +1034,13 @@
     },
     "doctorLink": "Open local mode and CLI doctor instructions ↗"
   },
+  "savedReportCopy": {
+    "label": "Copy saved Markdown",
+    "pending": "Copying saved Markdown…",
+    "success": "Copied saved Markdown.",
+    "unavailable": "Clipboard access is unavailable here. Use Download Markdown instead.",
+    "failed": "Could not copy saved Markdown. Try again or use Download Markdown."
+  },
   "savedReportSearch": {
     "label": "Find in this report",
     "matchCase": "Match case",

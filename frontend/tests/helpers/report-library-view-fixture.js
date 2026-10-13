@@ -11,6 +11,7 @@ import * as savedReportComparison from '../../src/utils/savedReportComparison.js
 import * as savedReportSearch from '../../src/utils/savedReportSearch.js'
 import * as savedReportObservation from '../../src/utils/savedReportObservation.js'
 import * as savedReportFiles from '../../src/utils/savedReportFiles.js'
+import * as savedReportClipboard from '../../src/utils/savedReportClipboard.js'
 
 export const ok = data => ({ success: true, data })
 export async function flush() {
@@ -98,6 +99,7 @@ export async function mountReportLibrary({ api, initialPath = '/reports', locale
     '../utils/savedReportComparison.js': savedReportComparison,
     '../utils/savedReportObservation.js': savedReportObservation,
     '../utils/savedReportFiles.js': savedReportFiles,
+    '../utils/savedReportClipboard.js': savedReportClipboard,
     '../utils/savedReportSearch.js': { ...savedReportSearch,
       createReportSearchIndex: text => {
         const index = savedReportSearch.createReportSearchIndex(text)

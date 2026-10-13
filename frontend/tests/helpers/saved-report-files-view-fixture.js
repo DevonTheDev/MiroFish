@@ -15,6 +15,7 @@ const sourceRoot = process.env.MIRO_REPORT_FILES_SOURCE_ROOT ? pathToFileURL(pro
 const sourceUrl = path => new URL(path, sourceRoot)
 const reportFiles = existsSync(sourceUrl('src/utils/savedReportFiles.js')) ? await import(sourceUrl('src/utils/savedReportFiles.js')) : {}
 const reportObservation = existsSync(sourceUrl('src/utils/savedReportObservation.js')) ? await import(sourceUrl('src/utils/savedReportObservation.js')) : {}
+const reportClipboard = existsSync(sourceUrl('src/utils/savedReportClipboard.js')) ? await import(sourceUrl('src/utils/savedReportClipboard.js')) : {}
 
 export const ok = data => ({ success: true, data })
 export async function flush() {
@@ -70,7 +71,7 @@ function renderer(scrollCalls) {
   return { host, root, body }
 }
 
-export async function mountReportFiles({ api, initialPath = '/report-files', locale = 'en', timers = fakeTimers(), deferredScrolls = null, onSearchIndex = null, cacheHandlers, downloadHooks = {} } = {}) {
+export async function mountReportFiles({ api, initialPath = '/report-files', locale = 'en', timers = fakeTimers(), deferredScrolls = null, onSearchIndex = null, cacheHandlers, downloadHooks = {}, clipboardHost = {}, onReaderMount = null, clipboardGlobalFacade = false } = {}) {
   const requests = api ? null : deferredApi()
   api ??= requests.api
   const warnings = [], downloads = [], revokedUrls = [], scrollCalls = [], storageWrites = [], networkCalls = [], anchors = []
@@ -104,6 +105,7 @@ export async function mountReportFiles({ api, initialPath = '/report-files', loc
     '../utils/savedReportComparison.js': savedReportComparison,
     '../utils/savedReportObservation.js': reportObservation,
     '../utils/savedReportFiles.js': reportFiles,
+    '../utils/savedReportClipboard.js': reportClipboard,
     '../utils/savedReportSearch.js': { ...savedReportSearch,
       createReportSearchIndex: text => {
         const index = savedReportSearch.createReportSearchIndex(text)
@@ -118,6 +120,11 @@ export async function mountReportFiles({ api, initialPath = '/report-files', loc
     const globals = { AbortController, Date, Intl, console, Blob, TextEncoder, TextDecoder, URL: urlApi, document, localStorage: storage, sessionStorage: storage, indexedDB: { open: (...args) => { storageWrites.push(args); throw Error('Persistence forbidden') } }, fetch: (...args) => { networkCalls.push(args); throw Error('Network forbidden') },
       setTimeout: timers.setTimeout, clearTimeout: timers.clearTimeout,
       IntersectionObserver: class { observe() {} disconnect() {} } }
+    // Synthetic only: no system clipboard is read or written by this fixture.
+    Object.defineProperty(globals, 'navigator', { get: () => clipboardHost.navigator })
+    // Node's contextified global swallows a throwing getter. Only the explicit
+    // throwing-navigator probes opt into a plain object with normal JS semantics.
+    if (clipboardGlobalFacade) globals.globalThis = clipboardHost
     for (const statement of ast.program.body.filter(item => item.type === 'ImportDeclaration').reverse()) {
       const path = statement.source.value
       const dependency = modules[path] ?? (path.includes('/api/') ? api : null)
@@ -137,6 +144,10 @@ export async function mountReportFiles({ api, initialPath = '/report-files', loc
       compilerOptions: { bindingMetadata: script.bindings, hoistStatic: false, ...(cacheHandlers === undefined ? {} : { cacheHandlers }) } })
     assert.deepEqual(template.errors, [])
     const value = evaluate(script.content)
+    if (path === 'components/SavedReportReader.vue' && onReaderMount) {
+      const setup = value.setup
+      value.setup = (props, context) => { onReaderMount(props); return setup(props, context) }
+    }
     value.render = evaluate(template.code, 'render')
     return value
   }
