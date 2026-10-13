@@ -11,6 +11,14 @@ const circles = h => h.find('.nodes')?.querySelectorAll('circle') ?? []
 const detail = h => h.find('.detail-content')?.textContent
 const callback = button => button.props.onClick
 const invoke = fn => fn({ stopPropagation() {} })
+const messagesFor = locale => JSON.parse(readFileSync(new URL(`../../locales/${locale}.json`, import.meta.url), 'utf8'))
+const english = messagesFor('en')
+const previous = h => h.find('.node-search-previous')
+const next = h => h.find('.node-search-next')
+const range = h => h.find('.node-search-range')?.textContent
+const rangeText = (messages, start, end, total) => messages.graph.searchRange
+  .replace('{start}', String(start)).replace('{end}', String(end)).replace('{total}', String(total))
+const matchingNodes = count => Array.from({ length: count }, (_, i) => node(`Match ${i + 1}`, String(i), { attributes: { position: i + 1 } }))
 const styles = h => ({
   nodes: circles(h).map(n => [n.props.stroke, n.props['stroke-width']]),
   edges: h.find('.links')?.querySelectorAll('path').map(n => [n.props.stroke, n.props['stroke-width']]) ?? [],
@@ -68,18 +76,52 @@ test('blank query, empty graph and no matches have distinct states', async t => 
   assert.equal(h.find('.node-search'), null)
 })
 
-test('search displays the first twenty records and only detects a twenty-first match', async t => {
-  const h = mountGraphPanel(t)
-  const records = Array.from({ length: 23 }, (_, i) => node(`Match ${i}`, String(i)))
-  await h.load(graph(records.slice(0, 20)))
-  await h.input('match')
-  assert.deepEqual(names(h), records.slice(0, 20).map(n => n.name))
-  assert.equal(h.find('.node-search-more'), null)
-  await h.load(graph(records))
-  assert.deepEqual(names(h), records.slice(0, 20).map(n => n.name))
-  assert.equal(h.find('.node-search-more').textContent, 'graph.searchNarrowQuery')
-  assert.equal(h.find('.node-search').textContent.includes('23'), false)
-})
+// Fixed boundary cases exercise exact totals, all pages, and disabled-handler
+// guards. Source gaps ensure match positions cannot stand in for raw positions.
+for (const count of [0, 1, 20, 21, 40, 45]) {
+  test(`search pages all ${count} matches in source order with exact ranges`, async t => {
+    const records = matchingNodes(count)
+    const rawRecords = records.flatMap((record, index) => [node(`Other ${index}`, `other-${index}`), record])
+    const h = mountGraphPanel(t, { messages: english })
+    await h.load(graph(rawRecords))
+    await h.input('match')
+    const originalCircles = circles(h)
+    const assertPage = page => {
+      const offset = (page - 1) * 20
+      assert.deepEqual(names(h), records.slice(offset, offset + 20).map(record => record.name))
+      assert.ok(results(h).length <= 20)
+      assert.equal(range(h), rangeText(english, count ? offset + 1 : 0, Math.min(offset + 20, count), count))
+      assert.equal(previous(h).props.disabled, page === 1)
+      assert.equal(next(h).props.disabled, page === Math.max(1, Math.ceil(count / 20)))
+      for (const [index, button] of results(h).entries()) {
+        assert.equal(button.querySelector('.node-search-position').textContent,
+          english.graph.searchPosition.replace('{position}', String((offset + index) * 2 + 2)))
+      }
+      assert.deepEqual(circles(h), originalCircles, 'pagination does not replace D3 circles')
+      assert.deepEqual(h.emitted, [], 'pagination emits no refresh or maximize events')
+    }
+    for (const button of [previous(h), next(h)]) {
+      assert.equal(button.type, 'button')
+      assert.equal(button.props.type, 'button')
+    }
+    assert.equal(h.find('.node-search-range').props.role, 'status')
+    assert.equal(h.find('.node-search-range').props['aria-live'], 'polite')
+    assertPage(1)
+    // The synthetic host does not suppress native disabled clicks. Invoke the
+    // handlers directly to independently verify their lower and upper bounds.
+    invoke(callback(previous(h))); invoke(callback(previous(h))); await settle()
+    assertPage(1)
+    const pageCount = Math.max(1, Math.ceil(count / 20))
+    for (let page = 2; page <= pageCount; page++) {
+      await h.click(next(h)); assertPage(page)
+    }
+    invoke(callback(next(h))); invoke(callback(next(h))); await settle()
+    assertPage(pageCount)
+    for (let page = pageCount - 1; page >= 1; page--) {
+      await h.click(previous(h)); assertPage(page)
+    }
+  })
+}
 
 test('input is capped at two hundred UTF-16 units even for programmatic events', async t => {
   const h = mountGraphPanel(t)
@@ -113,6 +155,128 @@ test('duplicate names, duplicate UUIDs and missing UUIDs retain separate source 
   }
   await h.input('Unnamed')
   assert.equal(results(h).length, 0, 'rendered fallback names are not indexed')
+})
+
+test('duplicate and missing UUIDs on later pages select the exact raw source record', async t => {
+  const records = matchingNodes(45).map((record, index) => ({ ...record, name: 'Same name',
+    uuid: [0, 20, 40].includes(index) ? 'duplicate' : [19, 39, 44].includes(index) ? undefined : record.uuid }))
+  const h = mountGraphPanel(t, { messages: english })
+  await h.load(graph(records))
+  await h.input('same')
+  for (const sourceIndex of [0, 19, 20, 39, 40, 44]) {
+    const targetPage = Math.floor(sourceIndex / 20) + 1
+    if (targetPage > 1 && sourceIndex % 20 === 0) await h.click(next(h))
+    const button = results(h)[sourceIndex % 20]
+    assert.equal(button.querySelector('.node-search-position').textContent,
+      english.graph.searchPosition.replace('{position}', String(sourceIndex + 1)))
+    await h.click(button)
+    assert.deepEqual(h.properties(), { position: String(sourceIndex + 1) })
+    assert.equal(circles(h)[sourceIndex].__data__.rawData, h.props.graphData.nodes[sourceIndex])
+    assert.deepEqual(circles(h).map(circle => circle.props.stroke),
+      records.map((_record, index) => index === sourceIndex ? '#E91E63' : '#fff'))
+  }
+})
+
+test('query edits and clearing reset pagination without changing selected details or circles', async t => {
+  const h = mountGraphPanel(t, { messages: english })
+  await h.load(graph(matchingNodes(45)))
+  await h.input('match')
+  await h.click(next(h)); await h.click(next(h))
+  await h.click(results(h)[0])
+  const selectedDetails = detail(h), selectedStyles = styles(h), originalCircles = circles(h)
+  for (const query of ['MATCH', '  MATCH  ', '']) {
+    await h.input(query)
+    assert.equal(detail(h), selectedDetails)
+    assert.deepEqual(styles(h), selectedStyles)
+    assert.deepEqual(circles(h), originalCircles)
+    if (query) {
+      assert.equal(range(h), rangeText(english, 1, 20, 45))
+      await h.click(next(h))
+    } else {
+      assert.equal(results(h).length, 0)
+      assert.equal(h.find('.node-search-pagination'), null)
+    }
+  }
+  await h.input('match')
+  assert.equal(range(h), rangeText(english, 1, 20, 45))
+  assert.deepEqual(h.emitted, [])
+})
+
+test('same-graph refresh keeps valid pages and durably clamps after shrink before later growth', async t => {
+  const h = mountGraphPanel(t, { messages: english })
+  await h.load(graph(matchingNodes(45)))
+  await h.input('match')
+  await h.click(next(h))
+  await h.load(graph(matchingNodes(43)))
+  assert.equal(range(h), rangeText(english, 21, 40, 43))
+  await h.click(next(h))
+  const oldClick = callback(results(h)[0]), oldCircle = circles(h)[40]
+  await h.click(results(h)[0])
+  const refreshed = matchingNodes(25).map(record => ({ ...record, attributes: { ...record.attributes, version: 'new' } }))
+  await h.load(graph(refreshed))
+  assert.equal(h.find('.node-search-input').props.value, 'match')
+  assert.equal(range(h), rangeText(english, 21, 25, 25))
+  assert.equal(h.find('.detail-panel'), null)
+  assert.equal(circles(h).includes(oldCircle), false, 'old D3 circle was replaced')
+  invoke(oldClick); await settle()
+  assert.equal(h.find('.detail-panel'), null, 'old page callbacks cannot select replacement records')
+  await h.click(results(h)[0])
+  assert.deepEqual(h.properties(), { position: '21', version: 'new' })
+  await h.load(graph(matchingNodes(45)))
+  assert.equal(range(h), rangeText(english, 21, 40, 45), 'growth cannot revive page three')
+  invoke(oldClick); await settle()
+  assert.equal(h.find('.detail-panel'), null)
+  await h.load(graph([]))
+  assert.equal(range(h), rangeText(english, 0, 0, 0))
+  await h.load(graph(matchingNodes(45)))
+  assert.equal(range(h), rangeText(english, 1, 20, 45), 'empty refresh durably clamps to page one')
+})
+
+test('deep same-graph shrink retires page callbacks synchronously and keeps the clamped page after growth', async t => {
+  const h = mountGraphPanel(t, { messages: english })
+  await h.load(graph(matchingNodes(45)))
+  await h.input('match')
+  await h.click(next(h)); await h.click(next(h))
+  const oldClick = callback(results(h)[0]), oldCircle = circles(h)[40]
+  h.props.graphData.nodes.splice(25)
+  invoke(oldClick)
+  assert.equal(oldCircle.props.stroke, '#fff', 'stale page activation is rejected before queued redraws')
+  await settle()
+  assert.equal(range(h), rangeText(english, 21, 25, 25))
+  assert.equal(h.find('.detail-panel'), null)
+  h.props.graphData.nodes.push(...matchingNodes(45).slice(25))
+  await settle()
+  assert.equal(range(h), rangeText(english, 21, 40, 45))
+  await h.click(results(h)[0])
+  assert.deepEqual(h.properties(), { position: '21' })
+})
+
+test('paging preserves node details, highlights and expanded self-relation details without D3 redraws', async t => {
+  const h = mountGraphPanel(t)
+  const records = matchingNodes(45)
+  const edges = [
+    { uuid: 'link', source_node_uuid: '0', target_node_uuid: '1', name: 'KNOWS' },
+    { uuid: 'loop', source_node_uuid: '0', target_node_uuid: '0', name: 'SELF', fact: 'Keep expanded' },
+  ]
+  await h.load(graph(records, 'graph-A', edges))
+  await h.input('match')
+  await h.click(results(h)[0])
+  const originalCircles = circles(h), nodeDetails = detail(h), nodeStyles = styles(h)
+  await h.click(next(h)); await h.click(previous(h))
+  assert.equal(detail(h), nodeDetails)
+  assert.deepEqual(styles(h), nodeStyles)
+  const loopPath = h.find('.links').querySelectorAll('path').find(path => path.__data__.rawData.isSelfLoopGroup)
+  await h.click(loopPath)
+  await h.click(h.find('.self-loop-item-header'))
+  const loopDetails = detail(h), loopStyles = styles(h), loopHeader = h.find('.self-loop-item-header')
+  assert.equal(loopHeader.props['aria-expanded'], true)
+  await h.click(next(h)); await h.click(next(h)); await h.click(previous(h))
+  assert.equal(detail(h), loopDetails)
+  assert.equal(h.find('.self-loop-item-header'), loopHeader)
+  assert.equal(loopHeader.props['aria-expanded'], true)
+  assert.deepEqual(styles(h), loopStyles)
+  assert.deepEqual(circles(h), originalCircles)
+  assert.deepEqual(h.emitted, [])
 })
 
 test('hostile-looking names, types and UUIDs remain full literal text', async t => {
@@ -219,22 +383,29 @@ test('reorder, rename, removal and empty replacement reject captured source posi
   assert.equal(circles(h).length, 0)
 })
 
-test('only equal concrete graph IDs retain a query; changes, invalid IDs and removal clear it', async t => {
-  const h = mountGraphPanel(t)
-  await h.load(graph([node('Alice', 'a')]))
-  await h.input('Alice')
-  await h.load(graph([node('Alice new', 'b')]))
-  assert.equal(h.find('.node-search-input').props.value, 'Alice')
+test('only equal concrete graph IDs retain query and page; changed, invalid and cleared identities reset both', async t => {
+  const h = mountGraphPanel(t, { messages: english })
+  await h.load(graph(matchingNodes(45)))
+  await h.input('match')
+  await h.click(next(h)); await h.click(next(h))
+  await h.load(graph(matchingNodes(45)))
+  assert.equal(h.find('.node-search-input').props.value, 'match')
+  assert.equal(range(h), rangeText(english, 41, 45, 45))
   for (const id of ['graph-B', undefined, undefined, '', '  ', null, 42]) {
-    await h.input('Alice')
-    const data = graph([node('Alice', 'a')]); data.graph_id = id
+    const data = graph(matchingNodes(45)); data.graph_id = id
     await h.load(data)
     assert.equal(h.find('.node-search-input').props.value, '')
+    assert.equal(h.find('.node-search-pagination'), null)
+    await h.input('match')
+    assert.equal(range(h), rangeText(english, 1, 20, 45))
+    await h.click(next(h)); await h.click(next(h))
   }
-  await h.input('Alice')
   await h.load(null)
-  await h.load(graph([node('Alice', 'a')]))
+  assert.equal(h.find('.node-search'), null)
+  await h.load(graph(matchingNodes(45)))
   assert.equal(h.find('.node-search-input').props.value, '')
+  await h.input('match')
+  assert.equal(range(h), rangeText(english, 1, 20, 45))
 })
 
 test('older queued redraws cannot revive a retired snapshot after refresh or unmount', async t => {
@@ -260,6 +431,42 @@ test('older queued redraws cannot revive a retired snapshot after refresh or unm
   assert.equal(h.host.children.length, 0)
 })
 
+test('resize preserves later pages and query while deferred redraws keep their separate ownership', async t => {
+  const h = mountGraphPanel(t, { messages: english, deferGraphRedraw: true })
+  await h.load(graph(matchingNodes(45)))
+  for (const redraw of h.takeRedraws()) redraw()
+  await settle(); await h.input('match'); await h.click(next(h)); await h.click(next(h))
+  const savedClick = callback(results(h)[0]), originalCircles = circles(h)
+  assert.equal(h.takeRedraws().length, 0, 'paging alone queues no graph redraw')
+  h.resize()
+  const olderResizeRedraws = h.takeRedraws()
+  await settle()
+  assert.equal(range(h), rangeText(english, 41, 45, 45))
+  assert.equal(h.find('.node-search-input').props.value, 'match')
+  assert.equal(results(h)[0].props.disabled, true)
+  invoke(savedClick); await settle()
+  assert.equal(h.find('.detail-panel'), null)
+  await h.click(previous(h))
+  assert.equal(range(h), rangeText(english, 21, 40, 45))
+  assert.equal(h.takeRedraws().length, 0, 'paging while resizing queues no additional redraw')
+  h.resize()
+  const currentResizeRedraws = h.takeRedraws()
+  for (const redraw of olderResizeRedraws) redraw()
+  await settle()
+  assert.deepEqual(circles(h), originalCircles, 'older resize tickets cannot rebuild circles')
+  assert.equal(results(h)[0].props.disabled, true)
+  for (const redraw of currentResizeRedraws) redraw()
+  await settle()
+  assert.notEqual(circles(h)[0], originalCircles[0])
+  assert.equal(range(h), rangeText(english, 21, 40, 45))
+  assert.equal(results(h)[0].props.disabled, false)
+  invoke(savedClick); await settle()
+  assert.deepEqual(h.properties(), { position: '41' }, 'resize retains the valid graph-revision callback')
+  await h.click(results(h)[0])
+  assert.deepEqual(h.properties(), { position: '21' })
+  assert.deepEqual(h.emitted, [])
+})
+
 test('refresh, maximize, edge selection, edge labels and resize remain available', async t => {
   const h = mountGraphPanel(t)
   await h.load(graph([node('Alice', 'a'), node('Bob', 'b')], 'graph-A', [
@@ -283,21 +490,31 @@ test('refresh, maximize, edge selection, edge labels and resize remain available
   assert.ok(h.find('.links').querySelectorAll('text').every(n => n.style.display === 'block'))
 })
 
-test('English and Chinese search text includes source positions and bounded-result guidance', async t => {
+test('English and Chinese search controls show localized page ranges and source positions', async t => {
   for (const locale of ['en', 'zh']) {
-    const messages = JSON.parse(readFileSync(new URL(`../../locales/${locale}.json`, import.meta.url), 'utf8'))
-    for (const key of ['searchNodes', 'searchPlaceholder', 'searchPrompt', 'searchEmptyGraph', 'searchNoMatches', 'searchNarrowQuery', 'searchPosition']) {
+    const messages = messagesFor(locale)
+    for (const key of ['searchNodes', 'searchPlaceholder', 'searchPrompt', 'searchEmptyGraph', 'searchNoMatches', 'searchRange', 'searchPrevious', 'searchNext', 'searchPosition']) {
       assert.equal(typeof messages.graph[key], 'string', `${locale} includes ${key}`)
       assert.ok(messages.graph[key].trim())
     }
     const h = mountGraphPanel(t, { messages })
-    await h.load(graph(Array.from({ length: 21 }, (_, i) => node('Match', String(i)))))
+    await h.load(graph(matchingNodes(21)))
     const input = h.find('.node-search-input')
     assert.ok(input.parentNode.textContent.includes(messages.graph.searchNodes))
     assert.equal(h.find('.node-search-status').textContent, messages.graph.searchPrompt)
     await h.input('Match')
+    assert.equal(previous(h).textContent, messages.graph.searchPrevious)
+    assert.equal(next(h).textContent, messages.graph.searchNext)
     assert.equal(results(h)[0].querySelector('.node-search-position').textContent, messages.graph.searchPosition.replace('{position}', '1'))
     assert.equal(results(h)[19].querySelector('.node-search-position').textContent, messages.graph.searchPosition.replace('{position}', '20'))
-    assert.equal(h.find('.node-search-more').textContent, messages.graph.searchNarrowQuery)
+    assert.equal(range(h), rangeText(messages, 1, 20, 21))
+    await h.click(next(h))
+    assert.equal(range(h), rangeText(messages, 21, 21, 21))
+    assert.equal(results(h)[0].querySelector('.node-search-position').textContent, messages.graph.searchPosition.replace('{position}', '21'))
+    await h.input('missing')
+    assert.equal(range(h), rangeText(messages, 0, 0, 0))
+    assert.equal(h.find('.node-search-status').textContent, messages.graph.searchNoMatches)
+    assert.equal(previous(h).props.disabled, true)
+    assert.equal(next(h).props.disabled, true)
   }
 })

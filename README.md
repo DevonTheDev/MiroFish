@@ -40,15 +40,22 @@ Opening a preset does not prepare or start a simulation.
 
 Use **Find a node** in a graph preview to search full node names. Matching is
 literal and case-insensitive; only whitespace around the query is ignored.
-Queries are limited to 200 UTF-16 units. The first 20 matching node records appear
-in their current source order, with a prompt to narrow the query when another
-match exists. Names, types, available UUIDs and source positions distinguish
-results, including duplicate names or IDs. Selecting a result opens the same
-node details and highlights as clicking its circle.
+Queries are limited to 200 UTF-16 units. Matching node records appear in pages of
+20 in their current source order. **Previous** and **Next** move between pages;
+the displayed range and exact total count all matching names in the loaded graph.
+Names, types, available UUIDs and source positions distinguish results, including
+duplicate names or IDs. Source positions refer to the original node list, not a
+position among matches. Selecting a result opens the same node details and
+highlights as clicking its circle. Paging keeps the current details, highlights
+and expanded self-relations, without redrawing the graph.
 
-The query survives refreshes of the same identified graph. Changing graphs or
-removing the graph clears it, and refreshed data closes details opened through
-search. Search examines the loaded graph only; it makes no additional requests.
+Editing or clearing the query returns to the first page. The query and page
+survive refreshes of the same identified graph; if results shrink, the page moves
+to the last remaining page (or the first page when empty). Later growth keeps that
+adjusted page. A changed, missing or invalid graph ID, or removing the graph,
+clears the query and resets the page. Resize preserves both. Refreshed data closes
+details opened through search. Search examines the loaded graph only; exact
+totals require scanning its node names, and no additional requests are made.
 
 ## Expand self-relation details
 

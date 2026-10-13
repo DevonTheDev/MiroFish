@@ -35,7 +35,19 @@
           </button>
         </li>
       </ul>
-      <p v-if="searchSnapshot.hasMore" class="node-search-more">{{ $t('graph.searchNarrowQuery') }}</p>
+      <div v-if="!searchSnapshot.blank" class="node-search-pagination">
+        <p class="node-search-range" role="status" aria-live="polite">
+          {{ $t('graph.searchRange', { start: searchSnapshot.start, end: searchSnapshot.end, total: searchSnapshot.total }) }}
+        </p>
+        <div class="node-search-page-buttons">
+          <button type="button" class="node-search-previous" :disabled="searchPage === 1" @click="previousSearchPage">
+            {{ $t('graph.searchPrevious') }}
+          </button>
+          <button type="button" class="node-search-next" :disabled="searchPage >= searchPageCount" @click="nextSearchPage">
+            {{ $t('graph.searchNext') }}
+          </button>
+        </div>
+      </div>
     </section>
 
     <div class="graph-container" ref="graphContainer">
@@ -282,6 +294,8 @@ const expandedSelfLoops = ref(new Set()) // 展开的自环项
 const showSimulationFinishedHint = ref(false) // 模拟结束后的提示
 const wasSimulating = ref(false) // 追踪之前是否在模拟中
 const nodeQuery = ref('')
+const searchPage = ref(1)
+const searchPageSize = 20
 const searchReady = ref(false)
 const graphRevision = ref(0)
 let activateRenderedNode = null
@@ -295,24 +309,42 @@ let lastGraphIdentity = graphIdentity(props.graphData)
 
 const updateNodeQuery = event => {
   nodeQuery.value = event.target.value.slice(0, 200)
+  searchPage.value = 1
 }
 
-const searchSnapshot = computed(() => {
+// Scan all loaded names for an exact total, keeping raw source positions for
+// selection. Paging only slices these matches; it never requests a D3 redraw.
+const searchMatches = computed(() => {
   const records = props.graphData?.nodes || []
   const query = nodeQuery.value.trim().toLowerCase()
   const results = []
-  let hasMore = false
   const revision = graphRevision.value
   if (query) {
     for (let index = 0; index < records.length; index++) {
       const raw = records[index]
       if (typeof raw.name !== 'string' || !raw.name || !raw.name.toLowerCase().includes(query)) continue
-      if (results.length === 20) { hasMore = true; break }
       results.push({ index, raw, revision })
     }
   }
-  return { results, hasMore, blank: !query, emptyGraph: !records.length }
+  return { results, blank: !query, emptyGraph: !records.length }
 })
+const searchPageCount = computed(() => Math.max(1, Math.ceil(searchMatches.value.results.length / searchPageSize)))
+const searchSnapshot = computed(() => {
+  const matches = searchMatches.value
+  const offset = (searchPage.value - 1) * searchPageSize
+  const total = matches.results.length
+  return {
+    results: matches.results.slice(offset, offset + searchPageSize),
+    blank: matches.blank, emptyGraph: matches.emptyGraph, total,
+    start: total ? offset + 1 : 0, end: Math.min(offset + searchPageSize, total)
+  }
+})
+const previousSearchPage = () => {
+  if (searchPage.value > 1) searchPage.value--
+}
+const nextSearchPage = () => {
+  if (searchPage.value < searchPageCount.value) searchPage.value++
+}
 
 const activateSearchResult = result => {
   if (disposed || result.revision !== graphRevision.value
@@ -880,7 +912,14 @@ watch(() => props.graphData, data => {
   // Invalidate before a queued render can run, including in-place data changes.
   graphRevision.value++
   const identity = graphIdentity(data)
-  if (!identity || identity !== lastGraphIdentity) nodeQuery.value = ''
+  if (!identity || identity !== lastGraphIdentity) {
+    nodeQuery.value = ''
+    searchPage.value = 1
+  } else {
+    // Store the clamped page so a later refresh with more matches cannot revive
+    // a page that disappeared. Resize has its own render ticket, not this reset.
+    searchPage.value = Math.min(searchPage.value, searchPageCount.value)
+  }
   lastGraphIdentity = identity
   if (detailOpenedBySearch || !data) closeDetailPanel()
   requestGraphRender()
@@ -910,6 +949,7 @@ onUnmounted(() => {
   renderTicket++
   graphRevision.value++
   nodeQuery.value = ''
+  searchPage.value = 1
   lastGraphIdentity = null
   closeDetailPanel()
   retireRenderedGraph()
@@ -947,7 +987,7 @@ onUnmounted(() => {
 
 .node-search-label { display: grid; gap: 6px; color: #333; font-weight: 600; }
 .node-search-input { width: 100%; min-width: 0; box-sizing: border-box; padding: 7px; border: 1px solid #BBB; border-radius: 4px; }
-.node-search-status, .node-search-more { margin: 8px 0 0; color: #666; }
+.node-search-status, .node-search-range { margin: 8px 0 0; color: #666; }
 .node-search-status:empty { display: none; }
 .node-search-results { list-style: none; margin: 8px 0 0; padding: 0; }
 .node-search-result { display: flex; flex-wrap: wrap; gap: 4px 8px; width: 100%; padding: 8px; margin-top: 4px; text-align: left; border: 1px solid #DDD; border-radius: 4px; background: #FFF; color: #444; cursor: pointer; overflow-wrap: anywhere; }
@@ -955,7 +995,10 @@ onUnmounted(() => {
 .node-search-name { width: 100%; font-weight: 600; }
 .node-search-uuid { width: 100%; font-family: monospace; }
 .node-search-position { color: #666; }
-.node-search-input:focus-visible, .node-search-result:focus-visible { outline: 2px solid #004E89; outline-offset: 2px; }
+.node-search-page-buttons { display: flex; gap: 8px; margin-top: 8px; }
+.node-search-page-buttons button { padding: 6px 10px; border: 1px solid #BBB; border-radius: 4px; background: #FFF; color: #444; cursor: pointer; }
+.node-search-page-buttons button:disabled { opacity: 0.6; cursor: default; }
+.node-search-input:focus-visible, .node-search-result:focus-visible, .node-search-page-buttons button:focus-visible { outline: 2px solid #004E89; outline-offset: 2px; }
 
 .panel-header {
   position: absolute;
