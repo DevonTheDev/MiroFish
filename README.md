@@ -50,6 +50,20 @@ The query survives refreshes of the same identified graph. Changing graphs or
 removing the graph clears it, and refreshed data closes details opened through
 search. Search examines the loaded graph only; it makes no additional requests.
 
+## Expand self-relation details
+
+After opening a grouped **Self Relations** edge, each numbered relation header is
+a button with an expanded/collapsed state. Tab to a header and use Enter or Space
+to toggle its details; the focused header has a visible outline. Multiple rows
+can stay open. Closing the detail panel with **×** resets expanded rows, while
+clicking the graph background dismisses the panel and retains their state.
+
+This covers disclosures inside an open panel; selecting SVG graph edges still
+uses the existing pointer controls. Row identity still uses its UUID, falling
+back to its position when absent, so duplicate UUIDs keep their existing shared
+expansion behavior. Mounted tests check rendered semantics and state changes;
+the synthetic host does not verify native keyboard activation or focus pixels.
+
 ## Choose one or both simulation platforms
 
 When a graph build finishes, setup becomes available after its completed project

@@ -141,14 +141,16 @@
                   class="self-loop-item"
                   :class="{ expanded: expandedSelfLoops.has(loop.uuid || idx) }"
                 >
-                  <div 
+                  <button
+                    type="button"
                     class="self-loop-item-header"
+                    :aria-expanded="expandedSelfLoops.has(loop.uuid || idx)"
                     @click="toggleSelfLoop(loop.uuid || idx)"
                   >
                     <span class="self-loop-index">#{{ idx + 1 }}</span>
                     <span class="self-loop-name">{{ loop.name || loop.fact_type || 'RELATED' }}</span>
-                    <span class="self-loop-toggle">{{ expandedSelfLoops.has(loop.uuid || idx) ? '−' : '+' }}</span>
-                  </div>
+                    <span class="self-loop-toggle" aria-hidden="true">{{ expandedSelfLoops.has(loop.uuid || idx) ? '−' : '+' }}</span>
+                  </button>
                   
                   <div class="self-loop-item-content" v-show="expandedSelfLoops.has(loop.uuid || idx)">
                     <div class="detail-row" v-if="loop.uuid">
@@ -1467,6 +1469,10 @@ input:checked + .slider:before {
 }
 
 .self-loop-item-header {
+  width: 100%;
+  border: 0;
+  font: inherit;
+  text-align: left;
   display: flex;
   align-items: center;
   gap: 8px;
@@ -1478,6 +1484,11 @@ input:checked + .slider:before {
 
 .self-loop-item-header:hover {
   background: #EEEEEE;
+}
+
+.self-loop-item-header:focus-visible {
+  outline: 2px solid #004E89;
+  outline-offset: 2px;
 }
 
 .self-loop-item.expanded .self-loop-item-header {
