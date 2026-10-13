@@ -338,6 +338,16 @@
     "selectAgentFirst": "Please select a simulated individual first"
   },
   "graph": {
+    "searchMode": "Search in loaded graph",
+    "searchModeNodes": "Nodes",
+    "searchModeRelationships": "Relationships",
+    "searchRelationships": "Find a relationship",
+    "searchRelationshipPlaceholder": "Relationship text or endpoint name",
+    "searchRelationshipPrompt": "Enter relationship text or an endpoint name.",
+    "searchRelationshipNoMatches": "No matching relationships.",
+    "searchEmptyRelationships": "This graph has no relationships yet.",
+    "searchIndividualSelfRelation": "Individual self-relation; shown in the grouped Self Relations line",
+    "searchRelationshipDetailsOnly": "Details only: one or both endpoints are missing from the loaded graph",
     "searchNodes": "Find a node",
     "searchPlaceholder": "Search full node names",
     "searchPrompt": "Enter part of a node name.",

@@ -36,26 +36,43 @@ save selected agents, profile mode and a round cap to a small JSON file, then
 explicitly apply those choices to a fresh setup on the same project and graph.
 Opening a preset does not prepare or start a simulation.
 
-## Find a node in the graph
+## Find a node or relationship in the graph
 
-Use **Find a node** in a graph preview to search full node names. Matching is
-literal and case-insensitive; only whitespace around the query is ignored.
-Queries are limited to 200 UTF-16 units. Matching node records appear in pages of
-20 in their current source order. **Previous** and **Next** move between pages;
-the displayed range and exact total count all matching names in the loaded graph.
-Names, types, available UUIDs and source positions distinguish results, including
-duplicate names or IDs. Source positions refer to the original node list, not a
-position among matches. Selecting a result opens the same node details and
-highlights as clicking its circle. Paging keeps the current details, highlights
-and expanded self-relations, without redrawing the graph.
+The graph search starts in **Nodes** mode and searches full node names. Switch
+to **Relationships** to search each loaded relationship's label (`name`), full
+fact, type (`fact_type`), source display text or target display text. These five
+strings are searched separately. Endpoint text uses the current loaded node name,
+then the producer's endpoint name, then its UUID. Relationship UUIDs distinguish
+rows but are not searched; attributes, episodes, dates and JSON are not searched.
+Display-only fallback text such as Unknown is not indexed.
 
-Editing or clearing the query returns to the first page. The query and page
-survive refreshes of the same identified graph; if results shrink, the page moves
-to the last remaining page (or the first page when empty). Later growth keeps that
-adjusted page. A changed, missing or invalid graph ID, or removing the graph,
-clears the query and resets the page. Resize preserves both. Refreshed data closes
-details opened through search. Search examines the loaded graph only; exact
-totals require scanning its node names, and no additional requests are made.
+Matching is literal and case-insensitive; only whitespace around the query is
+ignored. Blank queries show no results. Queries are limited to 200 UTF-16 units.
+Matches appear in pages of 20 in current source order, with exact totals and
+**Previous**/**Next** controls. Rows show source positions from the original node
+or relationship list, including records omitted from the drawing. Relationship
+rows show directional endpoints, label/type, available UUID and a fact preview
+limited to 160 UTF-16 units plus an ellipsis; the full fact remains searchable.
+
+Selecting a node opens the same details and highlights as clicking its circle.
+Selecting a relationship opens that exact individual record, even with duplicate
+or missing UUIDs, equal-looking records or repeated references. A self-relation
+may highlight the grouped **Self Relations** line, but its search detail shows
+only the chosen member and identifies that grouping. A relationship with missing
+endpoints opens **Details only** and clears graph highlights. This also works when
+the graph has no loaded nodes. Search reads loaded data without verifying its
+factual accuracy or making additional requests.
+
+Switching modes clears the query and page while retaining the current details and
+drawing. Editing or clearing a query returns to page one. Paging and queries do
+not redraw, pan or change selection. The mode, query and page survive refreshes
+of the same identified graph; shrinking results durably clamp to the last page
+(or page one when empty). A changed, missing or invalid graph ID, or removing the
+graph, resets to **Nodes** with a blank query. Refreshed data closes search-opened
+details. Resize preserves state; selection waits for the current drawing to be
+ready. Stale results and retired graph pointer callbacks cannot select old data.
+Mounted tests use real Vue and D3 with a synthetic host; native browser keyboard,
+focus behavior, pointer geometry and layout remain unverified.
 
 ## Expand self-relation details
 

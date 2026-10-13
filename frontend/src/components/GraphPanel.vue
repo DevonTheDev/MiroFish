@@ -14,22 +14,34 @@
       </div>
     </div>
     
-    <section v-if="graphData" class="node-search" :aria-label="$t('graph.searchNodes')">
+    <section v-if="graphData" class="node-search" :aria-label="$t(searchMode === 'nodes' ? 'graph.searchNodes' : 'graph.searchRelationships')">
+      <div class="search-mode" role="group" :aria-label="$t('graph.searchMode')">
+        <button type="button" class="search-mode-nodes" :aria-pressed="searchMode === 'nodes'" @click="setSearchMode('nodes')">{{ $t('graph.searchModeNodes') }}</button>
+        <button type="button" class="search-mode-relationships" :aria-pressed="searchMode === 'relationships'" @click="setSearchMode('relationships')">{{ $t('graph.searchModeRelationships') }}</button>
+      </div>
       <label class="node-search-label">
-        <span>{{ $t('graph.searchNodes') }}</span>
+        <span>{{ $t(searchMode === 'nodes' ? 'graph.searchNodes' : 'graph.searchRelationships') }}</span>
         <input class="node-search-input" type="search" maxlength="200"
-          :value="nodeQuery" @input="updateNodeQuery" :placeholder="$t('graph.searchPlaceholder')" />
+          :value="nodeQuery" @input="updateNodeQuery" :placeholder="$t(searchMode === 'nodes' ? 'graph.searchPlaceholder' : 'graph.searchRelationshipPlaceholder')" />
       </label>
       <p class="node-search-status" role="status" aria-live="polite">
-        {{ searchSnapshot.emptyGraph ? $t('graph.searchEmptyGraph')
-          : searchSnapshot.blank ? $t('graph.searchPrompt')
-          : !searchSnapshot.results.length ? $t('graph.searchNoMatches') : '' }}
+        {{ searchSnapshot.emptyGraph ? $t(searchMode === 'nodes' ? 'graph.searchEmptyGraph' : 'graph.searchEmptyRelationships')
+          : searchSnapshot.blank ? $t(searchMode === 'nodes' ? 'graph.searchPrompt' : 'graph.searchRelationshipPrompt')
+          : !searchSnapshot.results.length ? $t(searchMode === 'nodes' ? 'graph.searchNoMatches' : 'graph.searchRelationshipNoMatches') : '' }}
       </p>
       <ul v-if="searchSnapshot.results.length" class="node-search-results">
-        <li v-for="result in searchSnapshot.results" :key="result.index">
-          <button type="button" class="node-search-result" :disabled="!searchReady" @click="activateSearchResult(result)">
-            <span class="node-search-name">{{ result.raw.name }}</span>
-            <span class="node-search-type">{{ result.raw.labels?.find(label => label !== 'Entity') || 'Entity' }}</span>
+        <li v-for="result in searchSnapshot.results" :key="`${result.mode}-${result.index}`">
+          <button type="button" class="node-search-result" :class="{ 'relationship-search-result': result.mode === 'relationships' }" :disabled="!searchReady" @click="activateSearchResult(result)">
+            <template v-if="result.mode === 'nodes'">
+              <span class="node-search-name">{{ result.raw.name }}</span>
+              <span class="node-search-type">{{ result.raw.labels?.find(label => label !== 'Entity') || 'Entity' }}</span>
+            </template>
+            <template v-else>
+              <span class="relationship-search-endpoints">{{ result.sourceName || 'Unknown' }} → {{ result.targetName || 'Unknown' }}</span>
+              <span class="node-search-name">{{ result.raw.name || 'RELATED_TO' }}</span>
+              <span class="node-search-type">{{ result.raw.fact_type || 'Unknown' }}</span>
+              <span v-if="result.factPreview" class="relationship-search-fact">{{ result.factPreview }}</span>
+            </template>
             <span v-if="result.raw.uuid" class="node-search-uuid">{{ result.raw.uuid }}</span>
             <span class="node-search-position">{{ $t('graph.searchPosition', { position: result.index + 1 }) }}</span>
           </button>
@@ -139,6 +151,7 @@
           
           <!-- 边详情 -->
           <div v-else class="detail-content">
+            <p v-if="selectedItem.relationshipNotice" class="relationship-search-notice">{{ $t(selectedItem.relationshipNotice) }}</p>
             <!-- 自环组详情 -->
             <template v-if="selectedItem.data.isSelfLoopGroup">
               <div class="edge-relation-header self-loop-header">
@@ -294,11 +307,14 @@ const expandedSelfLoops = ref(new Set()) // 展开的自环项
 const showSimulationFinishedHint = ref(false) // 模拟结束后的提示
 const wasSimulating = ref(false) // 追踪之前是否在模拟中
 const nodeQuery = ref('')
+const searchMode = ref('nodes')
+let searchModeRevision = 0
 const searchPage = ref(1)
 const searchPageSize = 20
 const searchReady = ref(false)
 const graphRevision = ref(0)
 let activateRenderedNode = null
+let activateRenderedRelationship = null
 let detailOpenedBySearch = false
 let renderTicket = 0
 let disposed = false
@@ -312,18 +328,45 @@ const updateNodeQuery = event => {
   searchPage.value = 1
 }
 
-// Scan all loaded names for an exact total, keeping raw source positions for
-// selection. Paging only slices these matches; it never requests a D3 redraw.
+const setSearchMode = mode => {
+  if (mode === searchMode.value) return
+  searchModeRevision++
+  searchMode.value = mode
+  nodeQuery.value = ''
+  searchPage.value = 1
+}
+
+const nonemptyString = value => typeof value === 'string' && value ? value : ''
+const endpointNames = computed(() => new Map((props.graphData?.nodes || []).map(node => [node.uuid, nonemptyString(node.name)])))
+const relationshipEndpoints = raw => ({
+  sourceName: endpointNames.value.get(raw.source_node_uuid) || nonemptyString(raw.source_node_name) || nonemptyString(raw.source_node_uuid),
+  targetName: endpointNames.value.get(raw.target_node_uuid) || nonemptyString(raw.target_node_name) || nonemptyString(raw.target_node_uuid)
+})
+
+// Match only eligible strings, separately. Source positions precede filtering or
+// D3 grouping, so duplicate IDs and repeated object references stay distinct.
 const searchMatches = computed(() => {
-  const records = props.graphData?.nodes || []
+  const mode = searchMode.value
+  const records = props.graphData?.[mode === 'nodes' ? 'nodes' : 'edges'] || []
   const query = nodeQuery.value.trim().toLowerCase()
   const results = []
   const revision = graphRevision.value
+  const modeRevision = searchModeRevision
   if (query) {
     for (let index = 0; index < records.length; index++) {
       const raw = records[index]
-      if (typeof raw.name !== 'string' || !raw.name || !raw.name.toLowerCase().includes(query)) continue
-      results.push({ index, raw, revision })
+      if (!raw || typeof raw !== 'object') continue
+      if (mode === 'nodes') {
+        if (!nonemptyString(raw.name).toLowerCase().includes(query)) continue
+        results.push({ index, raw, revision, mode, modeRevision })
+      } else {
+        const endpoints = relationshipEndpoints(raw)
+        const fields = [raw.name, raw.fact, raw.fact_type, endpoints.sourceName, endpoints.targetName]
+        if (!fields.some(field => nonemptyString(field).toLowerCase().includes(query))) continue
+        const fact = nonemptyString(raw.fact)
+        results.push({ index, raw, revision, mode, modeRevision, ...endpoints,
+          factPreview: fact.length > 160 ? fact.slice(0, 160) + '…' : fact })
+      }
     }
   }
   return { results, blank: !query, emptyGraph: !records.length }
@@ -347,9 +390,12 @@ const nextSearchPage = () => {
 }
 
 const activateSearchResult = result => {
-  if (disposed || result.revision !== graphRevision.value
-    || props.graphData?.nodes?.[result.index] !== result.raw) return
-  activateRenderedNode?.(result)
+  const records = props.graphData?.[result.mode === 'nodes' ? 'nodes' : 'edges']
+  if (disposed || !searchReady.value || result.revision !== graphRevision.value
+    || result.mode !== searchMode.value || result.modeRevision !== searchModeRevision
+    || records?.[result.index] !== result.raw) return
+  if (result.mode === 'nodes') activateRenderedNode?.(result)
+  else activateRenderedRelationship?.(result)
 }
 
 // 关闭模拟结束提示
@@ -424,6 +470,7 @@ let linkLabelBgRef = null
 
 const retireRenderedGraph = () => {
   activateRenderedNode = null
+  activateRenderedRelationship = null
   searchReady.value = false
   currentSimulation?.stop()
   currentSimulation = null
@@ -450,6 +497,34 @@ const renderGraph = (revision, ticket) => {
   const nodesData = props.graphData.nodes || []
   const edgesData = props.graphData.edges || []
   
+  const isCurrentRender = () => !disposed && ticket === renderTicket && revision === graphRevision.value
+  const renderedRelationships = new Map()
+  let clearHighlights = () => {}
+  let highlightRelationship = () => {}
+  activateRenderedRelationship = result => {
+    if (!isCurrentRender() || result.revision !== revision || edgesData[result.index] !== result.raw) return
+    const match = renderedRelationships.get(result.index)
+    if (match && match.raw !== result.raw) return
+    clearHighlights()
+    if (match) highlightRelationship(match.edge)
+    const endpoints = relationshipEndpoints(result.raw)
+    detailOpenedBySearch = true
+    selectedItem.value = {
+      type: 'edge',
+      data: { ...result.raw, isSelfLoopGroup: false,
+        source_name: endpoints.sourceName || 'Unknown', target_name: endpoints.targetName || 'Unknown' },
+      relationshipNotice: !match ? 'graph.searchRelationshipDetailsOnly'
+        : match.edge.isSelfLoop ? 'graph.searchIndividualSelfRelation' : null
+    }
+  }
+  // SVG listeners survive child removal. Replace dismissal even on empty draws.
+  svg.on('click', () => {
+    if (!isCurrentRender()) return
+    detailOpenedBySearch = false
+    selectedItem.value = null
+    clearHighlights()
+  })
+  searchReady.value = true
   if (nodesData.length === 0) return
 
   // Prep data
@@ -469,16 +544,21 @@ const renderGraph = (revision, ticket) => {
   // 处理边数据，计算同一对节点间的边数量和索引
   const edgePairCount = {}
   const selfLoopEdges = {} // 按节点分组的自环边
+  const selfLoopRecords = new Map()
   const tempEdges = edgesData
-    .filter(e => nodeIds.has(e.source_node_uuid) && nodeIds.has(e.target_node_uuid))
+    .map((raw, index) => ({ raw, index }))
+    .filter(({ raw }) => raw && nodeIds.has(raw.source_node_uuid) && nodeIds.has(raw.target_node_uuid))
   
   // 统计每对节点之间的边数量，收集自环边
-  tempEdges.forEach(e => {
+  tempEdges.forEach(record => {
+    const e = record.raw
     if (e.source_node_uuid === e.target_node_uuid) {
       // 自环 - 收集到数组中
       if (!selfLoopEdges[e.source_node_uuid]) {
         selfLoopEdges[e.source_node_uuid] = []
       }
+      if (!selfLoopRecords.has(e.source_node_uuid)) selfLoopRecords.set(e.source_node_uuid, [])
+      selfLoopRecords.get(e.source_node_uuid).push(record)
       selfLoopEdges[e.source_node_uuid].push({
         ...e,
         source_name: nodeMap[e.source_node_uuid]?.name,
@@ -496,7 +576,8 @@ const renderGraph = (revision, ticket) => {
   
   const edges = []
   
-  tempEdges.forEach(e => {
+  tempEdges.forEach(record => {
+    const e = record.raw
     const isSelfLoop = e.source_node_uuid === e.target_node_uuid
     
     if (isSelfLoop) {
@@ -516,6 +597,7 @@ const renderGraph = (revision, ticket) => {
         name: `Self Relations (${allSelfLoops.length})`,
         curvature: 0,
         isSelfLoop: true,
+        sourceRecords: selfLoopRecords.get(e.source_node_uuid),
         rawData: {
           isSelfLoopGroup: true,
           source_name: nodeName,
@@ -557,6 +639,7 @@ const renderGraph = (revision, ticket) => {
       name: e.name || e.fact_type || 'RELATED',
       curvature,
       isSelfLoop: false,
+      sourceRecords: [record],
       pairIndex: currentIndex,
       pairTotal: totalCount,
       rawData: {
@@ -567,6 +650,12 @@ const renderGraph = (revision, ticket) => {
     })
   })
     
+  for (const edge of edges) {
+    for (const { index, raw } of edge.sourceRecords) renderedRelationships.set(index, { raw, edge })
+  }
+  const isCurrentEdge = edge => isCurrentRender()
+    && edge.sourceRecords.every(({ index, raw }) => props.graphData?.edges?.[index] === raw)
+
   // Color scale
   const colorMap = {}
   entityTypes.value.forEach(t => colorMap[t.name] = t.color)
@@ -681,6 +770,7 @@ const renderGraph = (revision, ticket) => {
     .style('cursor', 'pointer')
     .on('click', (event, d) => {
       event.stopPropagation()
+      if (!isCurrentEdge(d)) return
       // 重置之前选中边的样式
       linkGroup.selectAll('path').attr('stroke', '#C0C0C0').attr('stroke-width', 1.5)
       linkLabelBg.attr('fill', 'rgba(255,255,255,0.95)')
@@ -707,6 +797,7 @@ const renderGraph = (revision, ticket) => {
     .style('display', showEdgeLabels.value ? 'block' : 'none')
     .on('click', (event, d) => {
       event.stopPropagation()
+      if (!isCurrentEdge(d)) return
       linkGroup.selectAll('path').attr('stroke', '#C0C0C0').attr('stroke-width', 1.5)
       linkLabelBg.attr('fill', 'rgba(255,255,255,0.95)')
       linkLabels.attr('fill', '#666')
@@ -736,6 +827,7 @@ const renderGraph = (revision, ticket) => {
     .style('display', showEdgeLabels.value ? 'block' : 'none')
     .on('click', (event, d) => {
       event.stopPropagation()
+      if (!isCurrentEdge(d)) return
       linkGroup.selectAll('path').attr('stroke', '#C0C0C0').attr('stroke-width', 1.5)
       linkLabelBg.attr('fill', 'rgba(255,255,255,0.95)')
       linkLabels.attr('fill', '#666')
@@ -817,11 +909,20 @@ const renderGraph = (revision, ticket) => {
       }
     })
 
+  clearHighlights = () => {
+    node.attr('stroke', '#fff').attr('stroke-width', 2.5)
+    link.attr('stroke', '#C0C0C0').attr('stroke-width', 1.5)
+    linkLabelBg.attr('fill', 'rgba(255,255,255,0.95)')
+    linkLabels.attr('fill', '#666')
+  }
+  highlightRelationship = edge => {
+    link.filter(rendered => rendered === edge).attr('stroke', '#3498db').attr('stroke-width', 3)
+  }
+
   // Both entry points use the original circle selection behavior. Resolve search
   // by source position and raw record, since UUIDs need not identify one circle.
   const selectRenderedNode = (d, target, fromSearch = false) => {
-    if (disposed || ticket !== renderTicket || revision !== graphRevision.value
-      || props.graphData?.nodes?.[d.sourceIndex] !== d.rawData) return
+    if (!isCurrentRender() || props.graphData?.nodes?.[d.sourceIndex] !== d.rawData) return
     node.attr('stroke', '#fff').attr('stroke-width', 2.5)
     linkGroup.selectAll('path').attr('stroke', '#C0C0C0').attr('stroke-width', 1.5)
     d3.select(target).attr('stroke', '#E91E63').attr('stroke-width', 4)
@@ -890,15 +991,7 @@ const renderGraph = (revision, ticket) => {
       .attr('y', d => d.y)
   })
   
-  // 点击空白处关闭详情面板
-  svg.on('click', () => {
-    detailOpenedBySearch = false
-    selectedItem.value = null
-    node.attr('stroke', '#fff').attr('stroke-width', 2.5)
-    linkGroup.selectAll('path').attr('stroke', '#C0C0C0').attr('stroke-width', 1.5)
-    linkLabelBg.attr('fill', 'rgba(255,255,255,0.95)')
-    linkLabels.attr('fill', '#666')
-  })
+
 }
 
 const requestGraphRender = () => {
@@ -913,6 +1006,7 @@ watch(() => props.graphData, data => {
   graphRevision.value++
   const identity = graphIdentity(data)
   if (!identity || identity !== lastGraphIdentity) {
+    setSearchMode('nodes')
     nodeQuery.value = ''
     searchPage.value = 1
   } else {
@@ -985,6 +1079,13 @@ onUnmounted(() => {
   font-size: 12px;
 }
 
+.search-mode { display: flex; gap: 6px; margin-bottom: 8px; }
+.search-mode button { flex: 1; padding: 6px; border: 1px solid #BBB; border-radius: 4px; background: #FFF; color: #444; cursor: pointer; }
+.search-mode button[aria-pressed="true"] { background: #004E89; border-color: #004E89; color: #FFF; }
+.relationship-search-endpoints, .relationship-search-fact { width: 100%; }
+.relationship-search-endpoints { font-weight: 600; }
+.relationship-search-fact { color: #666; }
+.relationship-search-notice { margin: 0 0 12px; color: #666; font-size: 12px; line-height: 1.5; }
 .node-search-label { display: grid; gap: 6px; color: #333; font-weight: 600; }
 .node-search-input { width: 100%; min-width: 0; box-sizing: border-box; padding: 7px; border: 1px solid #BBB; border-radius: 4px; }
 .node-search-status, .node-search-range { margin: 8px 0 0; color: #666; }
@@ -998,7 +1099,7 @@ onUnmounted(() => {
 .node-search-page-buttons { display: flex; gap: 8px; margin-top: 8px; }
 .node-search-page-buttons button { padding: 6px 10px; border: 1px solid #BBB; border-radius: 4px; background: #FFF; color: #444; cursor: pointer; }
 .node-search-page-buttons button:disabled { opacity: 0.6; cursor: default; }
-.node-search-input:focus-visible, .node-search-result:focus-visible, .node-search-page-buttons button:focus-visible { outline: 2px solid #004E89; outline-offset: 2px; }
+.search-mode button:focus-visible, .node-search-input:focus-visible, .node-search-result:focus-visible, .node-search-page-buttons button:focus-visible { outline: 2px solid #004E89; outline-offset: 2px; }
 
 .panel-header {
   position: absolute;

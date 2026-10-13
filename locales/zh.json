@@ -338,6 +338,16 @@
     "selectAgentFirst": "请先选择一个模拟个体"
   },
   "graph": {
+    "searchMode": "搜索已加载图谱",
+    "searchModeNodes": "节点",
+    "searchModeRelationships": "关系",
+    "searchRelationships": "查找关系",
+    "searchRelationshipPlaceholder": "关系文本或端点名称",
+    "searchRelationshipPrompt": "输入关系文本或端点名称。",
+    "searchRelationshipNoMatches": "没有匹配的关系。",
+    "searchEmptyRelationships": "此图谱尚无关系。",
+    "searchIndividualSelfRelation": "单条自关系；在分组的 Self Relations 连线中显示",
+    "searchRelationshipDetailsOnly": "仅显示详情：已加载图谱中缺少一个或两个端点",
     "searchNodes": "查找节点",
     "searchPlaceholder": "搜索完整节点名称",
     "searchPrompt": "输入节点名称的一部分。",
