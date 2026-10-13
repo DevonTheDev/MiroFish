@@ -77,6 +77,7 @@
     "engineBadge": "引擎: MiroFish-V1.0",
     "startEngine": "启动引擎",
     "initializing": "初始化中...",
+    "startFailed": "无法打开图谱构建页面。草稿仍保留在此，请再次点击启动引擎。",
     "workspaceLabel": "工作区",
     "workspaceTitle": "模拟工作区",
     "workspaceDesc": "上传资料并描述场景，准备创建模拟。可在运行监控中查看本地设置与网关活动。"

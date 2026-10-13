@@ -26,7 +26,9 @@ export async function settle() {
 // A custom host avoids a browser dependency without replacing Vue's renderer.
 function renderer() {
   const node = (type, text = '') => ({ type, text, tagName: type.toUpperCase(), props: {},
-    children: [], parent: null, style: {}, addEventListener() {}, removeEventListener() {},
+    children: [], parent: null, style: {}, listeners: {},
+    addEventListener(event, callback) { this.listeners[event] = callback },
+    removeEventListener(event) { delete this.listeners[event] },
     setAttribute(key, value) { this.props[key] = value }, removeAttribute(key) { delete this.props[key] } })
   const remove = child => {
     if (!child.parent) return
@@ -103,7 +105,7 @@ export function build(options = {}) {
     for (const statement of ast.program.body.filter(item => item.type === 'ImportDeclaration').reverse()) {
       const path = statement.source.value
       let dependency = modules[path] ?? (path.includes('/api/') ? api : null)
-      if (path === '../store/pendingUpload') dependency = PendingUpload
+      if (path === '../store/pendingUpload' || path === '../store/pendingUpload.js') dependency = PendingUpload
       if (path === '../utils/localCastPreset') dependency = LocalCastPreset
       if (path === '../utils/localRunPlan') {
         const utility = readFileSync(new URL('../../src/utils/localRunPlan.js', import.meta.url), 'utf8')
@@ -117,10 +119,18 @@ export function build(options = {}) {
       source = source.slice(0, statement.start) + source.slice(statement.end)
     }
     return vm.runInNewContext(source.replace('export default', 'const component =')
-      .replace('export function render', 'function render') + '\n;' + returnName, globals)
+      .replace('export function render', 'function render') + '\n;' + returnName, globals, {
+      // The unchanged pre-fix Home dynamically imports the real pending store.
+      // Node's supported VM import callback keeps baseline witnesses about Home
+      // behavior rather than a missing VM loader (run with --experimental-vm-modules).
+      importModuleDynamically(specifier) {
+        assert.equal(specifier, '../store/pendingUpload.js')
+        return import('../../src/store/pendingUpload.js')
+      },
+    })
   }
   function component(path) {
-    const source = readFileSync(new URL('../../src/' + path, import.meta.url), 'utf8')
+    const source = options.sources?.[path] ?? readFileSync(new URL('../../src/' + path, import.meta.url), 'utf8')
     const { descriptor } = parse(source, { filename: path })
     const script = compileScript(descriptor, { id: path })
     const template = compileTemplate({ source: descriptor.template.content, filename: path, id: path,

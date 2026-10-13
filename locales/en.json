@@ -77,6 +77,7 @@
     "engineBadge": "Engine: MiroFish-V1.0",
     "startEngine": "Start Engine",
     "initializing": "Initializing...",
+    "startFailed": "Could not open the graph builder. Your draft is still here. Try Start Engine again.",
     "workspaceLabel": "Workspace",
     "workspaceTitle": "Simulation workspace",
     "workspaceDesc": "Upload source material and describe a scenario to prepare a simulation. Use the runtime monitor to inspect local settings and gateway activity."

@@ -6,6 +6,7 @@ import { parse, compileScript, compileTemplate } from '@vue/compiler-sfc'
 import * as Vue from 'vue'
 import * as Router from 'vue-router'
 import { createI18n, useI18n } from 'vue-i18n'
+import * as PendingUpload from '../../src/store/pendingUpload.js'
 
 export const ok = data => ({ success: true, data })
 export async function flush() {
@@ -153,6 +154,7 @@ export async function mountSavedSimulations({ api, initialPath = '/simulations',
     vue: { ...Vue, Transition: passThrough },
     'vue-router': { ...Router, createWebHistory: Router.createMemoryHistory },
     'vue-i18n': { useI18n },
+    '../store/pendingUpload.js': PendingUpload,
   }
   const components = { '../components/LanguageSwitcher.vue': stub }
   function evaluate(source, returnName = 'component') {

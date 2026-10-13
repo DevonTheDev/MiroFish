@@ -8,6 +8,7 @@ import { webcrypto } from 'node:crypto'
 import axios from 'axios'
 import * as Router from 'vue-router'
 import { createI18n, useI18n } from 'vue-i18n'
+import * as PendingUpload from '../../src/store/pendingUpload.js'
 import * as promptTrialFiles from '../../src/utils/promptTrialFiles.js'
 import * as promptTrialSuite from '../../src/utils/promptTrialSuite.js'
 
@@ -80,6 +81,7 @@ export async function mountTrials({ api, initialPath = '/prompt-trials', locale 
     vue: { ...Vue, Transition: passThrough },
     'vue-router': { ...Router, createWebHistory: Router.createMemoryHistory },
     'vue-i18n': { useI18n },
+    '../store/pendingUpload.js': PendingUpload,
     '../utils/promptTrialFiles.js': promptTrialFiles,
     '../utils/promptTrialSuite.js': promptTrialSuite,
   }

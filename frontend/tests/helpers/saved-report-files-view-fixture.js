@@ -6,6 +6,7 @@ import { parse, compileScript, compileTemplate } from '@vue/compiler-sfc'
 import * as Vue from 'vue'
 import * as Router from 'vue-router'
 import { createI18n, useI18n } from 'vue-i18n'
+import * as PendingUpload from '../../src/store/pendingUpload.js'
 import { pathToFileURL } from 'node:url'
 import * as savedReportComparison from '../../src/utils/savedReportComparison.js'
 import * as savedReportSearch from '../../src/utils/savedReportSearch.js'
@@ -99,6 +100,7 @@ export async function mountReportFiles({ api, initialPath = '/report-files', loc
     },
     'vue-router': { ...Router, createWebHistory: Router.createMemoryHistory },
     'vue-i18n': { useI18n },
+    '../store/pendingUpload.js': PendingUpload,
     '../utils/savedReportComparison.js': savedReportComparison,
     '../utils/savedReportObservation.js': reportObservation,
     '../utils/savedReportFiles.js': reportFiles,

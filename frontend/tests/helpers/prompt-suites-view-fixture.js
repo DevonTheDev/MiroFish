@@ -10,6 +10,7 @@ import { trialApi, deferredTrials, fakeTimers } from './prompt-trials-view-fixtu
 export { trialApi, trialSnapshot, trialRequest, fakeTimers, ok as envelope } from './prompt-trials-view-fixture.js'
 import * as Router from 'vue-router'
 import { createI18n, useI18n } from 'vue-i18n'
+import * as PendingUpload from '../../src/store/pendingUpload.js'
 
 export const ok = data => ({ success: true, data })
 export async function flush() {
@@ -80,6 +81,7 @@ export async function mountSuites({ api, initialPath = '/prompt-suites', locale 
     vue: { ...Vue, Transition: passThrough },
     'vue-router': { ...Router, createWebHistory: Router.createMemoryHistory },
     'vue-i18n': { useI18n },
+    '../store/pendingUpload.js': PendingUpload,
   }
   const components = { '../components/LanguageSwitcher.vue': stub }
   function evaluate(source, returnName = 'component') {

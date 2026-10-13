@@ -207,6 +207,7 @@
                 <span v-else>{{ $t('home.initializing') }}</span>
                 <span class="btn-arrow">→</span>
               </button>
+              <p v-if="error" class="start-error" role="alert" data-testid="home-start-error">{{ $t(error) }}</p>
             </div>
           </div>
         </div>
@@ -219,10 +220,11 @@
 </template>
 
 <script setup>
-import { ref, computed } from 'vue'
+import { ref, computed, onBeforeUnmount } from 'vue'
 import { RouterLink, useRouter } from 'vue-router'
 import HistoryDatabase from '../components/HistoryDatabase.vue'
 import LanguageSwitcher from '../components/LanguageSwitcher.vue'
+import { setPendingUpload } from '../store/pendingUpload.js'
 
 const router = useRouter()
 
@@ -238,6 +240,16 @@ const files = ref([])
 const loading = ref(false)
 const error = ref('')
 const isDragOver = ref(false)
+let active = true
+let startAttempt = null
+
+onBeforeUnmount(() => {
+  active = false
+  startAttempt = null
+})
+
+const ownsStart = attempt => active && startAttempt === attempt
+  && router.currentRoute.value.name === 'Home'
 
 // 文件输入引用
 const fileInput = ref(null)
@@ -302,20 +314,34 @@ const scrollToBottom = () => {
   })
 }
 
-// 开始模拟 - 立即跳转，API调用在Process页面进行
-const startSimulation = () => {
-  if (!canSubmit.value || loading.value) return
-  
-  // 存储待上传的数据
-  import('../store/pendingUpload.js').then(({ setPendingUpload }) => {
-    setPendingUpload(files.value, formData.value.simulationRequirement)
-    
-    // 立即跳转到Process页面（使用特殊标识表示新建项目）
-    router.push({
+// Capture one accepted draft; MainView owns the upload and its consumption.
+const startSimulation = async () => {
+  if (!active || router.currentRoute.value.name !== 'Home' || !canSubmit.value || loading.value) return
+
+  const attempt = {}
+  startAttempt = attempt
+  loading.value = true
+  error.value = ''
+  const acceptedFiles = [...files.value]
+  const acceptedRequirement = formData.value.simulationRequirement
+
+  try {
+    setPendingUpload(acceptedFiles, acceptedRequirement)
+    await router.push({
       name: 'Process',
       params: { projectId: 'new' }
     })
-  })
+  } catch {
+    // Rejected navigation uses the same visible recovery as an aborted push.
+  } finally {
+    // A resolved push can also leave this Home selected (for example a redirect).
+    // Retired instances must never update a newer Home or clear pending data.
+    if (ownsStart(attempt)) {
+      startAttempt = null
+      loading.value = false
+      error.value = 'home.startFailed'
+    }
+  }
 }
 </script>
 
@@ -878,6 +904,13 @@ const startSimulation = () => {
   cursor: not-allowed;
   transform: none;
   border: 1px solid #E5E5E5;
+}
+
+.start-error {
+  margin: 12px 0 0;
+  color: #B42318;
+  font-size: 0.875rem;
+  line-height: 1.5;
 }
 
 /* 引导动画：微妙的边框脉冲 */

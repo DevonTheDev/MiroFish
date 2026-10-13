@@ -6,6 +6,7 @@ import { parse, compileScript, compileTemplate } from '@vue/compiler-sfc'
 import * as Vue from 'vue'
 import * as Router from 'vue-router'
 import { createI18n, useI18n } from 'vue-i18n'
+import * as PendingUpload from '../../src/store/pendingUpload.js'
 import * as activityFiles from '../../src/utils/savedActivityFiles.js'
 import * as activityReview from '../../src/utils/savedActivityReview.js'
 
@@ -87,6 +88,7 @@ export async function mountActivityFiles({ api, initialPath = '/activity-files',
     vue: { ...Vue, Transition: passThrough },
     'vue-router': { ...Router, createWebHistory: Router.createMemoryHistory },
     'vue-i18n': { useI18n },
+    '../store/pendingUpload.js': PendingUpload,
     '../utils/savedActivityFiles.js': activityFiles,
     '../utils/savedActivityReview.js': activityReview,
   }
