@@ -111,7 +111,7 @@ test('sparse records are accepted in original order without copying or assigning
   assert.ok(view.emitted.includes('Loaded 3 simulated individuals'))
   view.state().selectSurveyTab()
   await settle()
-  assert.equal(view.all(node => node.type === 'input' && node.props.type === 'checkbox').length, 3)
+  assert.equal(byClass(view, 'agent-checkbox').length, 3)
   assert.equal(profiles.length, 1)
 })
 
@@ -130,6 +130,7 @@ for (const metadata of [{}, { status: 'preparing', count: 5 }, { status: 'failed
     view.state().selectSurveyTab()
     await settle()
     assert.equal(textContent(catalogueStatus(view)), 'No agent profiles available')
+    assert.equal(byClass(view, 'survey-selected-only').length, 0)
     assert.equal(profiles.length, 1)
   })
 }
@@ -293,7 +294,7 @@ test('retired retry cannot change accepted indices, pending agent chat or survey
   await settle()
   view.state().selectSurveyTab()
   await settle()
-  const checkbox = view.all(node => node.type === 'input' && node.props.type === 'checkbox')[0]
+  const checkbox = byClass(view, 'agent-checkbox')[0].children.find(node => node.type === 'input')
   checkbox.props.onChange()
   byClass(view, 'survey-input')[0].props['onUpdate:modelValue']('Survey for Alice')
   await settle()

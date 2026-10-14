@@ -29,7 +29,7 @@ async function setup(t, { selected = [0], locale = 'en' } = {}) {
   await settle()
   view.state().selectSurveyTab()
   await settle()
-  const checkboxes = view.all(node => node.type === 'input' && node.props.type === 'checkbox')
+  const checkboxes = byClass(view, 'agent-checkbox').map(row => row.children.find(node => node.type === 'input'))
   selected.forEach(index => checkboxes[index].props.onChange())
   const question = byClass(view, 'survey-input')[0]
   question.props['onUpdate:modelValue']('Original question 雪')

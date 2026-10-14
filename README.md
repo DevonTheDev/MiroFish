@@ -229,6 +229,13 @@ The hidden-selection count makes these visible; **Select all N agents** and
 when the report or simulation context changes. Searching itself starts no
 interview or profile reload.
 
+In the survey picker, **Selected only** shows the selected agents that match the
+current search. Unchecking an agent removes it from this view. **Clear search**
+keeps the view enabled, and the global selection actions still affect every
+agent. The view stays enabled when switching tabs and resets off when changing
+the report or simulation. View and selection edits during a survey affect future
+submissions; the pending survey keeps its submitted targets and question.
+
 ## Monitor local runtime activity
 
 Open **Runtime monitor** from Home to see loaded model settings, resource limits,

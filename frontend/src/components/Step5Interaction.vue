@@ -356,16 +356,25 @@
                 </label>
                 <button v-if="surveyAgentQuery" type="button" class="agent-search-clear"
                   @click="surveyAgentQuery = ''">{{ $t('step5.clearAgentSearch') }}</button>
+                <label class="survey-selected-only-label">
+                  <input type="checkbox" class="survey-selected-only" :checked="surveySelectedOnly"
+                    @change="surveySelectedOnly = $event.target.checked">
+                  <span>{{ $t('step5.selectedOnly') }}</span>
+                </label>
                 <span class="agent-search-count" role="status" aria-live="polite"
-                  >{{ $t('step5.agentMatchCount', { count: surveyAgentMatches.length, total: profiles.length }) }}</span>
+                  >{{ $t(surveySelectedOnly ? 'step5.selectedAgentMatchCount' : 'step5.agentMatchCount', {
+                    count: surveyVisibleAgents.length, total: surveySelectedOnly ? selectedAgents.size : profiles.length
+                  }) }}</span>
                 <span v-if="hiddenSelectedAgentCount > 0" class="agent-search-hidden"
                   >{{ $t('step5.hiddenSelectedAgents', { count: hiddenSelectedAgentCount }) }}</span>
               </div>
-              <p v-if="profiles.length > 0 && surveyAgentMatches.length === 0" class="agent-search-empty"
-                >{{ $t('step5.noMatchingAgents') }}</p>
+              <p v-if="profiles.length > 0 && surveyVisibleAgents.length === 0" class="agent-search-empty"
+                >{{ $t(surveySelectedOnly
+                  ? (selectedAgents.size === 0 ? 'step5.noAgentsSelected' : 'step5.noSelectedAgentsMatch')
+                  : 'step5.noMatchingAgents') }}</p>
               <div class="agents-grid">
                 <label 
-                  v-for="{ profile: agent, originalIndex: idx } in surveyAgentMatches"
+                  v-for="{ profile: agent, originalIndex: idx } in surveyVisibleAgents"
                   :key="idx"
                   class="agent-checkbox"
                   :class="{ checked: selectedAgents.has(idx) }"
@@ -495,6 +504,7 @@ const chatInputRef = ref(null)
 
 // Survey State
 const selectedAgents = ref(new Set())
+const surveySelectedOnly = ref(false)
 const surveyQuestion = ref('')
 const surveyResults = ref([])
 const isSurveying = ref(false)
@@ -520,6 +530,9 @@ const matchingAgents = (query) => {
 }
 const chatAgentMatches = computed(() => matchingAgents(chatAgentQuery.value))
 const surveyAgentMatches = computed(() => matchingAgents(surveyAgentQuery.value))
+const surveyVisibleAgents = computed(() => surveySelectedOnly.value
+  ? surveyAgentMatches.value.filter(({ originalIndex }) => selectedAgents.value.has(originalIndex))
+  : surveyAgentMatches.value)
 const hiddenSelectedAgentCount = computed(() => selectedAgents.value.size
   - surveyAgentMatches.value.filter(({ originalIndex }) => selectedAgents.value.has(originalIndex)).length)
 const profileLoadState = ref('idle')
@@ -976,6 +989,7 @@ watch(() => [props.reportId, props.simulationId], () => {
   profiles.value = []
   chatAgentQuery.value = ''
   surveyAgentQuery.value = ''
+  surveySelectedOnly.value = false
   profileLoadState.value = 'idle'
   profileRetry.value = null
   profileRequest = null
@@ -1941,6 +1955,15 @@ watch(() => [props.reportId, props.simulationId], () => {
   border: 0;
   background: transparent;
   color: #4F46E5;
+  cursor: pointer;
+}
+
+.survey-selected-only-label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: #374151;
   cursor: pointer;
 }
 
