@@ -306,6 +306,7 @@
     "findAgents": "查找智能体",
     "agentSearchPlaceholder": "用户名、姓名或职业",
     "clearAgentSearch": "清除搜索",
+    "selectMatchingAgents": "选择匹配的智能体",
     "agentMatchCount": "匹配 {count} / {total} 个智能体",
     "noMatchingAgents": "没有符合搜索条件的智能体",
     "hiddenSelectedAgents": "有 {count} 个已选智能体被搜索隐藏",

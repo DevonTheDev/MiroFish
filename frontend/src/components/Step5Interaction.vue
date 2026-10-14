@@ -356,6 +356,9 @@
                 </label>
                 <button v-if="surveyAgentQuery" type="button" class="agent-search-clear"
                   @click="surveyAgentQuery = ''">{{ $t('step5.clearAgentSearch') }}</button>
+                <button v-if="surveyAgentQuery.trim() && !surveySelectedOnly" type="button"
+                  class="survey-select-matching" :disabled="!hasUnselectedSurveyMatches"
+                  v-on="{ click: selectMatchingAgents }">{{ $t('step5.selectMatchingAgents') }}</button>
                 <label class="survey-selected-only-label">
                   <input type="checkbox" class="survey-selected-only" :checked="surveySelectedOnly"
                     @change="surveySelectedOnly = $event.target.checked">
@@ -530,6 +533,8 @@ const matchingAgents = (query) => {
 }
 const chatAgentMatches = computed(() => matchingAgents(chatAgentQuery.value))
 const surveyAgentMatches = computed(() => matchingAgents(surveyAgentQuery.value))
+const hasUnselectedSurveyMatches = computed(() => surveyAgentMatches.value
+  .some(({ originalIndex }) => !selectedAgents.value.has(originalIndex)))
 const surveyVisibleAgents = computed(() => surveySelectedOnly.value
   ? surveyAgentMatches.value.filter(({ originalIndex }) => selectedAgents.value.has(originalIndex))
   : surveyAgentMatches.value)
@@ -813,6 +818,24 @@ const selectAllAgents = () => {
   profiles.value.forEach((_, idx) => newSet.add(idx))
   selectedAgents.value = newSet
 }
+
+const selectMatchingAgents = computed(() => {
+  const context = viewContext()
+  const catalogue = profiles.value
+  const query = surveyAgentQuery.value
+  const matches = surveyAgentMatches.value
+  // Like profile retry, the rendered action belongs to this view and catalogue.
+  const select = () => {
+    if (!isCurrentView(context) || selectMatchingAgents.value !== select
+      || activeTab.value !== 'survey' || surveySelectedOnly.value || !query.trim()
+      || query !== surveyAgentQuery.value || catalogue !== profiles.value
+      || profileLoadState.value !== 'ready') return
+    const newSet = new Set(selectedAgents.value)
+    for (const { originalIndex } of matches) newSet.add(originalIndex)
+    if (newSet.size !== selectedAgents.value.size) selectedAgents.value = newSet
+  }
+  return select
+})
 
 const clearAgentSelection = () => {
   selectedAgents.value = new Set()
@@ -1950,12 +1973,18 @@ watch(() => [props.reportId, props.simulationId], () => {
   font: inherit;
 }
 
-.agent-search-clear {
+.agent-search-clear,
+.survey-select-matching {
   padding: 6px;
   border: 0;
   background: transparent;
   color: #4F46E5;
   cursor: pointer;
+}
+
+.survey-select-matching:disabled {
+  color: #9CA3AF;
+  cursor: not-allowed;
 }
 
 .survey-selected-only-label {

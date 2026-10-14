@@ -306,6 +306,7 @@
     "findAgents": "Find agents",
     "agentSearchPlaceholder": "Username, name or profession",
     "clearAgentSearch": "Clear search",
+    "selectMatchingAgents": "Select matching agents",
     "agentMatchCount": "{count} of {total} agents match",
     "noMatchingAgents": "No agents match your search",
     "hiddenSelectedAgents": "Selected agents hidden by search: {count}",

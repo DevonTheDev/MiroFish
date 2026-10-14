@@ -236,6 +236,12 @@ agent. The view stays enabled when switching tabs and resets off when changing
 the report or simulation. View and selection edits during a survey affect future
 submissions; the pending survey keeps its submitted targets and question.
 
+With a nonblank survey search and **Selected only** off, **Select matching agents**
+adds every matching agent to your current selection. Earlier selections, including
+hidden agents, keep their order; new matches are appended in catalogue order.
+The action keeps the search and is disabled when no new matches remain. You can
+use it while a survey is pending to prepare the next submission.
+
 ## Monitor local runtime activity
 
 Open **Runtime monitor** from Home to see loaded model settings, resource limits,
