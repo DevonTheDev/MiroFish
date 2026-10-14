@@ -374,6 +374,7 @@
     "zoomOut": "缩小",
     "resetView": "重置视图",
     "fitGraph": "适应图谱",
+    "centerSelectedNode": "居中选中节点",
     "viewControls": "图谱视图控制",
     "toggleMaximize": "最大化/还原",
     "closeHint": "关闭提示"

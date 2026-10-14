@@ -130,6 +130,10 @@
           
           <!-- 节点详情 -->
           <div v-if="selectedItem.type === 'node'" class="detail-content">
+            <button type="button" class="tool-btn graph-center-selected"
+              :disabled="!canCenterSelectedNode" @click="centerSelectedNode">
+              {{ $t('graph.centerSelectedNode') }}
+            </button>
             <div class="detail-row">
               <span class="detail-label">Name:</span>
               <span class="detail-value">{{ selectedItem.data.name }}</span>
@@ -340,8 +344,11 @@ const zoomIn = () => commandRenderedZoom?.('in')
 const zoomOut = () => commandRenderedZoom?.('out')
 const resetView = () => commandRenderedZoom?.('reset')
 const fitView = () => commandRenderedZoom?.('fit')
+const centerSelectedNode = () => commandRenderedZoom?.('center-selected')
 const searchReady = ref(false)
 const graphRevision = ref(0)
+const canCenterSelectedNode = computed(() => zoomReady.value
+  && selectedItem.value?.type === 'node' && selectedItem.value.graphRevision === graphRevision.value)
 let activateRenderedNode = null
 let activateRenderedRelationship = null
 let detailOpenedBySearch = false
@@ -967,7 +974,8 @@ const renderGraph = (revision, ticket) => {
       .attr('stroke-width', 2.5)
     detailOpenedBySearch = fromSearch
     selectedItem.value = {
-      type: 'node', data: d.rawData, entityType: d.type, color: getColor(d.type)
+      type: 'node', data: d.rawData, entityType: d.type, color: getColor(d.type),
+      sourceIndex: d.sourceIndex, graphRevision: revision
     }
   }
   activateRenderedNode = result => {
@@ -1044,6 +1052,20 @@ const renderGraph = (revision, ticket) => {
     if (command === 'reset') svg.call(zoom.transform, d3.zoomIdentity)
     else if (command === 'in' && current.k < maximum) svg.call(zoom.scaleBy, 2)
     else if (command === 'out' && current.k > minimum) svg.call(zoom.scaleBy, 0.5)
+    else if (command === 'center-selected') {
+      const selected = selectedItem.value
+      if (selected?.type !== 'node' || selected.graphRevision !== revision
+        || !Number.isInteger(selected.sourceIndex)
+        || props.graphData?.nodes?.[selected.sourceIndex] !== selected.data) return
+      // Resolve this occurrence in the completed drawing, including after resize.
+      const node = nodes[selected.sourceIndex]
+      if (!node || node.rawData !== selected.data
+        || nodes.some(node => node.fx != null || node.fy != null)
+        || ![node.x, node.y, current.k].every(Number.isFinite) || current.k <= 0) return
+      const x = width / 2 - current.k * node.x, y = height / 2 - current.k * node.y
+      if (![x, y].every(Number.isFinite)) return
+      svg.call(zoom.transform, d3.zoomIdentity.translate(x, y).scale(current.k))
+    }
     else if (command === 'fit') {
       // Drag pins belong to these live rendered nodes. Leave a drag's viewport alone.
       if (nodes.some(node => node.fx != null || node.fy != null)) return
@@ -1453,6 +1475,10 @@ input:checked + .slider:before {
   overflow-y: auto;
   flex: 1;
 }
+
+.graph-center-selected { margin-bottom: 12px; }
+.graph-center-selected:focus-visible { outline: 2px solid #004E89; outline-offset: 2px; }
+.graph-center-selected:disabled { opacity: 0.45; cursor: default; }
 
 .detail-row {
   margin-bottom: 12px;

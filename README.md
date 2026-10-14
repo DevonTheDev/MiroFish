@@ -105,6 +105,20 @@ positions, unsafe arithmetic or a node pinned by an active drag leaves the view
 unchanged. Fit measures markers, not labels, links or overlays, and leaves layout,
 data, search and selection unchanged. Ongoing force motion may move nodes again.
 
+**Center selected node** is a text button in node details. Selecting a circle or
+node search result still leaves the viewport unchanged; this separate action
+centers that exact occurrence's current rendered position at the current zoom
+scale. It uses the full drawing viewport, so details or other overlays may cover
+its center, and ongoing force motion may move the node afterward. Resize keeps
+the selection usable after the new drawing completes. A data change leaves
+pointer-opened details visible but disables centering until a node is reselected;
+search-opened details still close on refresh. Pending/empty drawings, invalid
+coordinates or dimensions, unsafe arithmetic and any active node pin leave the
+view unchanged. The action preserves data, layout, selection and search, with
+English/Chinese text and a visible focus outline. Focused synthetic-host tests
+cover current positions, occurrence identity and active wheel continuity;
+native browser keyboard, focus and visual placement remain unverified.
+
 ## Expand self-relation details
 
 After opening a grouped **Self Relations** edge, each numbered relation header is
