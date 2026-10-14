@@ -373,6 +373,7 @@
     "zoomIn": "Zoom in",
     "zoomOut": "Zoom out",
     "resetView": "Reset view",
+    "fitGraph": "Fit graph",
     "viewControls": "Graph view controls",
     "toggleMaximize": "Maximize/Restore",
     "closeHint": "Close hint"

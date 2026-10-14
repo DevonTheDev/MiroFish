@@ -96,6 +96,15 @@ Buttons have English/Chinese accessible labels and a visible focus outline.
 Focused synthetic-host tests also cover commands during a retained wheel gesture;
 native keyboard activation, focus and visual placement remain unverified.
 
+**Fit graph** synchronously centers the current rendered node positions and fits
+their circle markers, including selected strokes, with an inset of up to 24
+viewport units. It uses the current drawing's viewport and the same 0.1–4 scale
+limits; very large layouts can extend outside the viewport at the minimum scale.
+Single or coincident nodes are supported. Invalid positions are ignored; no valid
+positions, unsafe arithmetic or a node pinned by an active drag leaves the view
+unchanged. Fit measures markers, not labels, links or overlays, and leaves layout,
+data, search and selection unchanged. Ongoing force motion may move nodes again.
+
 ## Expand self-relation details
 
 After opening a grouped **Self Relations** edge, each numbered relation header is

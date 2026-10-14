@@ -27,6 +27,11 @@
             :disabled="!zoomReady" @click="resetView">
             <span aria-hidden="true">↺</span>
           </button>
+          <button type="button" class="tool-btn graph-zoom-button graph-zoom-fit"
+            :aria-label="$t('graph.fitGraph')" :title="$t('graph.fitGraph')"
+            :disabled="!zoomReady" @click="fitView">
+            <span aria-hidden="true">⤢</span>
+          </button>
         </div>
       </div>
     </div>
@@ -334,6 +339,7 @@ let commandRenderedZoom = null
 const zoomIn = () => commandRenderedZoom?.('in')
 const zoomOut = () => commandRenderedZoom?.('out')
 const resetView = () => commandRenderedZoom?.('reset')
+const fitView = () => commandRenderedZoom?.('fit')
 const searchReady = ref(false)
 const graphRevision = ref(0)
 let activateRenderedNode = null
@@ -1027,9 +1033,9 @@ const renderGraph = (revision, ticket) => {
   // keep their SVG lifetime, while explicit commands require the latest render.
   commandRenderedZoom = command => {
     const container = graphContainer.value
-    const width = container?.clientWidth, height = container?.clientHeight
+    const liveWidth = container?.clientWidth, liveHeight = container?.clientHeight
     if (!isCurrentRender() || !zoomReady.value || graphSvg.value !== svg.node()
-      || !Number.isFinite(width) || !Number.isFinite(height) || width <= 0 || height <= 0
+      || !Number.isFinite(liveWidth) || !Number.isFinite(liveHeight) || liveWidth <= 0 || liveHeight <= 0
       || container.querySelector('.graph-svg') !== svg.node()
       || g.node().parentNode !== svg.node()) return
     const current = d3.zoomTransform(svg.node())
@@ -1038,6 +1044,32 @@ const renderGraph = (revision, ticket) => {
     if (command === 'reset') svg.call(zoom.transform, d3.zoomIdentity)
     else if (command === 'in' && current.k < maximum) svg.call(zoom.scaleBy, 2)
     else if (command === 'out' && current.k > minimum) svg.call(zoom.scaleBy, 0.5)
+    else if (command === 'fit') {
+      // Drag pins belong to these live rendered nodes. Leave a drag's viewport alone.
+      if (nodes.some(node => node.fx != null || node.fy != null)) return
+      let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity
+      for (const node of nodes) {
+        if (!Number.isFinite(node.x) || !Number.isFinite(node.y)) continue
+        minX = Math.min(minX, node.x)
+        minY = Math.min(minY, node.y)
+        maxX = Math.max(maxX, node.x)
+        maxY = Math.max(maxY, node.y)
+      }
+      if (minX === Infinity) return
+      const spanX = maxX - minX, spanY = maxY - minY
+      // Radius 10 plus half the selected stroke width 4, in world units.
+      const paddedWidth = spanX + 24, paddedHeight = spanY + 24
+      if (![spanX, spanY, paddedWidth, paddedHeight].every(Number.isFinite)) return
+      // Use this render's viewBox/zoom extent, not a later CSS-only size change.
+      const padding = Math.min(24, width / 4, height / 4)
+      const fitScale = Math.min((width - 2 * padding) / paddedWidth, (height - 2 * padding) / paddedHeight)
+      if (!Number.isFinite(fitScale)) return
+      const scale = Math.max(minimum, Math.min(maximum, fitScale))
+      const centerX = minX / 2 + maxX / 2, centerY = minY / 2 + maxY / 2
+      const x = width / 2 - scale * centerX, y = height / 2 - scale * centerY
+      if (![scale, x, y].every(Number.isFinite)) return
+      svg.call(zoom.transform, d3.zoomIdentity.translate(x, y).scale(scale))
+    }
   }
   zoomScale.value = d3.zoomTransform(svg.node()).k
   zoomReady.value = true
