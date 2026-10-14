@@ -685,6 +685,8 @@ const renderGraph = (revision, ticket) => {
   svg.call(d3.zoom().extent([[0, 0], [width, height]]).scaleExtent([0.1, 4]).on('zoom', (event) => {
     g.attr('transform', event.transform)
   }))
+  // The SVG retains its viewport when redraw replaces the root group.
+  g.attr('transform', d3.zoomTransform(svg.node()))
 
   // Links - 使用 path 支持曲线
   const linkGroup = g.append('g').attr('class', 'links')

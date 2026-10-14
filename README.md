@@ -74,6 +74,14 @@ ready. Stale results and retired graph pointer callbacks cannot select old data.
 Mounted tests use real Vue and D3 with a synthetic host; native browser keyboard,
 focus behavior, pointer geometry and layout remain unverified.
 
+After a completed zoom gesture, resize and data redraws preserve the pan and scale
+of the same rendered SVG, including graph-ID changes and empty-node refreshes.
+Removing the graph until its SVG unmounts, then loading again starts at identity.
+This does not fit the graph or preserve node positions when layout restarts.
+Redraw during an active wheel, drag, touch or zoom transition can still leave the
+viewport out of sync. Focused tests cover completed wheel gestures with the same
+synthetic host; native browser behavior and active-gesture handling remain unverified.
+
 ## Expand self-relation details
 
 After opening a grouped **Self Relations** edge, each numbered relation header is
