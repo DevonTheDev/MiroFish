@@ -119,6 +119,22 @@ English/Chinese text and a visible focus outline. Focused synthetic-host tests
 cover current positions, occurrence identity and active wheel continuity;
 native browser keyboard, focus and visual placement remain unverified.
 
+**Fit relationship endpoints** is a separate text button in relationship details.
+Selecting a line, its label or a relationship search result still leaves the
+viewport unchanged. Clicking the button fits both exact current rendered endpoint
+markers, including grouped and individually searched self-relations. It uses the
+same marker extent, viewport inset and 0.1–4 scale limits as **Fit graph**; very
+large endpoint separations can remain clipped at minimum scale. It does not fit
+curves, self-loop arcs, labels or pixels hidden by overlays. Ongoing force motion
+may move endpoints afterward. Resize retains the selection and enables the action
+after the new drawing completes; data changes disable the action in retained
+pointer details until reselection, while search-opened details still close. Missing rendered edges
+remain **Details only** with a disabled button. Either missing or invalid endpoint,
+unsafe arithmetic, invalid dimensions or any active node pin leaves the viewport
+unchanged. Layout, data, selection, search, labels and export behavior are retained.
+English/Chinese labels and focus styles are included; synthetic-host tests do not
+establish native browser keyboard, focus, placement or overlay visibility.
+
 ## Download the loaded graph JSON
 
 On the Process screen, **Download loaded graph JSON** downloads the values

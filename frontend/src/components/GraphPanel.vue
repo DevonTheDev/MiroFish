@@ -187,6 +187,10 @@
           
           <!-- 边详情 -->
           <div v-else class="detail-content">
+            <button type="button" class="tool-btn graph-fit-relationship"
+              :disabled="!canFitRelationshipEndpoints" @click="fitRelationshipEndpoints">
+              {{ $t('graph.fitRelationshipEndpoints') }}
+            </button>
             <p v-if="selectedItem.relationshipNotice" class="relationship-search-notice">{{ $t(selectedItem.relationshipNotice) }}</p>
             <!-- 自环组详情 -->
             <template v-if="selectedItem.data.isSelfLoopGroup">
@@ -361,10 +365,16 @@ const zoomOut = () => commandRenderedZoom?.('out')
 const resetView = () => commandRenderedZoom?.('reset')
 const fitView = () => commandRenderedZoom?.('fit')
 const centerSelectedNode = () => commandRenderedZoom?.('center-selected')
+const fitRelationshipEndpoints = () => commandRenderedZoom?.('fit-relationship')
 const searchReady = ref(false)
 const graphRevision = ref(0)
 const canCenterSelectedNode = computed(() => zoomReady.value
   && selectedItem.value?.type === 'node' && selectedItem.value.graphRevision === graphRevision.value)
+const selectedRelationship = ref(null)
+let resolveSelectedRelationship = null
+const canFitRelationshipEndpoints = computed(() => zoomReady.value
+  && selectedItem.value?.type === 'edge' && selectedRelationship.value?.revision === graphRevision.value
+  && !!resolveSelectedRelationship?.())
 let activateRenderedNode = null
 let activateRenderedRelationship = null
 let detailOpenedBySearch = false
@@ -513,6 +523,7 @@ const formatDateTime = (dateStr) => {
 const closeDetailPanel = () => {
   detailOpenedBySearch = false
   selectedItem.value = null
+  selectedRelationship.value = null
   expandedSelfLoops.value = new Set() // 重置展开状态
 }
 
@@ -523,6 +534,7 @@ let nodeLabelsRef = null
 
 const retireRenderedGraph = () => {
   commandRenderedZoom = null
+  resolveSelectedRelationship = null
   zoomReady.value = false
   activateRenderedNode = null
   activateRenderedRelationship = null
@@ -557,6 +569,14 @@ const renderGraph = (revision, ticket) => {
   const renderedRelationships = new Map()
   let clearHighlights = () => {}
   let highlightRelationship = () => {}
+  // Keep source occurrence identity separate from cloned/grouped detail data.
+  // Retain no rendered edge: resize resolves this metadata in the new drawing.
+  const rememberRelationship = (edge, record = edge?.sourceRecords[0]) => {
+    selectedRelationship.value = edge && record ? {
+      revision, index: record.index, raw: record.raw,
+      sourceRecords: edge.sourceRecords.map(({ index, raw }) => ({ index, raw }))
+    } : null
+  }
   activateRenderedRelationship = result => {
     if (!isCurrentRender() || result.revision !== revision || edgesData[result.index] !== result.raw) return
     const match = renderedRelationships.get(result.index)
@@ -565,6 +585,7 @@ const renderGraph = (revision, ticket) => {
     if (match) highlightRelationship(match.edge)
     const endpoints = relationshipEndpoints(result.raw)
     detailOpenedBySearch = true
+    rememberRelationship(match?.edge, result)
     selectedItem.value = {
       type: 'edge',
       data: { ...result.raw, isSelfLoopGroup: false,
@@ -578,6 +599,7 @@ const renderGraph = (revision, ticket) => {
     if (!isCurrentRender()) return
     detailOpenedBySearch = false
     selectedItem.value = null
+    selectedRelationship.value = null
     clearHighlights()
   })
   searchReady.value = true
@@ -840,6 +862,7 @@ const renderGraph = (revision, ticket) => {
       d3.select(event.target).attr('stroke', '#3498db').attr('stroke-width', 3)
       
       detailOpenedBySearch = false
+      rememberRelationship(d)
       selectedItem.value = {
         type: 'edge',
         data: d.rawData
@@ -867,6 +890,7 @@ const renderGraph = (revision, ticket) => {
       d3.select(event.target).attr('fill', 'rgba(52, 152, 219, 0.1)')
       
       detailOpenedBySearch = false
+      rememberRelationship(d)
       selectedItem.value = {
         type: 'edge',
         data: d.rawData
@@ -897,6 +921,7 @@ const renderGraph = (revision, ticket) => {
       d3.select(event.target).attr('fill', '#3498db')
       
       detailOpenedBySearch = false
+      rememberRelationship(d)
       selectedItem.value = {
         type: 'edge',
         data: d.rawData
@@ -991,6 +1016,7 @@ const renderGraph = (revision, ticket) => {
       .attr('stroke', '#E91E63')
       .attr('stroke-width', 2.5)
     detailOpenedBySearch = fromSearch
+    selectedRelationship.value = null
     selectedItem.value = {
       type: 'node', data: d.rawData, entityType: d.type, color: getColor(d.type),
       sourceIndex: d.sourceIndex, graphRevision: revision
@@ -1058,6 +1084,25 @@ const renderGraph = (revision, ticket) => {
 
   if (!Number.isFinite(width) || !Number.isFinite(height) || width <= 0 || height <= 0) return
 
+  resolveSelectedRelationship = () => {
+    const selected = selectedRelationship.value
+    if (!isCurrentRender() || selectedItem.value?.type !== 'edge' || selected?.revision !== revision
+      || !Number.isInteger(selected.index) || props.graphData?.edges?.[selected.index] !== selected.raw) return null
+    const match = renderedRelationships.get(selected.index)
+    if (!match || match.raw !== selected.raw) return null
+    const edge = match.edge
+    if (!isCurrentEdge(edge) || edge.sourceRecords.length !== selected.sourceRecords.length
+      || !edge.sourceRecords.every(({ index, raw }, position) => {
+        const saved = selected.sourceRecords[position], current = renderedRelationships.get(index)
+        return saved.index === index && saved.raw === raw && current?.raw === raw && current.edge === edge
+      })) return null
+    // D3 resolves duplicate IDs itself. Verify its exact endpoint occurrences,
+    // never a UUID/name lookup or a retained node from an earlier drawing.
+    return [edge.source, edge.target].every(endpoint => endpoint && Number.isInteger(endpoint.sourceIndex)
+      && nodes[endpoint.sourceIndex] === endpoint
+      && props.graphData?.nodes?.[endpoint.sourceIndex] === endpoint.rawData) ? edge : null
+  }
+
   // Publish commands only for this completed, populated drawing. Wheel callbacks
   // keep their SVG lifetime, while explicit commands require the latest render.
   commandRenderedZoom = command => {
@@ -1087,11 +1132,19 @@ const renderGraph = (revision, ticket) => {
       if (![x, y].every(Number.isFinite)) return
       svg.call(zoom.transform, d3.zoomIdentity.translate(x, y).scale(current.k))
     }
-    else if (command === 'fit') {
+    else if (command === 'fit' || command === 'fit-relationship') {
       // Drag pins belong to these live rendered nodes. Leave a drag's viewport alone.
       if (nodes.some(node => node.fx != null || node.fy != null)) return
+      let fitNodes = nodes
+      if (command === 'fit-relationship') {
+        const edge = resolveSelectedRelationship?.()
+        if (!edge) return
+        fitNodes = [edge.source, edge.target]
+        // Both endpoints are required; fitting only the valid one is misleading.
+        if (!fitNodes.every(node => Number.isFinite(node.x) && Number.isFinite(node.y))) return
+      }
       let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity
-      for (const node of nodes) {
+      for (const node of fitNodes) {
         if (!Number.isFinite(node.x) || !Number.isFinite(node.y)) continue
         minX = Math.min(minX, node.x)
         minY = Math.min(minY, node.y)
@@ -1128,6 +1181,7 @@ const requestGraphRender = () => {
 watch(() => props.graphData, data => {
   // Invalidate before a queued render can run, including in-place data changes.
   graphRevision.value++
+  selectedRelationship.value = null
   const identity = graphIdentity(data)
   if (!identity || identity !== lastGraphIdentity) {
     setSearchMode('nodes')
@@ -1559,9 +1613,9 @@ input:checked + .slider:before {
   flex: 1;
 }
 
-.graph-center-selected { margin-bottom: 12px; }
-.graph-center-selected:focus-visible { outline: 2px solid #004E89; outline-offset: 2px; }
-.graph-center-selected:disabled { opacity: 0.45; cursor: default; }
+.graph-center-selected, .graph-fit-relationship { margin-bottom: 12px; }
+.graph-center-selected:focus-visible, .graph-fit-relationship:focus-visible { outline: 2px solid #004E89; outline-offset: 2px; }
+.graph-center-selected:disabled, .graph-fit-relationship:disabled { opacity: 0.45; cursor: default; }
 
 .detail-row {
   margin-bottom: 12px;
