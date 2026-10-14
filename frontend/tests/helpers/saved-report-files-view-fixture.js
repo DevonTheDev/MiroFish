@@ -39,9 +39,10 @@ export function deferredApi() {
 
 // The real Vue renderer mounts compiled scripts AND templates through the real
 // application router. This host is deliberately not browser/visual validation.
-function renderer(scrollCalls) {
-  const node = (type, text = '') => ({ type, text, props: {}, children: [], parent: null,
+function renderer(scrollCalls, focusCalls, document) {
+  const node = (type, text = '') => Vue.markRaw({ type, text, props: {}, children: [], parent: null,
     listeners: {}, addEventListener(event, callback) { this.listeners[event] = callback },
+    focus(options) { focusCalls.push({ node: this, options }); document.focus(this) },
     scrollIntoView(options) { scrollCalls.push({ node: this, options }) } })
   const root = node('root'), body = node('body')
   const remove = child => {
@@ -74,7 +75,7 @@ function renderer(scrollCalls) {
 export async function mountReportFiles({ api, initialPath = '/report-files', locale = 'en', timers = fakeTimers(), deferredScrolls = null, onSearchIndex = null, cacheHandlers, downloadHooks = {}, clipboardHost = {}, onReaderMount = null, clipboardGlobalFacade = false } = {}) {
   const requests = api ? null : deferredApi()
   api ??= requests.api
-  const warnings = [], downloads = [], revokedUrls = [], scrollCalls = [], storageWrites = [], networkCalls = [], anchors = []
+  const warnings = [], downloads = [], revokedUrls = [], scrollCalls = [], focusCalls = [], storageWrites = [], networkCalls = [], anchors = []
   const storage = { getItem: () => null, setItem: (...args) => storageWrites.push(args), removeItem: (...args) => storageWrites.push(args), clear: () => storageWrites.push(['clear']) }
   const blobs = new Map()
   let urlIndex = 0
@@ -82,7 +83,17 @@ export async function mountReportFiles({ api, initialPath = '/report-files', loc
     createObjectURL(blob) { const url = `blob:report-files-${++urlIndex}`; downloadHooks.beforeCreate?.(blob); blobs.set(url, blob); downloadHooks.create?.(url, blob); return url },
     revokeObjectURL(url) { revokedUrls.push(url); blobs.delete(url); downloadHooks.revoke?.(url) },
   }
+  const documentListeners = new Map()
   const document = {
+    activeElement: null,
+    addEventListener(type, callback) { if (!documentListeners.has(type)) documentListeners.set(type, new Set()); documentListeners.get(type).add(callback) },
+    removeEventListener(type, callback) { documentListeners.get(type)?.delete(callback) },
+    focus(target) {
+      if (this.activeElement === target) return
+      this.activeElement = target
+      for (const callback of documentListeners.get('focusin') ?? []) callback({ target })
+      target?.onFocus?.()
+    },
     createElement(type) {
       assert.equal(type, 'a')
       downloadHooks.beforeAnchor?.()
@@ -90,7 +101,7 @@ export async function mountReportFiles({ api, initialPath = '/report-files', loc
     },
     body: { appendChild(anchor) { anchor.attached = true; downloadHooks.append?.(anchor) } },
   }
-  const { host, root, body } = renderer(scrollCalls)
+  const { host, root, body } = renderer(scrollCalls, focusCalls, document)
   const stub = { render: () => Vue.h('fixture-boundary') }
   const passThrough = { setup: (_props, { slots }) => () => slots.default?.() }
   const modules = {
@@ -172,7 +183,7 @@ export async function mountReportFiles({ api, initialPath = '/report-files', loc
   const find = predicate => all(predicate)[0]
   const byId = id => find(node => node.props['data-testid'] === id)
   const text = (target = root) => (target.type === '#comment' ? '' : target.text ?? '') + (target.children ?? []).map(text).join(' ')
-  return { root, body, router, i18n, warnings, requests, flush, waitFor, all, find, byId, text, downloads, revokedUrls, timers, scrollCalls, blobs, anchors, storageWrites, networkCalls, downloadHooks,
+  return { root, body, router, i18n, warnings, requests, flush, waitFor, all, find, byId, text, downloads, revokedUrls, timers, scrollCalls, focusCalls, document, documentListeners, blobs, anchors, storageWrites, networkCalls, downloadHooks,
     async click(id) {
       const target = byId(id); assert.ok(target, `missing clickable control ${id}`)
       assert.ok(!target.props.disabled, `disabled control ${id}`)

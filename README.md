@@ -214,6 +214,14 @@ download the exact displayed snapshot. Modern and legacy report files are
 supported. This view reads local saved files without calling models or starting
 new work. See the [saved report library guide](docs/LOCAL_MODE.md#revisit-saved-reports).
 
+The catalogue's **Open** button moves keyboard focus and requests an immediate
+scroll to the reader heading once its navigation commits, while saved content
+may still be loading. Later success or error responses do not move focus. A
+newer selection, intervening focus change, or observed Close, Refresh, filter
+edit or departure cancels the pending handoff. Direct links, browser history and
+file imports do not request it. The renderer tests cover focus/scroll requests;
+native browser positioning and assistive technology behavior remain unverified.
+
 **Copy saved Markdown**, at the top of the shared reader below the existing
 download controls, copies the whole accepted body in Saved reports and Open
 report files. It passes the exact saved string to the browser clipboard API,

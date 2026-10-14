@@ -36,7 +36,7 @@
       </section>
       <nav class="actions pagination" :aria-label="t('savedReports.pagination')"><button type="button" data-testid="first" :disabled="!canPrevious" @click="goPage(0)">{{ t('savedReports.first') }}</button><button type="button" data-testid="previous" :disabled="!canPrevious" @click="goPage(Math.max(0, result.offset - result.limit))">{{ t('savedReports.previous') }}</button><button type="button" data-testid="next" :disabled="!canNext" @click="goPage(result.offset + result.limit)">{{ t('savedReports.next') }}</button></nav>
       <section class="reader-section" :aria-label="t('savedReports.readerTitle')">
-        <div class="reader-heading"><h2>{{ t('savedReports.readerTitle') }}</h2><div class="actions"><button type="button" data-testid="download" :disabled="!canDownload" :onClick="downloadActions.markdown">{{ t('savedReports.download') }}</button><button type="button" data-testid="download-observation" :disabled="!savedReport || detailLoading || dirty" :onClick="downloadActions.json">{{ t('savedReportFiles.download') }}</button><button v-if="selectedReportId" type="button" data-testid="close-reader" @click="closeReader">{{ t('savedReports.close') }}</button></div></div>
+        <div class="reader-heading"><h2 ref="readerHeading" tabindex="-1" data-testid="reader-heading">{{ t('savedReports.readerTitle') }}</h2><div class="actions"><button type="button" data-testid="download" :disabled="!canDownload" :onClick="downloadActions.markdown">{{ t('savedReports.download') }}</button><button type="button" data-testid="download-observation" :disabled="!savedReport || detailLoading || dirty" :onClick="downloadActions.json">{{ t('savedReportFiles.download') }}</button><button v-if="selectedReportId" type="button" data-testid="close-reader" @click="closeReader">{{ t('savedReports.close') }}</button></div></div>
         <p class="note">{{ t('savedReports.readerNote') }}</p>
         <p v-if="downloadError" role="alert" class="notice error" data-testid="download-error">{{ t('savedReportFiles.downloadError') }}</p>
         <p v-if="detailLoading" role="status" data-testid="detail-loading">{{ t('savedReports.reading') }}</p>
@@ -55,8 +55,8 @@
 </template>
 
 <script setup>
-import { computed, ref, watch, onBeforeUnmount } from 'vue'
-import { useRoute, useRouter, RouterLink } from 'vue-router'
+import { computed, ref, watch, nextTick, onMounted, onBeforeUnmount } from 'vue'
+import { useRoute, useRouter, RouterLink, isNavigationFailure, NavigationFailureType } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import LanguageSwitcher from '../components/LanguageSwitcher.vue'
 import SavedReportComparison from '../components/SavedReportComparison.vue'
@@ -73,12 +73,14 @@ const errorCodes = ['invalid_query', 'invalid_report_id', 'report_not_found', 'm
 const reasonCodes = ['metadata_unreadable', 'metadata_too_large', 'identity_mismatch', 'unsafe_path']
 const revisionPattern = /^[a-f0-9]{64}$/, idPattern = /^[A-Za-z0-9_-]{1,128}$/
 const result = ref(null), savedReport = ref(null), loading = ref(false), detailLoading = ref(false)
-const downloadError = ref(false)
+const downloadError = ref(false), readerHeading = ref(null)
 const error = ref(''), detailError = ref(''), dirty = ref(false), selectedReportId = ref(null)
 const draft = ref({ q: '', status: '', limit: '20' })
 const pageSizes = computed(() => [...new Set([1, 10, 20, 50, Number(draft.value.limit)].filter(value => Number.isInteger(value) && value >= 1 && value <= 50))].sort((a, b) => a - b))
 let disposed = false, activeList = null, activeDetail = null, currentListKey = null, currentDetailKey = null
-let pendingNavigation = null, downloadResource = null
+let pendingNavigation = null, downloadResource = null, focusVersion = 0
+const observeFocus = () => { focusVersion += 1 }
+onMounted(() => document.addEventListener('focusin', observeFocus))
 
 function invalid() { throw { selectionCode: 'invalid_query' } }
 function pageNumber(value, fallback, min, max) {
@@ -174,17 +176,37 @@ function reconcile(force = false) {
   if (detailChanged) loadDetail(selected)
 }
 function editDraft(key, value) { dirty.value = true; retireAll(); draft.value = { ...draft.value, [key]: value } }
-async function navigateSelected(selected, { keepList = false } = {}) {
+function focusOpenedReader(navigation) {
+  const version = navigation?.readerFocusVersion
+  if (version === undefined) return
+  // The committed route watcher and same-route completion share this one use.
+  navigation.readerFocusVersion = undefined
+  const request = activeDetail
+  navigation.completion.then(failure => {
+    // A passive navigation can reach the same path while this Open is canceled.
+    if (failure && !isNavigationFailure(failure, NavigationFailureType.duplicated)) return
+    nextTick(() => {
+      const heading = readerHeading.value
+      const owns = () => !navigation.retired && route.fullPath === navigation.path && !!request && ownsDetail(request) && readerHeading.value === heading
+      if (!heading || focusVersion !== version || !owns()) return
+      heading.focus({ preventScroll: true })
+      // A synchronous focus handler may choose another control or retire this read.
+      if (owns() && document.activeElement === heading) heading.scrollIntoView({ behavior: 'instant', block: 'start' })
+    })
+  }, () => { /* Failed navigation never grants focus ownership. */ })
+}
+async function navigateSelected(selected, { keepList = false, focusReader = false } = {}) {
   const target = { name: 'SavedReports', query: queryFor(selected) }
   if (keepList) retireDetail(); else retireAll()
   dirty.value = false
-  const navigation = { path: router.resolve(target).fullPath, retired: false }; pendingNavigation = navigation
+  const navigation = { path: router.resolve(target).fullPath, retired: false, readerFocusVersion: focusReader ? focusVersion : undefined }; pendingNavigation = navigation
   try {
-    await router.push(target)
+    await (navigation.completion = router.push(target))
     if (disposed || pendingNavigation !== navigation || navigation.retired) return
     pendingNavigation = null
     if (route.fullPath !== navigation.path) { error.value = 'generic'; return }
     reconcile(!keepList)
+    focusOpenedReader(navigation)
   } catch { if (!disposed && pendingNavigation === navigation && !navigation.retired) error.value = 'generic' }
   finally { if (pendingNavigation === navigation) pendingNavigation = null }
 }
@@ -205,7 +227,7 @@ function goPage(offset) {
 }
 function openReport(report) {
   if (!result.value || dirty.value || loading.value || !activeList || !ownsList(activeList)) return
-  return navigateSelected({ filters: result.value.filters, offset: result.value.offset, limit: result.value.limit, revision: result.value.source_revision, report_id: report.report_id, metadata_revision: report.metadata_revision }, { keepList: true })
+  return navigateSelected({ filters: result.value.filters, offset: result.value.offset, limit: result.value.limit, revision: result.value.source_revision, report_id: report.report_id, metadata_revision: report.metadata_revision }, { keepList: true, focusReader: true })
 }
 function closeReader() {
   if (dirty.value) { retireDetail(); selectedReportId.value = null; return }
@@ -245,8 +267,9 @@ watch(() => route.fullPath, () => {
   const navigation = pendingNavigation; pendingNavigation = null
   if (navigation?.path === route.fullPath && navigation.retired) return
   reconcile()
+  if (navigation?.path === route.fullPath) focusOpenedReader(navigation)
 }, { immediate: true, flush: 'sync' })
-onBeforeUnmount(() => { disposed = true; retireAll(); pendingNavigation = null })
+onBeforeUnmount(() => { disposed = true; document.removeEventListener('focusin', observeFocus); retireAll(); pendingNavigation = null })
 </script>
 
 <style scoped>
@@ -256,6 +279,6 @@ main { max-width: 1120px; margin: auto; padding: 36px 24px 60px; }.page-heading 
 .panel { background: #fff; border: 1px solid #e1e5eb; border-radius: 12px; padding: 22px; }.filters { display: grid; grid-template-columns: minmax(0, 3fr) minmax(0, 1fr) minmax(0, .7fr); gap: 18px; }label { display: block; font-size: 13px; font-weight: 600; margin-bottom: 8px; }input, select { box-sizing: border-box; width: 100%; min-height: 44px; border: 1px solid #c8cfd9; border-radius: 6px; padding: 10px; font: inherit; background: #fff; color: #202329; }
 .actions { display: flex; flex-wrap: wrap; gap: 10px; }button { cursor: pointer; border: 1px solid #c8cfd9; background: #fff; color: #28323f; border-radius: 7px; padding: 10px 16px; font: inherit; font-size: 14px; min-height: 44px; }button.primary { background: #222b38; color: #fff; }button:disabled { opacity: .45; cursor: not-allowed; }button:hover:enabled { background: #edf1f6; }button.primary:hover:enabled { background: #3b495e; }button:focus-visible, input:focus-visible, select:focus-visible, a:focus-visible, pre:focus-visible { outline: 3px solid #5b8bc9; outline-offset: 3px; }
 .note { color: #68707c; font-size: 13px; }.notice { background: #edf1f6; border-radius: 8px; padding: 14px 16px; }.error { background: #fff0ed; color: #9a3527; }.warning { background: #fff3d9; color: #805518; }.page-summary, .reader-heading, .card-heading { display: flex; align-items: center; justify-content: space-between; gap: 16px; }.report-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 18px; }.status { background: #eff2f5; border-radius: 20px; padding: 5px 10px; font-size: 12px; white-space: nowrap; }
-dl { display: grid; grid-template-columns: minmax(100px, 1fr) minmax(0, 3fr); gap: 10px; font-size: 13px; }dt { color: #68707c; }dd { margin: 0; overflow-wrap: anywhere; }.preview { white-space: pre-wrap; overflow-wrap: anywhere; font-size: 14px; }.fingerprint { overflow-wrap: anywhere; }.pagination { margin: 24px 0; }.reader-section { margin-top: 40px; }pre { white-space: pre-wrap; overflow-wrap: anywhere; word-break: break-word; font: 13px/1.65 monospace; max-height: 720px; overflow-y: auto; tab-size: 4; }
+dl { display: grid; grid-template-columns: minmax(100px, 1fr) minmax(0, 3fr); gap: 10px; font-size: 13px; }dt { color: #68707c; }dd { margin: 0; overflow-wrap: anywhere; }.preview { white-space: pre-wrap; overflow-wrap: anywhere; font-size: 14px; }.fingerprint { overflow-wrap: anywhere; }.pagination { margin: 24px 0; }.reader-section { margin-top: 40px; }.reader-heading h2:focus { outline: 3px solid #5b8bc9; outline-offset: 3px; }pre { white-space: pre-wrap; overflow-wrap: anywhere; word-break: break-word; font: 13px/1.65 monospace; max-height: 720px; overflow-y: auto; tab-size: 4; }
 @media (max-width: 700px) { .report-grid, .filters { grid-template-columns: 1fr; }.app-header { padding: 14px 18px; flex-wrap: wrap; }.header-actions { gap: 14px; }main { padding: 24px 14px; }.panel { padding: 16px; }.reader-heading, .page-summary { align-items: flex-start; flex-direction: column; } }
 </style>
