@@ -683,7 +683,8 @@ const renderGraph = (revision, ticket) => {
   
   // Zoom
   svg.call(d3.zoom().extent([[0, 0], [width, height]]).scaleExtent([0.1, 4]).on('zoom', (event) => {
-    g.attr('transform', event.transform)
+    if (disposed || graphSvg.value !== svg.node()) return
+    svg.select('g').attr('transform', event.transform)
   }))
   // The SVG retains its viewport when redraw replaces the root group.
   g.attr('transform', d3.zoomTransform(svg.node()))

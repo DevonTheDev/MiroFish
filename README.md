@@ -74,13 +74,17 @@ ready. Stale results and retired graph pointer callbacks cannot select old data.
 Mounted tests use real Vue and D3 with a synthetic host; native browser keyboard,
 focus behavior, pointer geometry and layout remain unverified.
 
-After a completed zoom gesture, resize and data redraws preserve the pan and scale
+Resize and data redraws preserve the numerical pan and scale
 of the same rendered SVG, including graph-ID changes and empty-node refreshes.
 Removing the graph until its SVG unmounts, then loading again starts at identity.
 This does not fit the graph or preserve node positions when layout restarts.
-Redraw during an active wheel, drag, touch or zoom transition can still leave the
-viewport out of sync. Focused tests cover completed wheel gestures with the same
-synthetic host; native browser behavior and active-gesture handling remain unverified.
+An active wheel gesture follows the current root group of its owning SVG, including
+while a redraw is queued and after that group is replaced. Late events from a
+replaced SVG or unmounted panel cannot update rendered groups; D3 may still update
+the old SVG's internal transform before the callback guard runs. This does not
+cancel gestures or timers. Focused tests cover completed and active wheel gestures
+with the same synthetic host; pan, touch, zoom transitions, native browser geometry
+and rendering remain unverified.
 
 ## Expand self-relation details
 
