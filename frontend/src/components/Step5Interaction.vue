@@ -126,8 +126,21 @@
               </button>
               <div v-if="showAgentDropdown" class="dropdown-menu">
                 <div class="dropdown-header">{{ $t('step5.selectChatTarget') }}</div>
+                <div class="agent-search">
+                  <label class="agent-search-label">
+                    <span>{{ $t('step5.findAgents') }}</span>
+                    <input v-model="chatAgentQuery" type="search" class="chat-agent-search"
+                      :placeholder="$t('step5.agentSearchPlaceholder')">
+                  </label>
+                  <button v-if="chatAgentQuery" type="button" class="agent-search-clear"
+                    @click="chatAgentQuery = ''">{{ $t('step5.clearAgentSearch') }}</button>
+                  <span class="agent-search-count" role="status" aria-live="polite"
+                    >{{ $t('step5.agentMatchCount', { count: chatAgentMatches.length, total: profiles.length }) }}</span>
+                </div>
+                <p v-if="chatAgentMatches.length === 0" class="agent-search-empty"
+                  >{{ $t('step5.noMatchingAgents') }}</p>
                 <div 
-                  v-for="(agent, idx) in profiles" 
+                  v-for="{ profile: agent, originalIndex: idx } in chatAgentMatches"
                   :key="idx"
                   class="dropdown-item"
                   @click="selectAgent(agent, idx)"
@@ -335,9 +348,24 @@
                 <span class="section-title">{{ $t('step5.selectSurveyTarget') }}</span>
                 <span class="selection-count">{{ $t('step5.selectedCount', { selected: selectedAgents.size, total: profiles.length }) }}</span>
               </div>
+              <div v-if="profiles.length > 0" class="agent-search">
+                <label class="agent-search-label">
+                  <span>{{ $t('step5.findAgents') }}</span>
+                  <input v-model="surveyAgentQuery" type="search" class="survey-agent-search"
+                    :placeholder="$t('step5.agentSearchPlaceholder')">
+                </label>
+                <button v-if="surveyAgentQuery" type="button" class="agent-search-clear"
+                  @click="surveyAgentQuery = ''">{{ $t('step5.clearAgentSearch') }}</button>
+                <span class="agent-search-count" role="status" aria-live="polite"
+                  >{{ $t('step5.agentMatchCount', { count: surveyAgentMatches.length, total: profiles.length }) }}</span>
+                <span v-if="hiddenSelectedAgentCount > 0" class="agent-search-hidden"
+                  >{{ $t('step5.hiddenSelectedAgents', { count: hiddenSelectedAgentCount }) }}</span>
+              </div>
+              <p v-if="profiles.length > 0 && surveyAgentMatches.length === 0" class="agent-search-empty"
+                >{{ $t('step5.noMatchingAgents') }}</p>
               <div class="agents-grid">
                 <label 
-                  v-for="(agent, idx) in profiles" 
+                  v-for="{ profile: agent, originalIndex: idx } in surveyAgentMatches"
                   :key="idx"
                   class="agent-checkbox"
                   :class="{ checked: selectedAgents.has(idx) }"
@@ -360,7 +388,7 @@
                 </label>
               </div>
               <div class="selection-actions">
-                <button class="action-link" @click="selectAllAgents">{{ $t('step5.selectAll') }}</button>
+                <button class="action-link" @click="selectAllAgents">{{ $t('step5.selectAll', { count: profiles.length }) }}</button>
                 <span class="action-divider">|</span>
                 <button class="action-link" @click="clearAgentSelection">{{ $t('step5.clearSelection') }}</button>
               </div>
@@ -479,6 +507,21 @@ const generatedSections = ref({})
 const collapsedSections = ref(new Set())
 const currentSectionIndex = ref(null)
 const profiles = ref([])
+const chatAgentQuery = ref('')
+const surveyAgentQuery = ref('')
+// Filtering never changes the accepted catalogue: its positions are request
+// identities and chat cache keys, including for currently hidden selections.
+const indexedProfiles = computed(() => profiles.value.map((profile, originalIndex) => ({ profile, originalIndex })))
+const matchingAgents = (query) => {
+  const needle = query.trim().toLowerCase()
+  if (!needle) return indexedProfiles.value
+  return indexedProfiles.value.filter(({ profile }) => ['username', 'name', 'profession']
+    .some(field => typeof profile[field] === 'string' && profile[field].toLowerCase().includes(needle)))
+}
+const chatAgentMatches = computed(() => matchingAgents(chatAgentQuery.value))
+const surveyAgentMatches = computed(() => matchingAgents(surveyAgentQuery.value))
+const hiddenSelectedAgentCount = computed(() => selectedAgents.value.size
+  - surveyAgentMatches.value.filter(({ originalIndex }) => selectedAgents.value.has(originalIndex)).length)
 const profileLoadState = ref('idle')
 const profileRetry = ref(null)
 let profileRequest = null
@@ -931,6 +974,8 @@ watch(() => [props.reportId, props.simulationId], () => {
   collapsedSections.value = new Set()
   currentSectionIndex.value = null
   profiles.value = []
+  chatAgentQuery.value = ''
+  surveyAgentQuery.value = ''
   profileLoadState.value = 'idle'
   profileRetry.value = null
   profileRequest = null
@@ -1857,6 +1902,59 @@ watch(() => [props.reportId, props.simulationId], () => {
   text-transform: uppercase;
   letter-spacing: 0.05em;
   border-bottom: 1px solid #F3F4F6;
+}
+
+.agent-search {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  padding: 12px 0;
+}
+
+.dropdown-menu .agent-search {
+  padding: 12px 16px;
+}
+
+.agent-search-label {
+  display: flex;
+  flex: 1 1 180px;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 12px;
+  font-weight: 600;
+  color: #374151;
+}
+
+.agent-search-label input {
+  box-sizing: border-box;
+  width: 100%;
+  min-width: 0;
+  padding: 8px;
+  border: 1px solid #D1D5DB;
+  border-radius: 6px;
+  font: inherit;
+}
+
+.agent-search-clear {
+  padding: 6px;
+  border: 0;
+  background: transparent;
+  color: #4F46E5;
+  cursor: pointer;
+}
+
+.agent-search-count,
+.agent-search-hidden {
+  flex-basis: 100%;
+  font-size: 12px;
+  color: #6B7280;
+}
+
+.agent-search-empty {
+  padding: 12px 16px;
+  font-size: 13px;
+  color: #6B7280;
 }
 
 .dropdown-item {

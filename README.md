@@ -219,6 +219,16 @@ that answer appears on its own. Follow-up questions share this conversation:
 both labelled answers enter the same prompt once, within the existing six-message
 history window. The labels do not create independent platform conversations.
 
+Use **Find agents** in either Step 5 picker to match part of a username, name or
+profession. The two searches are independent, ignore case and surrounding query
+spaces, and treat punctuation literally. Matching counts and **Clear search**
+help you return to the full catalogue. Searching keeps the current conversation
+and all survey selections, including selected agents hidden by the search.
+The hidden-selection count makes these visible; **Select all N agents** and
+**Clear all selections** always apply to the entire catalogue. Searches reset
+when the report or simulation context changes. Searching itself starts no
+interview or profile reload.
+
 ## Monitor local runtime activity
 
 Open **Runtime monitor** from Home to see loaded model settings, resource limits,
