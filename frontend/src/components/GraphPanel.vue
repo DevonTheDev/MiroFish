@@ -66,6 +66,16 @@
         </label>
         <p class="node-search-type-hint">{{ $t('graph.searchTypeHint') }}</p>
       </template>
+      <template v-else>
+        <label class="node-search-type-label">
+          <span>{{ $t('graph.searchRelationshipType') }}</span>
+          <select class="relationship-search-type-select" :value="relationshipTypeChoice" @change="updateRelationshipTypeFilter">
+            <option value="all">{{ $t('graph.searchAllTypes') }}</option>
+            <option v-for="option in relationshipTypeOptions" :key="option.value" :value="option.value">{{ option.type }}</option>
+          </select>
+        </label>
+        <p class="node-search-type-hint relationship-search-type-hint">{{ $t('graph.searchRelationshipTypeHint') }}</p>
+      </template>
       <p class="node-search-status" role="status" aria-live="polite">
         {{ searchSnapshot.emptyGraph ? $t(searchMode === 'nodes' ? 'graph.searchEmptyGraph' : 'graph.searchEmptyRelationships')
           : searchSnapshot.blank ? $t(searchMode === 'nodes' ? 'graph.searchPrompt' : 'graph.searchRelationshipPrompt')
@@ -364,6 +374,7 @@ const showSimulationFinishedHint = ref(false) // 模拟结束后的提示
 const wasSimulating = ref(false) // 追踪之前是否在模拟中
 const nodeQuery = ref('')
 const nodeTypeFilter = ref(null)
+const relationshipTypeFilter = ref(null)
 const searchMode = ref('nodes')
 let searchModeRevision = 0
 const searchPage = ref(1)
@@ -420,6 +431,26 @@ const updateNodeTypeFilter = event => {
   searchPage.value = 1
 }
 
+// Read the recorded type separately from the relationship's label and from
+// display-only fallbacks. Preserve literal values, including whitespace.
+const relationshipTypeOptions = computed(() => {
+  const types = new Set()
+  for (const edge of props.graphData?.edges || []) {
+    if (edge && typeof edge.fact_type === 'string' && edge.fact_type !== '') types.add(edge.fact_type)
+  }
+  if (relationshipTypeFilter.value !== null) types.add(relationshipTypeFilter.value)
+  return Array.from(types, (type, index) => ({ type, value: `relationship-type-${index}` }))
+})
+const relationshipTypeChoice = computed(() => relationshipTypeFilter.value === null ? 'all'
+  : relationshipTypeOptions.value.find(option => option.type === relationshipTypeFilter.value).value)
+const updateRelationshipTypeFilter = event => {
+  const value = event.target.value
+  const option = relationshipTypeOptions.value.find(option => option.value === value)
+  if (value !== 'all' && !option) return
+  relationshipTypeFilter.value = option ? option.type : null
+  searchPage.value = 1
+}
+
 const updateNodeQuery = event => {
   nodeQuery.value = event.target.value.slice(0, 200)
   searchPage.value = 1
@@ -431,6 +462,7 @@ const setSearchMode = mode => {
   searchMode.value = mode
   nodeQuery.value = ''
   nodeTypeFilter.value = null
+  relationshipTypeFilter.value = null
   searchPage.value = 1
 }
 
@@ -447,7 +479,7 @@ const searchMatches = computed(() => {
   const mode = searchMode.value
   const records = props.graphData?.[mode === 'nodes' ? 'nodes' : 'edges'] || []
   const query = nodeQuery.value.trim().toLowerCase()
-  const hasTypeFilter = mode === 'nodes' && nodeTypeFilter.value !== null
+  const hasTypeFilter = mode === 'nodes' ? nodeTypeFilter.value !== null : relationshipTypeFilter.value !== null
   const results = []
   const revision = graphRevision.value
   const modeRevision = searchModeRevision
@@ -460,9 +492,10 @@ const searchMatches = computed(() => {
         if (query && !nonemptyString(raw.name).toLowerCase().includes(query)) continue
         results.push({ index, raw, revision, mode, modeRevision })
       } else {
+        if (hasTypeFilter && raw.fact_type !== relationshipTypeFilter.value) continue
         const endpoints = relationshipEndpoints(raw)
         const fields = [raw.name, raw.fact, raw.fact_type, endpoints.sourceName, endpoints.targetName]
-        if (!fields.some(field => nonemptyString(field).toLowerCase().includes(query))) continue
+        if (query && !fields.some(field => nonemptyString(field).toLowerCase().includes(query))) continue
         const fact = nonemptyString(raw.fact)
         results.push({ index, raw, revision, mode, modeRevision, ...endpoints,
           factPreview: fact.length > 160 ? fact.slice(0, 160) + '…' : fact })
@@ -1225,6 +1258,7 @@ watch(() => props.graphData, data => {
     setSearchMode('nodes')
     nodeQuery.value = ''
     nodeTypeFilter.value = null
+    relationshipTypeFilter.value = null
     searchPage.value = 1
   } else {
     // Store the clamped page so a later refresh with more matches cannot revive
@@ -1265,6 +1299,7 @@ onUnmounted(() => {
   graphRevision.value++
   nodeQuery.value = ''
   nodeTypeFilter.value = null
+  relationshipTypeFilter.value = null
   searchPage.value = 1
   lastGraphIdentity = null
   closeDetailPanel()
@@ -1311,7 +1346,7 @@ onUnmounted(() => {
 .node-search-label { display: grid; gap: 6px; color: #333; font-weight: 600; }
 .node-search-input { width: 100%; min-width: 0; box-sizing: border-box; padding: 7px; border: 1px solid #BBB; border-radius: 4px; }
 .node-search-type-label { display: grid; gap: 6px; margin-top: 8px; color: #333; font-weight: 600; }
-.node-search-type-select { width: 100%; min-width: 0; box-sizing: border-box; padding: 7px; border: 1px solid #BBB; border-radius: 4px; background: #FFF; color: #444; font: inherit; }
+.node-search-type-select, .relationship-search-type-select { width: 100%; min-width: 0; box-sizing: border-box; padding: 7px; border: 1px solid #BBB; border-radius: 4px; background: #FFF; color: #444; font: inherit; }
 .node-search-type-hint { margin: 6px 0 0; color: #666; line-height: 1.4; }
 .node-search-status, .node-search-range { margin: 8px 0 0; color: #666; }
 .node-search-status:empty { display: none; }
@@ -1324,7 +1359,7 @@ onUnmounted(() => {
 .node-search-page-buttons { display: flex; gap: 8px; margin-top: 8px; }
 .node-search-page-buttons button { padding: 6px 10px; border: 1px solid #BBB; border-radius: 4px; background: #FFF; color: #444; cursor: pointer; }
 .node-search-page-buttons button:disabled { opacity: 0.6; cursor: default; }
-.search-mode button:focus-visible, .node-search-input:focus-visible, .node-search-type-select:focus-visible, .node-search-result:focus-visible, .node-search-page-buttons button:focus-visible { outline: 2px solid #004E89; outline-offset: 2px; }
+.search-mode button:focus-visible, .node-search-input:focus-visible, .node-search-type-select:focus-visible, .relationship-search-type-select:focus-visible, .node-search-result:focus-visible, .node-search-page-buttons button:focus-visible { outline: 2px solid #004E89; outline-offset: 2px; }
 
 .panel-header {
   position: absolute;

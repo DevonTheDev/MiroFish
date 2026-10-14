@@ -54,8 +54,17 @@ including nodes with empty names. When a name is entered, both criteria must mat
 **All types** applies no type restriction and, with a blank name, shows no results.
 The choices come from the full loaded node list, independent of the name query.
 
-Name and relationship matching is literal and case-insensitive; only whitespace
-around the query is ignored. Blank relationship queries show no results.
+In **Relationships**, **Relationship type** narrows the list to an exact recorded
+`fact_type`, independently of the relationship label (`name`). Choices use the
+nonempty string types in the full loaded relationship list, preserving source
+order, case and whitespace. Missing, null, empty and nonstring types have no
+choice but their records remain text-searchable with **All types**. Display-only
+`Unknown` is not a type choice; a literal stored `Unknown` is. A selected type
+lists matching relationships with a blank query. With text, both criteria must
+match. **All types** and blank text show no results.
+
+Name and relationship text matching is literal and case-insensitive; only whitespace
+around the query is ignored. Both type selectors use exact, case-sensitive values.
 Queries are limited to 200 UTF-16 units.
 Matches appear in pages of 20 in current source order, with exact totals and
 **Previous**/**Next** controls. Rows show source positions from the original node
