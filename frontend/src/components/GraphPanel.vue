@@ -56,6 +56,16 @@
         <input class="node-search-input" type="search" maxlength="200"
           :value="nodeQuery" @input="updateNodeQuery" :placeholder="$t(searchMode === 'nodes' ? 'graph.searchPlaceholder' : 'graph.searchRelationshipPlaceholder')" />
       </label>
+      <template v-if="searchMode === 'nodes'">
+        <label class="node-search-type-label">
+          <span>{{ $t('graph.searchDisplayedType') }}</span>
+          <select class="node-search-type-select" :value="nodeTypeChoice" @change="updateNodeTypeFilter">
+            <option value="all">{{ $t('graph.searchAllTypes') }}</option>
+            <option v-for="option in nodeTypeOptions" :key="option.value" :value="option.value">{{ option.type }}</option>
+          </select>
+        </label>
+        <p class="node-search-type-hint">{{ $t('graph.searchTypeHint') }}</p>
+      </template>
       <p class="node-search-status" role="status" aria-live="polite">
         {{ searchSnapshot.emptyGraph ? $t(searchMode === 'nodes' ? 'graph.searchEmptyGraph' : 'graph.searchEmptyRelationships')
           : searchSnapshot.blank ? $t(searchMode === 'nodes' ? 'graph.searchPrompt' : 'graph.searchRelationshipPrompt')
@@ -66,7 +76,7 @@
           <button type="button" class="node-search-result" :class="{ 'relationship-search-result': result.mode === 'relationships' }" :disabled="!searchReady" @click="activateSearchResult(result)">
             <template v-if="result.mode === 'nodes'">
               <span class="node-search-name">{{ result.raw.name }}</span>
-              <span class="node-search-type">{{ result.raw.labels?.find(label => label !== 'Entity') || 'Entity' }}</span>
+              <span class="node-search-type">{{ displayedNodeType(result.raw) }}</span>
             </template>
             <template v-else>
               <span class="relationship-search-endpoints">{{ result.sourceName || 'Unknown' }} → {{ result.targetName || 'Unknown' }}</span>
@@ -353,6 +363,7 @@ const expandedSelfLoops = ref(new Set()) // 展开的自环项
 const showSimulationFinishedHint = ref(false) // 模拟结束后的提示
 const wasSimulating = ref(false) // 追踪之前是否在模拟中
 const nodeQuery = ref('')
+const nodeTypeFilter = ref(null)
 const searchMode = ref('nodes')
 let searchModeRevision = 0
 const searchPage = ref(1)
@@ -385,6 +396,30 @@ const graphIdentity = data => typeof data?.graph_id === 'string' && data.graph_i
   ? data.graph_id : null
 let lastGraphIdentity = graphIdentity(props.graphData)
 
+// Match the type already shown in results, details, colors and the legend.
+// Ordered secondary labels remain available only in the node's full details.
+const displayedNodeType = node => node.labels?.find(label => label !== 'Entity') || 'Entity'
+const nodeTypeOptions = computed(() => {
+  const types = new Set()
+  for (const node of props.graphData?.nodes || []) {
+    if (node && typeof node === 'object') types.add(displayedNodeType(node))
+  }
+  // A same-graph refresh may remove this type. Keep the user's criterion visible
+  // with zero matches instead of silently broadening the search to All types.
+  if (nodeTypeFilter.value !== null) types.add(nodeTypeFilter.value)
+  return Array.from(types, (type, index) => ({ type, value: `type-${index}` }))
+})
+const nodeTypeChoice = computed(() => nodeTypeFilter.value === null ? 'all'
+  : nodeTypeOptions.value.find(option => option.type === nodeTypeFilter.value).value)
+const updateNodeTypeFilter = event => {
+  const value = event.target.value
+  const option = nodeTypeOptions.value.find(option => option.value === value)
+  if (value !== 'all' && !option) return
+  // Native option values are opaque IDs, never raw labels or the null sentinel.
+  nodeTypeFilter.value = option ? option.type : null
+  searchPage.value = 1
+}
+
 const updateNodeQuery = event => {
   nodeQuery.value = event.target.value.slice(0, 200)
   searchPage.value = 1
@@ -395,6 +430,7 @@ const setSearchMode = mode => {
   searchModeRevision++
   searchMode.value = mode
   nodeQuery.value = ''
+  nodeTypeFilter.value = null
   searchPage.value = 1
 }
 
@@ -411,15 +447,17 @@ const searchMatches = computed(() => {
   const mode = searchMode.value
   const records = props.graphData?.[mode === 'nodes' ? 'nodes' : 'edges'] || []
   const query = nodeQuery.value.trim().toLowerCase()
+  const hasTypeFilter = mode === 'nodes' && nodeTypeFilter.value !== null
   const results = []
   const revision = graphRevision.value
   const modeRevision = searchModeRevision
-  if (query) {
+  if (query || hasTypeFilter) {
     for (let index = 0; index < records.length; index++) {
       const raw = records[index]
       if (!raw || typeof raw !== 'object') continue
       if (mode === 'nodes') {
-        if (!nonemptyString(raw.name).toLowerCase().includes(query)) continue
+        if (hasTypeFilter && displayedNodeType(raw) !== nodeTypeFilter.value) continue
+        if (query && !nonemptyString(raw.name).toLowerCase().includes(query)) continue
         results.push({ index, raw, revision, mode, modeRevision })
       } else {
         const endpoints = relationshipEndpoints(raw)
@@ -431,7 +469,7 @@ const searchMatches = computed(() => {
       }
     }
   }
-  return { results, blank: !query, emptyGraph: !records.length }
+  return { results, blank: !query && !hasTypeFilter, emptyGraph: !records.length }
 })
 const searchPageCount = computed(() => Math.max(1, Math.ceil(searchMatches.value.results.length / searchPageSize)))
 const searchSnapshot = computed(() => {
@@ -493,7 +531,7 @@ const entityTypes = computed(() => {
   const colors = ['#FF6B35', '#004E89', '#7B2D8E', '#1A936F', '#C5283D', '#E9724C', '#3498db', '#9b59b6', '#27ae60', '#f39c12']
   
   props.graphData.nodes.forEach(node => {
-    const type = node.labels?.find(l => l !== 'Entity') || 'Entity'
+    const type = displayedNodeType(node)
     if (!typeMap[type]) {
       typeMap[type] = { name: type, count: 0, color: colors[Object.keys(typeMap).length % colors.length] }
     }
@@ -613,7 +651,7 @@ const renderGraph = (revision, ticket) => {
     sourceIndex,
     id: n.uuid,
     name: n.name || 'Unnamed',
-    type: n.labels?.find(l => l !== 'Entity') || 'Entity',
+    type: displayedNodeType(n),
     rawData: n
   }))
   
@@ -1186,6 +1224,7 @@ watch(() => props.graphData, data => {
   if (!identity || identity !== lastGraphIdentity) {
     setSearchMode('nodes')
     nodeQuery.value = ''
+    nodeTypeFilter.value = null
     searchPage.value = 1
   } else {
     // Store the clamped page so a later refresh with more matches cannot revive
@@ -1225,6 +1264,7 @@ onUnmounted(() => {
   renderTicket++
   graphRevision.value++
   nodeQuery.value = ''
+  nodeTypeFilter.value = null
   searchPage.value = 1
   lastGraphIdentity = null
   closeDetailPanel()
@@ -1270,6 +1310,9 @@ onUnmounted(() => {
 .relationship-search-notice { margin: 0 0 12px; color: #666; font-size: 12px; line-height: 1.5; }
 .node-search-label { display: grid; gap: 6px; color: #333; font-weight: 600; }
 .node-search-input { width: 100%; min-width: 0; box-sizing: border-box; padding: 7px; border: 1px solid #BBB; border-radius: 4px; }
+.node-search-type-label { display: grid; gap: 6px; margin-top: 8px; color: #333; font-weight: 600; }
+.node-search-type-select { width: 100%; min-width: 0; box-sizing: border-box; padding: 7px; border: 1px solid #BBB; border-radius: 4px; background: #FFF; color: #444; font: inherit; }
+.node-search-type-hint { margin: 6px 0 0; color: #666; line-height: 1.4; }
 .node-search-status, .node-search-range { margin: 8px 0 0; color: #666; }
 .node-search-status:empty { display: none; }
 .node-search-results { list-style: none; margin: 8px 0 0; padding: 0; }
@@ -1281,7 +1324,7 @@ onUnmounted(() => {
 .node-search-page-buttons { display: flex; gap: 8px; margin-top: 8px; }
 .node-search-page-buttons button { padding: 6px 10px; border: 1px solid #BBB; border-radius: 4px; background: #FFF; color: #444; cursor: pointer; }
 .node-search-page-buttons button:disabled { opacity: 0.6; cursor: default; }
-.search-mode button:focus-visible, .node-search-input:focus-visible, .node-search-result:focus-visible, .node-search-page-buttons button:focus-visible { outline: 2px solid #004E89; outline-offset: 2px; }
+.search-mode button:focus-visible, .node-search-input:focus-visible, .node-search-type-select:focus-visible, .node-search-result:focus-visible, .node-search-page-buttons button:focus-visible { outline: 2px solid #004E89; outline-offset: 2px; }
 
 .panel-header {
   position: absolute;

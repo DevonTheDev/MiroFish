@@ -46,8 +46,17 @@ then the producer's endpoint name, then its UUID. Relationship UUIDs distinguish
 rows but are not searched; attributes, episodes, dates and JSON are not searched.
 Display-only fallback text such as Unknown is not indexed.
 
-Matching is literal and case-insensitive; only whitespace around the query is
-ignored. Blank queries show no results. Queries are limited to 200 UTF-16 units.
+In **Nodes**, **Displayed type** narrows the list to the exact type printed on each
+node result. This is the first label other than `Entity`, or `Entity` when that
+value is missing or empty; additional labels remain in node details. Label order,
+case and whitespace are preserved. A selected type can find nodes without a name,
+including nodes with empty names. When a name is entered, both criteria must match.
+**All types** applies no type restriction and, with a blank name, shows no results.
+The choices come from the full loaded node list, independent of the name query.
+
+Name and relationship matching is literal and case-insensitive; only whitespace
+around the query is ignored. Blank relationship queries show no results.
+Queries are limited to 200 UTF-16 units.
 Matches appear in pages of 20 in current source order, with exact totals and
 **Previous**/**Next** controls. Rows show source positions from the original node
 or relationship list, including records omitted from the drawing. Relationship
@@ -63,12 +72,15 @@ endpoints opens **Details only** and clears graph highlights. This also works wh
 the graph has no loaded nodes. Search reads loaded data without verifying its
 factual accuracy or making additional requests.
 
-Switching modes clears the query and page while retaining the current details and
-drawing. Editing or clearing a query returns to page one. Paging and queries do
-not redraw, pan or change selection. The mode, query and page survive refreshes
-of the same identified graph; shrinking results durably clamp to the last page
-(or page one when empty). A changed, missing or invalid graph ID, or removing the
-graph, resets to **Nodes** with a blank query. Refreshed data closes search-opened
+Switching modes clears the query, type and page while retaining the current details
+and drawing. Editing or clearing a query or changing the type returns to page one;
+editing one criterion keeps the other. Paging and search criteria do not redraw,
+pan or change selection, labels or the complete graph JSON export. The mode, query,
+type and page survive refreshes of the same identified graph; shrinking results
+durably clamp to the last page (or page one when empty). A selected type that
+disappears remains a visible choice with zero matches until it returns or the user
+changes it. A changed, missing or invalid graph ID, or removing the graph, resets
+to **Nodes**, **All types** and a blank query. Refreshed data closes search-opened
 details. Resize preserves state; selection waits for the current drawing to be
 ready. Stale results and retired graph pointer callbacks cannot select old data.
 Mounted tests use real Vue and D3 with a synthetic host; native browser keyboard,
