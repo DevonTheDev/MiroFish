@@ -136,9 +136,12 @@ test('preview refresh cannot load a retained old graph while the completed resul
   const h = fixture()
   try {
     const { request } = await finishTask(h, 'GA-old')
+    assert.equal(h.graph().props.graphDownload.enabled, false)
+    assert.equal(h.graph().props.graphDownload.action, undefined)
     h.graph().emit('refresh'); await settle()
     assert.equal(h.calls('getGraphData').length, 0)
     request.resolve({ success: false }); await settle()
+    assert.equal(h.graph().props.graphDownload.enabled, false)
     h.graph().emit('refresh'); await settle()
     assert.equal(h.calls('getGraphData').length, 0)
     retry(h).props.onClick(); await settle()
@@ -146,6 +149,8 @@ test('preview refresh cannot load a retained old graph while the completed resul
     h.graph().emit('refresh'); await settle()
     assert.equal(h.calls('getGraphData').length, 2)
     assert.ok(h.calls('getGraphData').every(call => call.args[0] === 'GA-new'))
+    assert.equal(h.graph().props.graphDownload.enabled, false)
+    assert.equal(h.downloads.length, 0)
     noMutations(h)
   } finally { h.close() }
 })

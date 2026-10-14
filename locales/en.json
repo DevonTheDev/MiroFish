@@ -349,6 +349,15 @@
     "selectAgentFirst": "Please select a simulated individual first"
   },
   "graph": {
+    "download": {
+      "label": "Download loaded graph JSON",
+      "note": "Downloads the loaded graph values currently held for this project; they may differ from the current server graph.",
+      "retained": "Refresh failed; download uses the previously loaded graph.",
+      "invalid": "This loaded graph cannot be downloaded as JSON.",
+      "tooLarge": "Graph download exceeds the 8 MiB limit; no file was created.",
+      "failed": "The graph download could not be started. Try again.",
+      "started": "Graph download started."
+    },
     "searchMode": "Search in loaded graph",
     "searchModeNodes": "Nodes",
     "searchModeRelationships": "Relationships",

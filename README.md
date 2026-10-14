@@ -119,6 +119,49 @@ English/Chinese text and a visible focus outline. Focused synthetic-host tests
 cover current positions, occurrence identity and active wheel continuity;
 native browser keyboard, focus and visual placement remain unverified.
 
+## Download the loaded graph JSON
+
+On the Process screen, **Download loaded graph JSON** downloads the values
+currently held for the selected completed project. The file may differ from the
+current server graph. Downloading makes no API request and does not change the
+graph. Other graph screens do not expose this control.
+
+The file is `mirofish-loaded-graph.json`, containing format
+`mirofish-loaded-graph-observation`, format version `1`, project and graph IDs,
+`downloaded_at` (the client UTC time of the download attempt), and `graph`.
+The backend reads nodes and relationships separately; neither the source nor
+this file establishes an atomic snapshot, server revision, or freshness. The
+format version describes this file format only. These are decoded JSON values,
+not original network bytes or an immutable accepted-response capture. Valid
+changes to held values before a click appear in that download; later changes
+cannot alter its already serialized body.
+
+All producer fields and additional JSON fields are retained, including literal
+temporal strings, ordered labels and episodes, repeated IDs, self-relations and
+relationships with missing endpoints. The visualization's filtered or grouped
+D3 data is not used. Malformed producer records and non-JSON values fail visibly;
+accessors and `toJSON` methods are not invoked. The complete formatted UTF-8 file,
+including its envelope and final newline, must fit within 8 MiB (8,388,608 bytes).
+An oversized download creates no file and never truncates data. This file limit
+does not describe the graph API's capacity.
+
+A refresh suspends downloads. If it fails while a valid source is retained, a
+fresh action explicitly says **Refresh failed; download uses the previously
+loaded graph.** Its click captures that source's current held values. A successful
+replacement, source replacement, departure or unmount retires previous actions.
+Navigation suspends downloads when MainView observes its leave, global or update
+guard. An earlier registered global guard can delay observation of a same-project
+query navigation: the current action remains available while that guard waits,
+and an abort before MainView observes it preserves the current action. Download
+ownership still checks the committed route, source and current read at every
+side-effect boundary.
+
+The browser's download is only initiated; a native file-save completion is not
+reported. Successful object URLs are retained until the next download, refresh,
+source retirement or unmount, with each attempt cleaning only its own resources.
+Synthetic frontend checks cover controls, JSON and ownership; native browser
+layout and file-saving behavior remain unverified.
+
 ## Expand self-relation details
 
 After opening a grouped **Self Relations** edge, each numbered relation header is

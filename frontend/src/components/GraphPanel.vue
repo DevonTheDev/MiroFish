@@ -1,9 +1,14 @@
 <template>
-  <div class="graph-panel">
+  <div class="graph-panel" :class="{ 'has-graph-download': graphDownload }">
     <div class="panel-header">
       <span class="panel-title">{{ $t('graph.panelTitle') }}</span>
       <!-- 顶部工具栏 (Internal Top Right) -->
       <div class="header-tools">
+        <button v-if="graphDownload" type="button" class="tool-btn graph-download-button"
+          :onClick="graphDownload.enabled ? graphDownload.action : undefined"
+          :disabled="!graphDownload.enabled">
+          {{ $t('graph.download.label') }}
+        </button>
         <button class="tool-btn" @click="$emit('refresh')" :disabled="loading" :title="$t('graph.refreshGraph')">
           <span class="icon-refresh" :class="{ 'spinning': loading }">↻</span>
           <span class="btn-text">Refresh</span>
@@ -33,6 +38,11 @@
             <span aria-hidden="true">⤢</span>
           </button>
         </div>
+      </div>
+      <div v-if="graphDownload" class="graph-download-copy">
+        <p class="graph-download-note">{{ $t('graph.download.note') }}</p>
+        <p v-if="graphDownload.status" class="graph-download-status" role="status" aria-live="polite">{{ graphDownload.status }}</p>
+        <p v-if="graphDownload.error" class="graph-download-error" role="alert">{{ graphDownload.error }}</p>
       </div>
     </div>
     
@@ -320,7 +330,8 @@ const props = defineProps({
   graphData: Object,
   loading: Boolean,
   currentPhase: Number,
-  isSimulating: Boolean
+  isSimulating: Boolean,
+  graphDownload: { type: Object, default: null }
 })
 
 const emit = defineEmits(['refresh', 'toggle-maximize'])
@@ -1259,6 +1270,54 @@ onUnmounted(() => {
 .tool-btn.graph-zoom-button { padding: 0 8px; font-size: 16px; }
 .graph-zoom-button:focus-visible { outline: 2px solid #004E89; outline-offset: 2px; }
 .graph-zoom-button:disabled { opacity: 0.45; cursor: default; background: #FFF; color: #666; border-color: #E0E0E0; }
+
+/* Only the routed download owner needs room for the optional control and copy.
+   Its natural-height header keeps wrapped tools clear of the search overlay. */
+.graph-panel.has-graph-download {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  grid-template-rows: auto minmax(0, 1fr);
+}
+
+.has-graph-download .panel-header {
+  position: relative;
+  grid-area: 1 / 1;
+  flex-wrap: wrap;
+  gap: 10px 16px;
+  min-width: 0;
+}
+
+.has-graph-download .panel-title { min-width: 0; overflow-wrap: anywhere; }
+.has-graph-download .header-tools { flex-wrap: wrap; min-width: 0; max-width: 100%; }
+.has-graph-download .graph-container { grid-area: 2 / 1; position: relative; min-height: 0; }
+.has-graph-download .node-search {
+  grid-area: 2 / 1;
+  position: relative;
+  align-self: start;
+  top: auto;
+  left: auto;
+  margin: 16px 20px;
+  min-height: 0;
+  max-height: calc(100% - 120px);
+}
+.has-graph-download .edge-labels-toggle {
+  grid-area: 2 / 1;
+  position: relative;
+  align-self: start;
+  justify-self: end;
+  top: auto;
+  right: auto;
+  margin: 16px 20px;
+}
+
+.graph-download-button { max-width: 100%; height: auto; min-height: 32px; padding: 6px 12px; overflow-wrap: anywhere; }
+.graph-download-button:focus-visible { outline: 2px solid #004E89; outline-offset: 2px; }
+.graph-download-button:disabled { opacity: 0.45; cursor: default; background: #FFF; color: #666; border-color: #E0E0E0; }
+.graph-download-copy { flex-basis: 100%; min-width: 0; pointer-events: auto; font-size: 12px; line-height: 1.5; overflow-wrap: anywhere; }
+.graph-download-copy p { margin: 0; }
+.graph-download-copy p + p { margin-top: 4px; }
+.graph-download-note, .graph-download-status { color: #555; }
+.graph-download-error { color: #B42318; }
 
 .tool-btn .btn-text {
   font-size: 12px;

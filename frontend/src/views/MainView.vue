@@ -43,6 +43,7 @@
           :graphData="graphData"
           :loading="graphLoading"
           :currentPhase="currentPhase"
+          :graphDownload="graphDownload"
           @refresh="refreshGraph"
           @toggle-maximize="toggleMaximize('graph')"
         />
@@ -89,6 +90,7 @@ import Step2EnvSetup from '../components/Step2EnvSetup.vue'
 import { generateOntology, getProject, buildGraph, getTaskStatus, getGraphData } from '../api/graph'
 import { getPendingUpload, clearPendingUpload } from '../store/pendingUpload'
 import LanguageSwitcher from '../components/LanguageSwitcher.vue'
+import { hasLoadedGraphShape, createLoadedGraphFile } from '../utils/loadedGraphFile.js'
 
 const route = useRoute()
 const router = useRouter()
@@ -218,7 +220,109 @@ let projectAdoption = null
 const ownsView = context => !!context && context.active && context === viewContext
   && route.name === 'Process' && context.id === currentProjectId.value
 
+// A receipt binds a loaded source, not immutable response bytes. Every allowed
+// period gets fresh callbacks; the detached JSON is made only on explicit click.
+let loadedGraphReceipt = null, graphDownloadOwner = null, graphDownloadResource = null
+let graphDownloadDeparture = null, loadedGraphRetained = false
+const graphDownloadState = shallowRef({ enabled: false, action: undefined, status: '', error: '' })
+const graphDownload = computed(() => ({
+  ...graphDownloadState.value,
+  status: graphDownloadState.value.status ? t(`graph.download.${graphDownloadState.value.status}`) : '',
+  error: graphDownloadState.value.error ? t(`graph.download.${graphDownloadState.value.error}`) : '',
+}))
+const nonemptyGraphId = value => typeof value === 'string' && value.trim().length > 0
+const ownsLoadedGraph = receipt => !!receipt && receipt === loadedGraphReceipt && ownsView(receipt.context)
+  && !graphResult.value && projectData.value?.status === 'graph_completed'
+  && nonemptyGraphId(receipt.context.id) && nonemptyGraphId(receipt.graphId)
+  && projectData.value?.project_id === receipt.context.id
+  && projectData.value?.graph_id === receipt.graphId && graphData.value === receipt.source
+  && receipt.request.graphId === receipt.graphId
+  && receipt.source !== null && typeof receipt.source === 'object'
+  && Object.getOwnPropertyDescriptor(receipt.source, 'graph_id')?.value === receipt.graphId
+const ownsGraphDownload = owner => !!owner && owner === graphDownloadOwner
+  && !graphDownloadDeparture && !graphLoading.value && ownsLoadedGraph(owner.receipt)
+  && owner.context === viewContext && owner.epoch === owner.context.graphRequest && !owner.epoch.pending
+
+const releaseGraphDownload = (resource = graphDownloadResource) => {
+  if (!resource) return
+  if (graphDownloadResource === resource) graphDownloadResource = null
+  const link = resource.link, url = resource.url
+  resource.link = null; resource.url = null
+  try { link?.remove() } catch { /* Still release only this attempt's URL. */ }
+  try { if (url) URL.revokeObjectURL(url) } catch { /* Cleanup cannot disturb a newer attempt. */ }
+}
+const retireGraphDownload = (clearSource = false) => {
+  graphDownloadOwner = null
+  graphDownloadState.value = { enabled: false, action: undefined, status: '', error: '' }
+  if (clearSource) { loadedGraphReceipt = null; loadedGraphRetained = false }
+  releaseGraphDownload()
+}
+const downloadLoadedGraph = owner => {
+  if (!ownsGraphDownload(owner)) return
+  const previous = graphDownloadResource, resource = { url: null, link: null }
+  graphDownloadResource = resource
+  releaseGraphDownload(previous)
+  const owns = () => graphDownloadResource === resource && ownsGraphDownload(owner)
+  try {
+    if (!owns()) return
+    graphDownloadState.value = { ...graphDownloadState.value, error: '' }
+    const body = createLoadedGraphFile(owner.receipt.source, {
+      projectId: owner.context.id, graphId: owner.receipt.graphId, downloadedAt: new Date().toISOString(),
+    })
+    if (!owns()) return
+    const blob = new Blob([body], { type: 'application/json;charset=utf-8' })
+    if (!owns()) return
+    resource.url = URL.createObjectURL(blob)
+    if (!owns()) return
+    resource.link = document.createElement('a')
+    if (!owns()) return
+    resource.link.href = resource.url
+    if (!owns()) return
+    resource.link.download = 'mirofish-loaded-graph.json'
+    if (!owns()) return
+    document.body.appendChild(resource.link)
+    if (!owns()) return
+    resource.link.click()
+    if (!owns()) return
+    const link = resource.link; resource.link = null; link.remove()
+    if (!owns()) return
+    graphDownloadState.value = { ...graphDownloadState.value, status: loadedGraphRetained ? 'retained' : 'started' }
+  } catch (cause) {
+    if (owns()) graphDownloadState.value = { ...graphDownloadState.value,
+      error: cause?.code === 'too_large' ? 'tooLarge' : cause?.code === 'invalid' ? 'invalid' : 'failed' }
+    releaseGraphDownload(resource)
+  } finally {
+    if (!owns()) releaseGraphDownload(resource)
+  }
+}
+const publishGraphDownload = () => {
+  // The source may predate a failed refresh; actions belong to its latest
+  // settled read epoch, never the request that originally supplied the source.
+  if (graphDownloadDeparture || graphLoading.value || !ownsLoadedGraph(loadedGraphReceipt)
+    || viewContext.graphRequest?.pending) return
+  const owner = { context: viewContext, receipt: loadedGraphReceipt, epoch: viewContext.graphRequest }
+  graphDownloadOwner = owner
+  graphDownloadState.value = { enabled: true, action: () => downloadLoadedGraph(owner),
+    status: loadedGraphRetained ? 'retained' : '', error: '' }
+}
+const suspendGraphDownload = to => {
+  graphDownloadDeparture = { to: to.redirectedFrom || to }
+  retireGraphDownload()
+}
+const recoverGraphDownload = (to, committed) => {
+  const departure = graphDownloadDeparture
+  if (!departure || (departure.to !== (to.redirectedFrom || to)
+    && !(committed && router.currentRoute.value === to))) return
+  graphDownloadDeparture = null
+  publishGraphDownload()
+}
+// Only outer/source and binding changes retire ownership. Valid nested edits
+// remain current values for the next click; there is no deep mutation watcher.
+watch([graphData, () => projectData.value?.project_id, () => projectData.value?.graph_id,
+  () => projectData.value?.status, graphResult], () => retireGraphDownload(true), { flush: 'sync' })
+
 const resetProjectState = () => {
+  retireGraphDownload(true)
   currentStep.value = 1
   loading.value = false
   graphLoading.value = false
@@ -542,16 +646,26 @@ const loadCompletedGraphResult = async (task, context) => {
 const loadGraph = async (graphId, context) => {
   if (!ownsView(context)) return
   context.graphRequest?.controller.abort()
-  const request = { controller: new AbortController() }
+  const request = { controller: new AbortController(), graphId, pending: true }
   context.graphRequest = request
+  retireGraphDownload()
   const ownsRequest = () => ownsView(context) && context.graphRequest === request
   graphLoading.value = true
   addLog(`Loading full graph data: ${graphId}`, context)
+  let failed = true
   try {
     const res = await getGraphData(graphId, request.controller.signal)
     if (!ownsRequest()) return
     if (res.success) {
       graphData.value = res.data
+      failed = false
+      const receipt = Object.freeze({ context, request, graphId, source: graphData.value })
+      loadedGraphRetained = false
+      loadedGraphReceipt = receipt
+      if (!ownsLoadedGraph(receipt) || !hasLoadedGraphShape(receipt.source, graphId)) {
+        loadedGraphReceipt = null
+        graphDownloadState.value = { ...graphDownloadState.value, error: 'invalid' }
+      }
       addLog('Graph data loaded successfully.', context)
     } else {
       addLog(`Failed to load graph data: ${res.error}`, context)
@@ -559,7 +673,14 @@ const loadGraph = async (graphId, context) => {
   } catch (err) {
     if (ownsRequest()) addLog(`Exception loading graph: ${err.message}`, context)
   } finally {
-    if (ownsRequest()) graphLoading.value = false
+    if (ownsRequest()) {
+      request.pending = false
+      graphLoading.value = false
+      if (failed && ownsLoadedGraph(loadedGraphReceipt)) {
+        loadedGraphRetained = true
+      }
+      publishGraphDownload()
+    }
   }
 }
 
@@ -604,6 +725,7 @@ const selectProject = (id, recovering = false) => {
 watch(currentProjectId, id => selectProject(id), { immediate: true, flush: 'sync' })
 
 onBeforeRouteLeave(to => {
+  suspendGraphDownload(to)
   suspendSimulation(to)
   if (viewContext) viewContext.departure = to.redirectedFrom || to
   retireView()
@@ -612,6 +734,7 @@ onBeforeRouteLeave(to => {
 // still follows its existing route-selection lifecycle. Global beforeEach runs
 // before this hook, so a fresh click before this hook is new navigation intent.
 onBeforeRouteUpdate(to => {
+  suspendGraphDownload(to)
   suspendSimulation(to)
   // If an earlier leave already retired observation, this newer update now
   // owns its recovery too. Do not retire otherwise-current graph observation.
@@ -628,13 +751,20 @@ const recoverSelectedProject = (to, committed = false) => {
     selectProject(context.id, true)
   }
 }
+// Reused-route navigation can wait in a global guard before its update hook.
+// This observer suspends exports only; existing reads/build/handoff stay owned.
+const removeGraphDownloadNavigation = router.beforeEach((to, from) => {
+  if (from.name === 'Process') suspendGraphDownload(to)
+})
 const removeRouteRecovery = router.afterEach((to, _from, failure) => {
   recoverSelectedProject(to, !failure)
   recoverSimulation(to, !failure)
+  recoverGraphDownload(to, !failure)
 })
 const removeRouteErrorRecovery = router.onError((err, to) => {
   recoverSelectedProject(to)
   recoverSimulation(to, false)
+  recoverGraphDownload(to, false)
   console.error(err)
 })
 onBeforeUnmount(() => {
@@ -642,6 +772,8 @@ onBeforeUnmount(() => {
   simulationOwner = null
   simulationDeparture = null
   simulationHandoff.value = {}
+  removeGraphDownloadNavigation()
+  graphDownloadDeparture = null
   removeRouteRecovery()
   removeRouteErrorRecovery()
   retireView()

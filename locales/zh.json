@@ -349,6 +349,15 @@
     "selectAgentFirst": "请先选择一个模拟个体"
   },
   "graph": {
+    "download": {
+      "label": "下载已加载图谱 JSON",
+      "note": "下载本项目当前保留的已加载图谱数据；这些数据可能与服务器上的当前图谱不同。",
+      "retained": "刷新失败；下载将使用先前加载的图谱。",
+      "invalid": "无法将此已加载图谱下载为 JSON。",
+      "tooLarge": "图谱下载超过 8 MiB 限制；未创建文件。",
+      "failed": "无法开始图谱下载，请重试。",
+      "started": "已开始图谱下载。"
+    },
     "searchMode": "搜索已加载图谱",
     "searchModeNodes": "节点",
     "searchModeRelationships": "关系",

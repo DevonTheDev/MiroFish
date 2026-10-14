@@ -6,6 +6,9 @@ import { setPendingUpload, clearPendingUpload, getPendingUpload } from '../src/s
 const build = () => buildParent({ graphRoute: true })
 const pending = (h, name) => h.calls(name).findLast(call => !call.settled && !call.signal?.aborted)
 const completed = id => ({ project_id: id, status: 'graph_completed', graph_id: 'G' + id })
+const graphPayload = (name, graphId = 'GA') => ({ graph_id: graphId,
+  nodes: [{ uuid: 'node-a', name, labels: [], summary: '', attributes: {}, created_at: null }],
+  edges: [], node_count: 1, edge_count: 0 })
 const building = id => ({ project_id: id, status: 'graph_building', graph_build_task_id: 'task-' + id })
 const generated = id => ({ project_id: id, status: 'ontology_generated' })
 const state = h => h.state(graphView)
@@ -19,7 +22,7 @@ async function reusedBuild(h, graphId = 'GA') {
 }
 async function loaded(h, id = 'A') {
   pending(h, 'getProject').resolve(ok(completed(id))); await settle()
-  pending(h, 'getGraphData').resolve(ok({ nodes: [{ name: id + ' graph' }] })); await settle()
+  pending(h, 'getGraphData').resolve(ok(graphPayload(id + ' graph', 'G' + id))); await settle()
 }
 async function task(h) {
   pending(h, 'getProject').resolve(ok(building('A'))); await settle()
@@ -395,17 +398,27 @@ for (const reject of [false, true]) {
       await h.mount('/process/A'); pending(h, 'getProject').resolve(ok(completed('A'))); await settle()
       const old = pending(h, 'getGraphData'); await refresh(h); const current = pending(h, 'getGraphData')
       assert.notEqual(old, current); assert.equal(old.signal?.aborted, true)
+      assert.equal(h.graph().props.graphDownload.enabled, false)
       const logs = state(h).systemLogs.length
-      if (reject) old.reject(new Error('retired graph failure')); else old.resolve(ok({ nodes: [{ name: 'retired graph' }] }))
+      if (reject) old.reject(new Error('retired graph failure')); else old.resolve(ok(graphPayload('retired graph')))
       await settle()
       assert.equal(state(h).graphData, null); assert.equal(state(h).graphLoading, true)
       assert.equal(state(h).systemLogs.length, logs)
-      current.resolve(ok({ nodes: [{ name: 'current graph' }] })); await settle()
+      assert.equal(h.graph().props.graphDownload.enabled, false)
+      current.resolve(ok(graphPayload('current graph'))); await settle()
       assert.equal(state(h).graphData.nodes[0].name, 'current graph'); assert.equal(state(h).graphLoading, false)
-      await refresh(h); const latest = pending(h, 'getGraphData')
-      await refresh(h); pending(h, 'getGraphData').resolve(ok({ nodes: [{ name: 'latest graph' }] })); await settle()
-      latest.resolve(ok({ nodes: [{ name: 'stale graph' }] })); await settle()
+      const oldDownload = h.graph().props.graphDownload.action
+      assert.equal(h.graph().props.graphDownload.enabled, true); oldDownload()
+      assert.equal(h.downloads.length, 1)
+      await refresh(h); oldDownload(); assert.equal(h.downloads.length, 1)
+      assert.equal(h.graph().props.graphDownload.enabled, false)
+      const latest = pending(h, 'getGraphData')
+      await refresh(h); pending(h, 'getGraphData').resolve(ok(graphPayload('latest graph'))); await settle()
+      latest.resolve(ok(graphPayload('stale graph'))); await settle()
       assert.equal(state(h).graphData.nodes[0].name, 'latest graph')
+      const currentDownload = h.graph().props.graphDownload.action
+      assert.notEqual(currentDownload, oldDownload); oldDownload()
+      assert.equal(h.downloads.length, 1); currentDownload(); assert.equal(h.downloads.length, 2)
     } finally { h.close() }
   })
 }

@@ -9,6 +9,7 @@ import * as Vue from 'vue'
 import * as Router from 'vue-router'
 import * as PendingUpload from '../../src/store/pendingUpload.js'
 import * as LocalCastPreset from '../../src/utils/localCastPreset.js'
+import * as LoadedGraphFile from '../../src/utils/loadedGraphFile.js'
 
 export const graphView = 'views/MainView.vue'
 export const graphChild = 'components/Step1GraphBuild.vue'
@@ -60,15 +61,27 @@ function renderer() {
 export function build(options = {}) {
   const requests = {}, instances = {}, intervals = new Map(), warnings = []
   const downloads = options.downloads ?? [], revoked = options.revoked ?? [], objectUrls = new Map()
+  const downloadHooks = options.downloadHooks ?? {}, anchors = []
+  class DownloadBlob extends Blob {
+    constructor(parts, options) { downloadHooks.blob?.(); super(parts, options) }
+  }
   let nextObjectUrl = 0
   const fileUrl = {
-    createObjectURL(blob) { const url = 'blob:preset-fixture-' + (++nextObjectUrl); objectUrls.set(url, blob); return url },
-    revokeObjectURL(url) { revoked.push(url); objectUrls.delete(url) },
+    createObjectURL(blob) { downloadHooks.createObjectURL?.(); const url = 'blob:preset-fixture-' + (++nextObjectUrl); objectUrls.set(url, blob); return url },
+    revokeObjectURL(url) { revoked.push(url); objectUrls.delete(url); downloadHooks.revokeObjectURL?.() },
   }
-  const fileDocument = { createElement(type) {
-    assert.equal(type, 'a')
-    return { href: '', download: '', click() { downloads.push({ href: this.href, filename: this.download, blob: objectUrls.get(this.href) }) } }
-  } }
+  const fileDocument = {
+    body: { appendChild(anchor) { downloadHooks.append?.(); anchor.attached = true } },
+    createElement(type) {
+      assert.equal(type, 'a'); downloadHooks.anchor?.()
+      const anchor = { href: '', download: '', attached: false,
+        click() { downloadHooks.click?.(); downloads.push({ href: this.href, filename: this.download, blob: objectUrls.get(this.href) }) },
+        remove() { this.attached = false },
+      }
+      anchors.push(anchor)
+      return anchor
+    },
+  }
   let nextTimer = 0 // Timer ID zero must be retired too.
   const api = new Proxy({}, { get(_target, name) {
     return (...args) => {
@@ -86,7 +99,7 @@ export function build(options = {}) {
     }
   } })
   const stub = { render: () => Vue.h('fixture-boundary') }
-  const graph = { name: 'GraphBoundary', props: ['graphData', 'loading', 'currentPhase', 'isSimulating'],
+  const graph = { name: 'GraphBoundary', props: ['graphData', 'loading', 'currentPhase', 'isSimulating', 'graphDownload'],
     emits: ['refresh', 'toggle-maximize'], setup() {
       ;(instances.graph ??= []).push(Vue.getCurrentInstance())
       return () => Vue.h('graph-boundary')
@@ -99,7 +112,7 @@ export function build(options = {}) {
   const components = { '../components/GraphPanel.vue': graph }
   function evaluate(source, returnName = 'component') {
     const ast = parseJavaScript(source, { sourceType: 'module' })
-    const globals = { AbortController, Blob, FormData, alert: message => warnings.push(['alert', message]), URL: fileUrl, document: fileDocument, console: { warn: (...args) => warnings.push(args), error: (...args) => warnings.push(args) },
+    const globals = { AbortController, Blob: DownloadBlob, FormData, alert: message => warnings.push(['alert', message]), URL: fileUrl, document: fileDocument, console: { warn: (...args) => warnings.push(args), error: (...args) => warnings.push(args) },
       setInterval: (callback, ms) => { const id = nextTimer++; intervals.set(id, { callback, ms }); return id },
       clearInterval: id => intervals.delete(id) }
     for (const statement of ast.program.body.filter(item => item.type === 'ImportDeclaration').reverse()) {
@@ -107,6 +120,7 @@ export function build(options = {}) {
       let dependency = modules[path] ?? (path.includes('/api/') ? api : null)
       if (path === '../store/pendingUpload' || path === '../store/pendingUpload.js') dependency = PendingUpload
       if (path === '../utils/localCastPreset') dependency = LocalCastPreset
+      if (path === '../utils/loadedGraphFile.js') dependency = LoadedGraphFile
       if (path === '../utils/localRunPlan') {
         const utility = readFileSync(new URL('../../src/utils/localRunPlan.js', import.meta.url), 'utf8')
         const exports = [...utility.matchAll(/export (?:const|function) (\w+)/g)].map(match => match[1])
@@ -185,7 +199,7 @@ export function build(options = {}) {
   }
   const host = { type: 'root', children: [], parent: null }
   let mounted = false
-  return { requests, instances, router, i18n, intervals, host, warnings, downloads, revoked, objectUrls, pushes,
+  return { requests, instances, router, i18n, intervals, host, warnings, downloads, revoked, objectUrls, pushes, downloadHooks, anchors,
     state: path => instances[path].at(-1).setupState,
     child: path => instances[path].at(-1),
     graph: () => instances.graph.at(-1),
