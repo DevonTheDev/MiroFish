@@ -128,6 +128,11 @@
     "platformChoiceDesc": "Choose the platforms to prepare and run for this simulation."
   },
   "step2": {
+    "preparedDataLoadFailed": "Prepared data could not be loaded.",
+    "retryPreparedData": "Retry loading prepared data",
+    "loadingPreparedData": "Loading prepared data…",
+    "preparedDataNotReady": "Prepared data is not ready. Try again after preparation finishes.",
+    "preparedDataCheckFailed": "Could not check prepared data. Please try again.",
     "simInstanceInit": "Simulation Instance Initialization",
     "simInstanceDesc": "Create a new simulation instance and pull world parameter templates",
     "asyncTaskDone": "Async task completed",

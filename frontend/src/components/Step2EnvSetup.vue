@@ -1,6 +1,14 @@
 <template>
   <div class="env-setup-panel">
     <div class="scroll-container">
+      <div v-if="runtimeMode === 'cloud' && preparedDataRecoveryMessage" class="prepared-data-recovery"
+        role="status" aria-live="polite" :aria-busy="retryingPreparedData">
+        <p>{{ $t(retryingPreparedData ? 'step2.loadingPreparedData' : preparedDataRecoveryMessage) }}</p>
+        <button type="button" data-testid="retry-prepared-data" :disabled="retryingPreparedData"
+          :onClick="retryPreparedDataAction">
+          {{ $t(retryingPreparedData ? 'step2.loadingPreparedData' : 'step2.retryPreparedData') }}
+        </button>
+      </div>
       <LocalRunPlanner :key="plannerGeneration" v-if="runtimeMode !== 'cloud'"
         :plan="localPlan" :checking="planLoading" :waiting="waitingForCleanup" :busy="plannerBusy"
         :error="planError" :limits-valid="localLimitsValid" :can-prepare="canPrepareLocal" :can-reuse="canReuseLocal"
@@ -699,6 +707,9 @@ const profiles = ref([])
 const entityTypes = ref([])
 const expectedTotal = ref(null)
 const simulationConfig = ref(null)
+const preparedDataRecoveryMessage = ref('')
+const retryingPreparedData = ref(false)
+const retryPreparedDataAction = ref(null)
 const selectedProfile = ref(null)
 const showProfilesDetail = ref(true)
 
@@ -815,6 +826,10 @@ let configTimer = null
 // One identity owns this selection, including A → B → A and its final reads.
 let mounted = false
 let preparationContext = null
+const createPreparationContext = id => ({
+  id, controller: new AbortController(), cancelController: new AbortController(), requests: {}, cancelEpoch: 0,
+  terminal: null, preparedConfirmed: false,
+})
 const ownsView = context => !!context && mounted && context === preparationContext && props.simulationId === context.id
 const isActive = context => ownsView(context) && !context.terminal
 const ownsTask = (context, id) => isActive(context) && taskId.value === id
@@ -845,6 +860,16 @@ const finishPreparation = (context, status) => {
   // This retires HTTP observation only; backend preparation is not canceled.
   context.controller.abort()
   context.cancelController.abort()
+  retryingPreparedData.value = false
+  if (runtimeMode.value === 'cloud' && status === 'error' && (context.preparedConfirmed || context.recoveryEligible)) {
+    // Eligibility survives a failed readiness check on a fresh observer.
+    context.recoveryEligible = true
+    preparedDataRecoveryMessage.value = context.recoveryMessage || 'step2.preparedDataLoadFailed'
+    retryPreparedDataAction.value = () => retryPreparedData(context)
+  } else if (status === 'completed') {
+    preparedDataRecoveryMessage.value = ''
+    retryPreparedDataAction.value = null
+  }
   emit('update-status', status)
 }
 
@@ -853,6 +878,9 @@ const replacePreparation = () => {
   retirePreset()
   preparationContext = null
   stopAllPolling()
+  preparedDataRecoveryMessage.value = ''
+  retryingPreparedData.value = false
+  retryPreparedDataAction.value = null
   plannerGeneration.value += 1
   runtimeMode.value = 'unknown'
   localPlan.value = null
@@ -893,10 +921,7 @@ const replacePreparation = () => {
   lastLoggedProfileCount = 0
   lastLoggedConfigStage = ''
   if (!mounted || !props.simulationId) return
-  preparationContext = {
-    id: props.simulationId, controller: new AbortController(), cancelController: new AbortController(), requests: {}, cancelEpoch: 0,
-    terminal: null, preparedConfirmed: false,
-  }
+  preparationContext = createPreparationContext(props.simulationId)
   addLog(t('log.step2Init'))
   const context = preparationContext
   plannerActions.value = {
@@ -1069,6 +1094,62 @@ const handlePrepareFailure = (message, context = preparationContext) => {
     addLog(t('localPlan.requestError'))
   } else addLog(t('log.prepareFailedWithError', { error: message || t('common.unknownError') }))
   finishPreparation(context, 'error')
+}
+
+const retryPreparedData = previous => {
+  if (!ownsView(previous) || runtimeMode.value !== 'cloud' || previous.terminal !== 'error'
+    || !previous.recoveryEligible || retryingPreparedData.value) return
+  previous.controller.abort()
+  previous.cancelController.abort()
+  stopAllPolling()
+  const context = createPreparationContext(previous.id)
+  context.recoveryEligible = true
+  preparationContext = context
+  retryingPreparedData.value = true
+  phase.value = 2
+  currentStage.value = ''
+  progressMessage.value = ''
+  profiles.value = []
+  entityTypes.value = []
+  expectedTotal.value = null
+  simulationConfig.value = null
+  selectedProfile.value = null
+  // The context is not reactive: explicitly replace every cloud action closure.
+  // Preserve taskId and both round choices; this does not restart preparation.
+  retryPreparedDataAction.value = () => retryPreparedData(context)
+  plannerActions.value = {
+    start: () => { if (ownsView(context)) handleStartSimulation() },
+    back: () => { if (ownsView(context)) emit('go-back') },
+  }
+  emit('update-status', 'processing')
+  const observedTaskId = taskId.value
+  return singleFlight(context, 'status', async () => {
+    try {
+      // Simulation-only observation checks current artifacts. A historical
+      // task ID could fall back to an old completed task after readiness is lost.
+      // This endpoint retains its existing saved-status reconciliation behavior.
+      const response = await getPrepareStatus({ simulation_id: context.id }, context.controller.signal)
+      if (!ownsTask(context, observedTaskId)) return
+      const data = response?.data
+      if (response?.success !== true || data?.simulation_id !== context.id) {
+        context.recoveryMessage = 'step2.preparedDataCheckFailed'
+        handlePrepareFailure(t(context.recoveryMessage), context)
+        return
+      }
+      if (data.status !== 'ready' || data.already_prepared !== true) {
+        context.recoveryMessage = 'step2.preparedDataNotReady'
+        handlePrepareFailure(t(context.recoveryMessage), context)
+        return
+      }
+      await loadPreparedData(context)
+      // Busy ends at terminal settlement, including when final config polling
+      // continues after loadPreparedData has returned.
+    } catch (error) {
+      if (!ownsTask(context, observedTaskId)) return
+      context.recoveryMessage = 'step2.preparedDataCheckFailed'
+      handlePrepareFailure(t(context.recoveryMessage), context)
+    }
+  })
 }
 
 // 处理开始模拟按钮点击
@@ -1670,11 +1751,18 @@ onUnmounted(() => {
   retirePreset()
   preparationContext = null
   stopAllPolling()
+  preparedDataRecoveryMessage.value = ''
+  retryingPreparedData.value = false
+  retryPreparedDataAction.value = null
 })
 
 </script>
 
 <style scoped>
+.prepared-data-recovery { margin-bottom: 20px; padding: 16px; border: 1px solid #F0C36D; border-radius: 8px; background: #FFFBEB; }
+.prepared-data-recovery p { margin: 0 0 12px; color: #78350F; font-size: 14px; }
+.prepared-data-recovery button { padding: 8px 12px; border: 1px solid #92400E; border-radius: 6px; background: #FFF; color: #78350F; cursor: pointer; }
+.prepared-data-recovery button:disabled { opacity: 0.6; cursor: wait; }
 .local-rounds input { width: 100px; margin-left: 12px; padding: 8px; border: 1px solid #aaa; border-radius: 4px; }
 .local-rounds p { font-size: 13px; line-height: 1.6; color: #555; }
 .env-setup-panel {

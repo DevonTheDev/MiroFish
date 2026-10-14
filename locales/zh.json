@@ -128,6 +128,11 @@
     "platformChoiceDesc": "选择本次模拟需要准备并运行的平台。"
   },
   "step2": {
+    "preparedDataLoadFailed": "无法加载已准备的数据。",
+    "retryPreparedData": "重试加载已准备的数据",
+    "loadingPreparedData": "正在加载已准备的数据…",
+    "preparedDataNotReady": "数据尚未准备就绪，请在准备完成后重试。",
+    "preparedDataCheckFailed": "无法检查已准备的数据，请重试。",
     "simInstanceInit": "模拟实例初始化",
     "simInstanceDesc": "新建simulation实例，拉取模拟世界参数模版",
     "asyncTaskDone": "异步任务已完成",
