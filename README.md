@@ -86,6 +86,16 @@ cancel gestures or timers. Focused tests cover completed and active wheel gestur
 with the same synthetic host; pan, touch, zoom transitions, native browser geometry
 and rendering remain unverified.
 
+The graph header has **Zoom in**, **Zoom out** and **Reset view** buttons. Zoom
+steps double or halve the scale around the current viewport center, clamped to
+0.1–4. Reset restores viewport translation and scale to identity (x=0, y=0, k=1)
+synchronously; it does not fit the graph, restart layout, change selection or
+refresh data. Controls wait for a populated drawing with positive viewport size;
+zoom steps disable at their bounds, while Reset stays available at identity.
+Buttons have English/Chinese accessible labels and a visible focus outline.
+Focused synthetic-host tests also cover commands during a retained wheel gesture;
+native keyboard activation, focus and visual placement remain unverified.
+
 ## Expand self-relation details
 
 After opening a grouped **Self Relations** edge, each numbered relation header is

@@ -370,6 +370,10 @@
     "relationship": "Relationship",
     "graphDataLoading": "图谱数据加载中...",
     "waitingOntology": "等待本体生成...",
+    "zoomIn": "放大",
+    "zoomOut": "缩小",
+    "resetView": "重置视图",
+    "viewControls": "图谱视图控制",
     "toggleMaximize": "最大化/还原",
     "closeHint": "关闭提示"
   },

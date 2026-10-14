@@ -370,6 +370,10 @@
     "relationship": "Relationship",
     "graphDataLoading": "Loading graph data...",
     "waitingOntology": "Waiting for ontology generation...",
+    "zoomIn": "Zoom in",
+    "zoomOut": "Zoom out",
+    "resetView": "Reset view",
+    "viewControls": "Graph view controls",
     "toggleMaximize": "Maximize/Restore",
     "closeHint": "Close hint"
   },

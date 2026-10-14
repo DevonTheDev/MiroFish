@@ -11,6 +11,23 @@
         <button class="tool-btn" @click="$emit('toggle-maximize')" :title="$t('graph.toggleMaximize')">
           <span class="icon-maximize">⛶</span>
         </button>
+        <div class="graph-zoom-controls" role="group" :aria-label="$t('graph.viewControls')">
+          <button type="button" class="tool-btn graph-zoom-button graph-zoom-in"
+            :aria-label="$t('graph.zoomIn')" :title="$t('graph.zoomIn')"
+            :disabled="!zoomReady || zoomScale >= 4" @click="zoomIn">
+            <span aria-hidden="true">+</span>
+          </button>
+          <button type="button" class="tool-btn graph-zoom-button graph-zoom-out"
+            :aria-label="$t('graph.zoomOut')" :title="$t('graph.zoomOut')"
+            :disabled="!zoomReady || zoomScale <= 0.1" @click="zoomOut">
+            <span aria-hidden="true">−</span>
+          </button>
+          <button type="button" class="tool-btn graph-zoom-button graph-zoom-reset"
+            :aria-label="$t('graph.resetView')" :title="$t('graph.resetView')"
+            :disabled="!zoomReady" @click="resetView">
+            <span aria-hidden="true">↺</span>
+          </button>
+        </div>
       </div>
     </div>
     
@@ -311,6 +328,12 @@ const searchMode = ref('nodes')
 let searchModeRevision = 0
 const searchPage = ref(1)
 const searchPageSize = 20
+const zoomReady = ref(false)
+const zoomScale = ref(1)
+let commandRenderedZoom = null
+const zoomIn = () => commandRenderedZoom?.('in')
+const zoomOut = () => commandRenderedZoom?.('out')
+const resetView = () => commandRenderedZoom?.('reset')
 const searchReady = ref(false)
 const graphRevision = ref(0)
 let activateRenderedNode = null
@@ -469,6 +492,8 @@ let linkLabelsRef = null
 let linkLabelBgRef = null
 
 const retireRenderedGraph = () => {
+  commandRenderedZoom = null
+  zoomReady.value = false
   activateRenderedNode = null
   activateRenderedRelationship = null
   searchReady.value = false
@@ -682,10 +707,12 @@ const renderGraph = (revision, ticket) => {
   const g = svg.append('g')
   
   // Zoom
-  svg.call(d3.zoom().extent([[0, 0], [width, height]]).scaleExtent([0.1, 4]).on('zoom', (event) => {
+  const zoom = d3.zoom().extent([[0, 0], [width, height]]).scaleExtent([0.1, 4]).on('zoom', (event) => {
     if (disposed || graphSvg.value !== svg.node()) return
     svg.select('g').attr('transform', event.transform)
-  }))
+    zoomScale.value = event.transform.k
+  })
+  svg.call(zoom)
   // The SVG retains its viewport when redraw replaces the root group.
   g.attr('transform', d3.zoomTransform(svg.node()))
 
@@ -993,8 +1020,27 @@ const renderGraph = (revision, ticket) => {
       .attr('x', d => d.x)
       .attr('y', d => d.y)
   })
-  
 
+  if (!Number.isFinite(width) || !Number.isFinite(height) || width <= 0 || height <= 0) return
+
+  // Publish commands only for this completed, populated drawing. Wheel callbacks
+  // keep their SVG lifetime, while explicit commands require the latest render.
+  commandRenderedZoom = command => {
+    const container = graphContainer.value
+    const width = container?.clientWidth, height = container?.clientHeight
+    if (!isCurrentRender() || !zoomReady.value || graphSvg.value !== svg.node()
+      || !Number.isFinite(width) || !Number.isFinite(height) || width <= 0 || height <= 0
+      || container.querySelector('.graph-svg') !== svg.node()
+      || g.node().parentNode !== svg.node()) return
+    const current = d3.zoomTransform(svg.node())
+    zoomScale.value = current.k
+    const [minimum, maximum] = zoom.scaleExtent()
+    if (command === 'reset') svg.call(zoom.transform, d3.zoomIdentity)
+    else if (command === 'in' && current.k < maximum) svg.call(zoom.scaleBy, 2)
+    else if (command === 'out' && current.k > minimum) svg.call(zoom.scaleBy, 0.5)
+  }
+  zoomScale.value = d3.zoomTransform(svg.node()).k
+  zoomReady.value = true
 }
 
 const requestGraphRender = () => {
@@ -1154,6 +1200,11 @@ onUnmounted(() => {
   color: #000;
   border-color: #CCC;
 }
+
+.graph-zoom-controls { display: flex; gap: 4px; }
+.tool-btn.graph-zoom-button { padding: 0 8px; font-size: 16px; }
+.graph-zoom-button:focus-visible { outline: 2px solid #004E89; outline-offset: 2px; }
+.graph-zoom-button:disabled { opacity: 0.45; cursor: default; background: #FFF; color: #666; border-color: #E0E0E0; }
 
 .tool-btn .btn-text {
   font-size: 12px;
