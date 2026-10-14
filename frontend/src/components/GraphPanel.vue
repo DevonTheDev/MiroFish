@@ -311,13 +311,17 @@
       </div>
     </div>
     
-    <!-- 显示边标签开关 -->
+    <!-- Label visibility controls -->
     <div v-if="graphData" class="edge-labels-toggle">
       <label class="toggle-switch">
         <input type="checkbox" v-model="showEdgeLabels" />
         <span class="slider"></span>
       </label>
       <span class="toggle-label">Show Edge Labels</span>
+      <label class="node-labels-toggle toggle-label">
+        <input type="checkbox" v-model="showNodeLabels" />
+        <span>{{ $t('graph.showNodeLabels') }}</span>
+      </label>
     </div>
   </div>
 </template>
@@ -340,6 +344,7 @@ const graphContainer = ref(null)
 const graphSvg = ref(null)
 const selectedItem = ref(null)
 const showEdgeLabels = ref(true) // 默认显示边标签
+const showNodeLabels = ref(true)
 const expandedSelfLoops = ref(new Set()) // 展开的自环项
 const showSimulationFinishedHint = ref(false) // 模拟结束后的提示
 const wasSimulating = ref(false) // 追踪之前是否在模拟中
@@ -514,6 +519,7 @@ const closeDetailPanel = () => {
 let currentSimulation = null
 let linkLabelsRef = null
 let linkLabelBgRef = null
+let nodeLabelsRef = null
 
 const retireRenderedGraph = () => {
   commandRenderedZoom = null
@@ -525,6 +531,7 @@ const retireRenderedGraph = () => {
   currentSimulation = null
   linkLabelsRef = null
   linkLabelBgRef = null
+  nodeLabelsRef = null
 }
 
 const renderGraph = (revision, ticket) => {
@@ -1011,6 +1018,9 @@ const renderGraph = (revision, ticket) => {
     .style('pointer-events', 'none')
     .style('font-family', 'system-ui, sans-serif')
 
+  nodeLabelsRef = nodeLabels
+  nodeLabels.style('display', showNodeLabels.value ? null : 'none')
+
   simulation.on('tick', () => {
     // 更新曲线路径
     link.attr('d', d => getLinkPath(d))
@@ -1141,6 +1151,10 @@ watch(showEdgeLabels, (newVal) => {
   if (linkLabelBgRef) {
     linkLabelBgRef.style('display', newVal ? 'block' : 'none')
   }
+})
+
+watch(showNodeLabels, visible => {
+  nodeLabelsRef?.style('display', visible ? null : 'none')
 })
 
 const handleResize = () => {
@@ -1404,7 +1418,7 @@ onUnmounted(() => {
   white-space: nowrap;
 }
 
-/* Edge Labels Toggle - Top Right */
+/* Label visibility controls - Top Right */
 .edge-labels-toggle {
   position: absolute;
   top: 60px;
@@ -1469,6 +1483,16 @@ input:checked + .slider:before {
   font-size: 12px;
   color: #666;
 }
+
+.node-labels-toggle {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
+}
+
+.node-labels-toggle input { margin: 0; }
+.node-labels-toggle input:focus-visible { outline: 2px solid #004E89; outline-offset: 2px; }
 
 /* Detail Panel - Right Side */
 .detail-panel {

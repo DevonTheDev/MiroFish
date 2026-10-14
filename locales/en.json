@@ -395,6 +395,7 @@
     "resetView": "Reset view",
     "fitGraph": "Fit graph",
     "centerSelectedNode": "Center selected node",
+    "showNodeLabels": "Show node labels",
     "viewControls": "Graph view controls",
     "toggleMaximize": "Maximize/Restore",
     "closeHint": "Close hint"
