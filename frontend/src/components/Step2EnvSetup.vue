@@ -601,6 +601,16 @@
             </div>
           </div>
 
+          <div class="modal-section" data-testid="profile-creation-route">
+            <span class="section-label">{{ $t('step2.profileCreationRouteHeading') }}</span>
+            <div class="section-bio">
+              <strong>{{ $t(selectedProfileCreationRoute.labelKey) }}</strong>
+              <p>{{ $t(selectedProfileCreationRoute.descriptionKey) }}</p>
+              <p v-if="selectedProfileCreationRoute.providerReportedLength">{{ $t('step2.profileCreationRouteLength') }}</p>
+              <p>{{ $t('step2.profileCreationRouteNote') }}</p>
+            </div>
+          </div>
+
           <!-- 简介 -->
           <div class="modal-section">
             <span class="section-label">{{ $t('step2.profileModalBio') }}</span>
@@ -712,6 +722,42 @@ const retryingPreparedData = ref(false)
 const retryPreparedDataAction = ref(null)
 const selectedProfile = ref(null)
 const showProfilesDetail = ref(true)
+
+const profileCreationRouteKeys = {
+  model_json: 'ModelJson',
+  model_recovered_json: 'ModelRecoveredJson',
+  model_partial_fields: 'ModelPartialFields',
+  rule_requested: 'RuleRequested',
+  rule_fallback: 'RuleFallback',
+  basic_fallback: 'BasicFallback'
+}
+
+// Read only the selected object's closed record, so content and route keep the
+// same snapshot when newer profile rows arrive. Never render raw metadata.
+const selectedProfileCreationRoute = computed(() => {
+  const record = selectedProfile.value?.generation_provenance
+  const unknown = {
+    labelKey: 'step2.profileCreationRouteUnknownLabel',
+    descriptionKey: 'step2.profileCreationRouteUnknownDescription',
+    providerReportedLength: false
+  }
+  if (!record || typeof record !== 'object' || Array.isArray(record) ||
+      record.version !== 1 || typeof record.route !== 'string' ||
+      !Object.prototype.hasOwnProperty.call(profileCreationRouteKeys, record.route)) return unknown
+
+  const isModelRoute = ['model_json', 'model_recovered_json', 'model_partial_fields'].includes(record.route)
+  const expectedKeys = isModelRoute ? ['version', 'route', 'provider_reported_length'] : ['version', 'route']
+  const keys = Object.keys(record)
+  if (keys.length !== expectedKeys.length || !expectedKeys.every(key => keys.includes(key)) ||
+      (isModelRoute && typeof record.provider_reported_length !== 'boolean')) return unknown
+
+  const routeKey = profileCreationRouteKeys[record.route]
+  return {
+    labelKey: `step2.profileCreationRoute${routeKey}Label`,
+    descriptionKey: `step2.profileCreationRoute${routeKey}Description`,
+    providerReportedLength: isModelRoute && record.provider_reported_length
+  }
+})
 
 const plannerGeneration = ref(0)
 const runtimeMode = ref('unknown')

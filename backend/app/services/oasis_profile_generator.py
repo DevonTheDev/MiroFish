@@ -29,6 +29,7 @@ from ..utils.zep import (
     normalize_zep_search_query,
 )
 from .zep_entity_reader import EntityNode, ZepEntityReader
+from .profile_formats import normalize_generation_provenance
 
 logger = get_logger('mirofish.oasis_profile')
 
@@ -79,6 +80,19 @@ def _coerce_to_str_list(value: Any) -> List[str]:
 
 
 @dataclass
+class _ProfileCreationOutcome:
+    """Private to one invocation or repair attempt; never model-authored state."""
+    route: Optional[str] = None
+    provider_reported_length: Optional[bool] = None
+
+    def to_record(self) -> Optional[Dict[str, Any]]:
+        record = {"version": 1, "route": self.route}
+        if self.provider_reported_length is not None:
+            record["provider_reported_length"] = self.provider_reported_length
+        return normalize_generation_provenance(record)
+
+
+@dataclass
 class OasisAgentProfile:
     """OASIS Agent Profile数据结构"""
     # 通用字段
@@ -109,6 +123,7 @@ class OasisAgentProfile:
     source_entity_type: Optional[str] = None
     
     created_at: str = field(default_factory=lambda: datetime.now().strftime("%Y-%m-%d"))
+    generation_provenance: Optional[Dict[str, Any]] = None
     
     def __post_init__(self):
         """Normalize structured LLM fields once at the profile boundary."""
@@ -121,6 +136,7 @@ class OasisAgentProfile:
         self.gender = _coerce_to_str(self.gender) or None
         self.mbti = _coerce_to_str(self.mbti) or None
         self.interested_topics = _coerce_to_str_list(self.interested_topics)
+        self.generation_provenance = normalize_generation_provenance(self.generation_provenance)
 
     def to_reddit_format(self) -> Dict[str, Any]:
         """转换为Reddit平台格式"""
@@ -148,6 +164,9 @@ class OasisAgentProfile:
         if self.interested_topics:
             profile["interested_topics"] = self.interested_topics
         
+        provenance = normalize_generation_provenance(self.generation_provenance)
+        if provenance is not None:
+            profile["generation_provenance"] = provenance
         return profile
     
     def to_twitter_format(self) -> Dict[str, Any]:
@@ -178,11 +197,14 @@ class OasisAgentProfile:
         if self.interested_topics:
             profile["interested_topics"] = self.interested_topics
         
+        provenance = normalize_generation_provenance(self.generation_provenance)
+        if provenance is not None:
+            profile["generation_provenance"] = provenance
         return profile
     
     def to_dict(self) -> Dict[str, Any]:
         """转换为完整字典格式"""
-        return {
+        profile = {
             "user_id": self.user_id,
             "user_name": self.user_name,
             "name": self.name,
@@ -202,6 +224,11 @@ class OasisAgentProfile:
             "source_entity_type": self.source_entity_type,
             "created_at": self.created_at,
         }
+
+        provenance = normalize_generation_provenance(self.generation_provenance)
+        if provenance is not None:
+            profile["generation_provenance"] = provenance
+        return profile
 
 
 class OasisProfileGenerator:
@@ -294,6 +321,7 @@ class OasisProfileGenerator:
         # 基础信息
         name = entity.name
         user_name = self._generate_username(name)
+        outcome = _ProfileCreationOutcome()
         
         if use_llm:
             # Retrieval can embed/search the graph; templates do not need it.
@@ -304,7 +332,8 @@ class OasisProfileGenerator:
                 entity_type=entity_type,
                 entity_summary=entity.summary,
                 entity_attributes=entity.attributes,
-                context=context
+                context=context,
+                _outcome=outcome,
             )
         else:
             # 使用规则生成基础人设
@@ -314,6 +343,7 @@ class OasisProfileGenerator:
                 entity_summary=entity.summary,
                 entity_attributes=entity.attributes
             )
+            outcome.route = "rule_requested"
         
         return OasisAgentProfile(
             user_id=user_id,
@@ -333,6 +363,7 @@ class OasisProfileGenerator:
             interested_topics=profile_data.get("interested_topics", []),
             source_entity_uuid=entity.uuid,
             source_entity_type=entity_type,
+            generation_provenance=outcome.to_record(),
         )
     
     def _generate_username(self, name: str) -> str:
@@ -543,7 +574,9 @@ class OasisProfileGenerator:
         entity_type: str,
         entity_summary: str,
         entity_attributes: Dict[str, Any],
-        context: str
+        context: str,
+        *,
+        _outcome: Optional[_ProfileCreationOutcome] = None,
     ) -> Dict[str, Any]:
         """
         使用LLM生成非常详细的人设
@@ -569,6 +602,8 @@ class OasisProfileGenerator:
         last_error = None
         
         for attempt in range(max_attempts):
+            recovery = _ProfileCreationOutcome()
+            helper_changed_text = False
             try:
                 response = create_chat_completion(
                     self.client,
@@ -588,7 +623,9 @@ class OasisProfileGenerator:
                 finish_reason = response.choices[0].finish_reason
                 if finish_reason == 'length':
                     logger.warning(f"LLM输出被截断 (attempt {attempt+1}), 尝试修复...")
+                    before_repair = content
                     content = self._fix_truncated_json(content)
+                    helper_changed_text = content.strip() != before_repair.strip()
                 
                 # 尝试解析JSON
                 try:
@@ -600,15 +637,23 @@ class OasisProfileGenerator:
                     if "persona" not in result or not result["persona"]:
                         result["persona"] = entity_summary or f"{entity_name}是一个{entity_type}。"
                     
+                    if _outcome is not None:
+                        _outcome.route = "model_recovered_json" if helper_changed_text else "model_json"
+                        _outcome.provider_reported_length = finish_reason == "length"
                     return result
                     
                 except json.JSONDecodeError as je:
                     logger.warning(f"JSON解析失败 (attempt {attempt+1}): {str(je)[:80]}")
                     
                     # 尝试修复JSON
-                    result = self._try_fix_json(content, entity_name, entity_type, entity_summary)
+                    result = self._try_fix_json(
+                        content, entity_name, entity_type, entity_summary, _outcome=recovery
+                    )
                     if result.get("_fixed"):
                         del result["_fixed"]
+                        if _outcome is not None:
+                            _outcome.route = recovery.route
+                            _outcome.provider_reported_length = finish_reason == "length"
                         return result
                     
                     last_error = je
@@ -620,9 +665,13 @@ class OasisProfileGenerator:
                 time.sleep(1 * (attempt + 1))  # 指数退避
         
         logger.warning(f"LLM生成人设失败（{max_attempts}次尝试）: {last_error}, 使用规则生成")
-        return self._generate_profile_rule_based(
+        result = self._generate_profile_rule_based(
             entity_name, entity_type, entity_summary, entity_attributes
         )
+        if _outcome is not None:
+            _outcome.route = "rule_fallback"
+            _outcome.provider_reported_length = None
+        return result
     
     def _fix_truncated_json(self, content: str) -> str:
         """修复被截断的JSON（输出被max_tokens限制截断）"""
@@ -647,7 +696,10 @@ class OasisProfileGenerator:
         
         return content
     
-    def _try_fix_json(self, content: str, entity_name: str, entity_type: str, entity_summary: str = "") -> Dict[str, Any]:
+    def _try_fix_json(
+        self, content: str, entity_name: str, entity_type: str, entity_summary: str = "",
+        *, _outcome: Optional[_ProfileCreationOutcome] = None,
+    ) -> Dict[str, Any]:
         """尝试修复损坏的JSON"""
         import re
         
@@ -676,6 +728,8 @@ class OasisProfileGenerator:
             try:
                 result = json.loads(json_str)
                 result["_fixed"] = True
+                if _outcome is not None:
+                    _outcome.route = "model_recovered_json"
                 return result
             except json.JSONDecodeError as e:
                 # 5. 如果还是失败，尝试更激进的修复
@@ -686,6 +740,8 @@ class OasisProfileGenerator:
                     json_str = re.sub(r'\s+', ' ', json_str)
                     result = json.loads(json_str)
                     result["_fixed"] = True
+                    if _outcome is not None:
+                        _outcome.route = "model_recovered_json"
                     return result
                 except:
                     pass
@@ -700,6 +756,8 @@ class OasisProfileGenerator:
         # 如果提取到了有意义的内容，标记为已修复
         if bio_match or persona_match:
             logger.info(f"从损坏的JSON中提取了部分信息")
+            if _outcome is not None:
+                _outcome.route = "model_partial_fields"
             return {
                 "bio": bio,
                 "persona": persona,
@@ -999,6 +1057,7 @@ class OasisProfileGenerator:
                     persona=entity.summary or f"A participant in social discussions.",
                     source_entity_uuid=entity.uuid,
                     source_entity_type=entity_type,
+                    generation_provenance={"version": 1, "route": "basic_fallback"},
                 )
                 if cancellation_check is not None:
                     cancellation_check()
@@ -1068,6 +1127,7 @@ class OasisProfileGenerator:
                             persona=entity.summary or "A participant in social discussions.",
                             source_entity_uuid=entity.uuid,
                             source_entity_type=entity_type,
+                            generation_provenance={"version": 1, "route": "basic_fallback"},
                         )
                         # 实时写入文件（即使是备用人设）
                         save_profiles_realtime()
@@ -1169,6 +1229,10 @@ class OasisProfileGenerator:
             
             # 写入OASIS要求的表头
             headers = ['user_id', 'name', 'username', 'user_char', 'description']
+            provenance = [normalize_generation_provenance(p.generation_provenance) for p in profiles]
+            include_provenance = any(record is not None for record in provenance)
+            if include_provenance:
+                headers.append('generation_provenance')
             writer.writerow(headers)
             
             # 写入数据行
@@ -1190,6 +1254,9 @@ class OasisProfileGenerator:
                     user_char,              # user_char: 完整人设（内部LLM使用）
                     description             # description: 简短简介（外部显示）
                 ]
+                if include_provenance:
+                    record = provenance[idx]
+                    row.append(json.dumps(record, separators=(",", ":")) if record is not None else "")
                 writer.writerow(row)
         
         logger.info(f"已保存 {len(profiles)} 个Twitter Profile到 {file_path} (OASIS CSV格式)")
@@ -1261,6 +1328,9 @@ class OasisProfileGenerator:
             if profile.interested_topics:
                 item["interested_topics"] = profile.interested_topics
             
+            provenance = normalize_generation_provenance(profile.generation_provenance)
+            if provenance is not None:
+                item["generation_provenance"] = provenance
             data.append(item)
         
         with open(file_path, 'w', encoding='utf-8') as f:

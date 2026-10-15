@@ -183,8 +183,16 @@ calls, before loading the existing profiles/configuration. Missing, changing,
 unsafe, inconsistent or now-over-cap files fail explicitly; reuse never falls
 through to regeneration. A previously completed preparation is not overwritten
 with a newly selected cast. Create another simulation through the existing
-project flow to prepare a different cast. The saved files do not record the
-original template/LLM choice, so the planner does not invent that provenance.
+project flow to prepare a different cast. New profile files can retain a
+**Recorded creation route**, shown in each profile's detail modal: model response
+parsing, JSON recovery, field recovery, a selected rule-based template, rule-based
+fallback, or a basic fallback profile. A provider-reported output-length limit is
+shown only when recorded for the accepted model response. This record does not
+establish field-by-field origin, completeness, quality, or file authenticity.
+Older files and unsupported records remain **Unknown / legacy**. Saved request
+selections are still not reconstructed, and the planner does not infer them from
+these records. Template profiles do not remove configuration generation's model
+use; the record describes the accepted profile's creation path.
 
 If a final request for saved profiles or configuration fails, setup shows an
 error and keeps Start unavailable. Choose **Refresh plan**, then explicitly

@@ -22,7 +22,7 @@ from ..services.platform_selection import (
     validate_platform_flags,
     validate_platform_mode,
 )
-from ..services.profile_formats import normalize_twitter_profile
+from ..services.profile_formats import normalize_profile_provenance, normalize_twitter_profile
 from ..services.simulation_comparison import (
     ComparisonError,
     compare_saved_simulations,
@@ -1328,6 +1328,8 @@ def get_simulation_profiles_realtime(simulation_id: str):
                 if platform == "reddit":
                     with open(profiles_file, 'r', encoding='utf-8') as f:
                         profiles = json.load(f)
+                    if isinstance(profiles, list):
+                        profiles = [normalize_profile_provenance(row) for row in profiles]
                 else:
                     with open(profiles_file, 'r', encoding='utf-8', newline='') as f:
                         reader = csv.DictReader(f)

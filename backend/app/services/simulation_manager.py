@@ -21,7 +21,7 @@ from .zep_entity_reader import ZepEntityReader, FilteredEntities
 from .oasis_profile_generator import OasisProfileGenerator, OasisAgentProfile
 from .simulation_config_generator import SimulationConfigGenerator, SimulationParameters
 from .platform_selection import validate_platform_flags
-from .profile_formats import normalize_twitter_profile
+from .profile_formats import normalize_profile_provenance, normalize_twitter_profile
 from ..utils.locale import t
 
 logger = get_logger('mirofish.simulation')
@@ -645,7 +645,10 @@ class SimulationManager:
                 return [normalize_twitter_profile(row) for row in csv.DictReader(f)]
 
         with open(profile_path, 'r', encoding='utf-8') as f:
-            return json.load(f)
+            profiles = json.load(f)
+        if isinstance(profiles, list):
+            return [normalize_profile_provenance(row) for row in profiles]
+        return profiles
     
     def get_simulation_config(self, simulation_id: str) -> Optional[Dict[str, Any]]:
         """获取模拟配置"""
