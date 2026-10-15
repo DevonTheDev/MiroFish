@@ -354,6 +354,15 @@
     "selectAgentFirst": "Please select a simulated individual first"
   },
   "graph": {
+    "viewDownload": {
+      "label": "Download graph view SVG",
+      "description": "Downloads this completed graph view with its current crop, geometry, labels and colors on a plain light background. Dots, controls, legend, details and status overlays are excluded. Clipped shapes may remain in the file, so cropping does not remove data. This static image is not a restorable graph, saved layout, identity certificate, history record or whole-graph fit. Text appearance may vary by viewer.",
+      "retained": "Refresh failed; this view uses the previously loaded graph.",
+      "invalid": "This graph view is unavailable or contains unsupported drawing data; no file was created.",
+      "tooLarge": "Graph view exceeds an SVG export limit; no file was created.",
+      "failed": "The SVG download could not be requested. Try again.",
+      "started": "SVG download requested. Check your browser downloads."
+    },
     "download": {
       "label": "Download loaded graph JSON",
       "note": "Downloads the loaded graph values currently held for this project; they may differ from the current server graph.",

@@ -1,5 +1,5 @@
 <template>
-  <div class="graph-panel" :class="{ 'has-graph-download': graphDownload }">
+  <div class="graph-panel" :class="{ 'has-graph-download': graphDownload || graphViewDownload }">
     <div class="panel-header">
       <span class="panel-title">{{ $t('graph.panelTitle') }}</span>
       <!-- 顶部工具栏 (Internal Top Right) -->
@@ -8,6 +8,11 @@
           :onClick="graphDownload.enabled ? graphDownload.action : undefined"
           :disabled="!graphDownload.enabled">
           {{ $t('graph.download.label') }}
+        </button>
+        <button v-if="graphViewDownload" type="button" class="tool-btn graph-download-button graph-view-download-button"
+          :onClick="graphViewDownload.enabled ? graphViewDownload.action : undefined"
+          :disabled="!graphViewDownload.enabled">
+          {{ $t('graph.viewDownload.label') }}
         </button>
         <button class="tool-btn" @click="$emit('refresh')" :disabled="loading" :title="$t('graph.refreshGraph')">
           <span class="icon-refresh" :class="{ 'spinning': loading }">↻</span>
@@ -43,6 +48,11 @@
         <p class="graph-download-note">{{ $t('graph.download.note') }}</p>
         <p v-if="graphDownload.status" class="graph-download-status" role="status" aria-live="polite">{{ graphDownload.status }}</p>
         <p v-if="graphDownload.error" class="graph-download-error" role="alert">{{ graphDownload.error }}</p>
+      </div>
+      <div v-if="graphViewDownload" class="graph-download-copy graph-view-download-copy">
+        <p class="graph-download-note graph-view-download-note">{{ $t('graph.viewDownload.description') }}</p>
+        <p v-if="graphViewDownload.status" class="graph-download-status graph-view-download-status" role="status" aria-live="polite">{{ graphViewDownload.status }}</p>
+        <p v-if="graphViewDownload.error" class="graph-download-error graph-view-download-error" role="alert">{{ graphViewDownload.error }}</p>
       </div>
     </div>
     
@@ -353,16 +363,18 @@
 <script setup>
 import { ref, onMounted, onUnmounted, watch, nextTick, computed } from 'vue'
 import * as d3 from 'd3'
+import { createGraphViewSvg } from '../utils/graphViewSvg.js'
 
 const props = defineProps({
   graphData: Object,
   loading: Boolean,
   currentPhase: Number,
   isSimulating: Boolean,
-  graphDownload: { type: Object, default: null }
+  graphDownload: { type: Object, default: null },
+  graphViewDownload: { type: Object, default: null }
 })
 
-const emit = defineEmits(['refresh', 'toggle-maximize'])
+const emit = defineEmits(['refresh', 'toggle-maximize', 'graph-view-capture', 'graph-view-retired'])
 
 const graphContainer = ref(null)
 const graphSvg = ref(null)
@@ -602,8 +614,14 @@ let currentSimulation = null
 let linkLabelsRef = null
 let linkLabelBgRef = null
 let nodeLabelsRef = null
+let graphViewCapture = null
 
 const retireRenderedGraph = () => {
+  // Notify with the retired identity before replacing any drawing. An old
+  // notification must never invalidate a later capture in the parent.
+  const retired = graphViewCapture
+  graphViewCapture = null
+  if (retired) emit('graph-view-retired', retired)
   commandRenderedZoom = null
   resolveSelectedRelationship = null
   zoomReady.value = false
@@ -829,6 +847,24 @@ const renderGraph = (revision, ticket) => {
   currentSimulation = simulation
 
   const g = svg.append('g')
+  const source = props.graphData, renderedSvg = svg.node(), renderedRoot = g.node()
+  let completedFrame = false
+  const ownsCapture = () => graphViewCapture === capture && isCurrentRender()
+    && props.graphData === source && graphSvg.value === renderedSvg
+    && renderedRoot.parentNode === renderedSvg
+  const capture = Object.freeze({
+    source,
+    isReady: () => completedFrame && ownsCapture(),
+    capture: () => {
+      if (!completedFrame || !ownsCapture()) throw Object.assign(new Error('Unavailable graph frame'), { code: 'invalid' })
+      // This closure reads only this render's recorded drawing. It cannot
+      // redirect a retained action through a mutable latest-render reference.
+      const body = createGraphViewSvg(renderedSvg, renderedRoot)
+      if (!completedFrame || !ownsCapture()) throw Object.assign(new Error('Retired graph frame'), { code: 'invalid' })
+      return body
+    },
+  })
+  graphViewCapture = capture
   
   // Zoom
   const zoom = d3.zoom().extent([[0, 0], [width, height]]).scaleExtent([0.1, 4]).on('zoom', (event) => {
@@ -1119,6 +1155,9 @@ const renderGraph = (revision, ticket) => {
   nodeLabels.style('display', showNodeLabels.value ? null : 'none')
 
   simulation.on('tick', () => {
+    const hadCompletedFrame = completedFrame
+    completedFrame = false
+    if (!ownsCapture()) return
     // 更新曲线路径
     link.attr('d', d => getLinkPath(d))
     
@@ -1151,6 +1190,14 @@ const renderGraph = (revision, ticket) => {
     nodeLabels
       .attr('x', d => d.x)
       .attr('y', d => d.y)
+    // A thrown/incomplete tick leaves the gate closed. Never restore it from
+    // finally, and never publish before all recorded geometry has been written.
+    if (!ownsCapture() || !Number.isFinite(width) || !Number.isFinite(height) || width <= 0 || height <= 0) return
+    completedFrame = true
+    // Recovery may happen after the parent's refresh/navigation recovery found
+    // this frame unavailable. Re-notify the same identity only on that edge;
+    // ordinary ticks leave a frozen download and its parent action untouched.
+    if (!hadCompletedFrame) emit('graph-view-capture', capture)
   })
 
   if (!Number.isFinite(width) || !Number.isFinite(height) || width <= 0 || height <= 0) return

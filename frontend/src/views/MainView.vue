@@ -44,6 +44,9 @@
           :loading="graphLoading"
           :currentPhase="currentPhase"
           :graphDownload="graphDownload"
+          :graphViewDownload="graphViewDownload"
+          @graph-view-capture="acceptGraphViewCapture"
+          @graph-view-retired="retireGraphViewCapture"
           @refresh="refreshGraph"
           @toggle-maximize="toggleMaximize('graph')"
         />
@@ -91,6 +94,7 @@ import { generateOntology, getProject, buildGraph, getTaskStatus, getGraphData }
 import { getPendingUpload, clearPendingUpload } from '../store/pendingUpload'
 import LanguageSwitcher from '../components/LanguageSwitcher.vue'
 import { hasLoadedGraphShape, createLoadedGraphFile } from '../utils/loadedGraphFile.js'
+import { MAX_GRAPH_VIEW_SVG_BYTES } from '../utils/graphViewSvg.js'
 
 const route = useRoute()
 const router = useRouter()
@@ -243,6 +247,115 @@ const ownsGraphDownload = owner => !!owner && owner === graphDownloadOwner
   && !graphDownloadDeparture && !graphLoading.value && ownsLoadedGraph(owner.receipt)
   && owner.context === viewContext && owner.epoch === owner.context.graphRequest && !owner.epoch.pending
 
+// A child owns one exact completed drawing. The parent owns all actions and
+// resources, including synchronous retirement before child props are delivered.
+let graphViewCapture = null, graphViewDownloadBinding = null, graphViewDownloadResource = null
+const graphViewDownloadState = shallowRef({ enabled: false, action: undefined, status: '', error: '', retained: false })
+const graphViewDownload = computed(() => ({
+  ...graphViewDownloadState.value,
+  status: [graphViewDownloadState.value.retained ? t('graph.viewDownload.retained') : '',
+    graphViewDownloadState.value.status ? t(`graph.viewDownload.${graphViewDownloadState.value.status}`) : ''].filter(Boolean).join(' '),
+  error: graphViewDownloadState.value.error ? t(`graph.viewDownload.${graphViewDownloadState.value.error}`) : '',
+}))
+const readyGraphViewCapture = capture => {
+  try { return !!capture && typeof capture.isReady === 'function' && typeof capture.capture === 'function' && capture.isReady() === true }
+  catch { return false }
+}
+const ownsGraphViewDownload = binding => !!binding && binding === graphViewDownloadBinding
+  && binding.capture === graphViewCapture && ownsGraphDownload(binding.owner)
+  && binding.capture.source === binding.owner.receipt.source
+
+const releaseGraphViewDownload = (resource = graphViewDownloadResource) => {
+  if (!resource) return
+  if (graphViewDownloadResource === resource) graphViewDownloadResource = null
+  const link = resource.link, url = resource.url
+  resource.link = null; resource.url = null
+  try { link?.remove() } catch { /* Still release only this SVG attempt's URL. */ }
+  try { if (url) URL.revokeObjectURL(url) } catch { /* Reentry cannot release a newer attempt. */ }
+}
+const retireGraphViewDownload = (clearCapture = false) => {
+  graphViewDownloadBinding = null
+  graphViewDownloadState.value = { enabled: false, action: undefined, status: '', error: '', retained: false }
+  if (clearCapture) graphViewCapture = null
+  releaseGraphViewDownload()
+}
+const downloadGraphView = binding => {
+  if (!ownsGraphViewDownload(binding)) return
+  if (!readyGraphViewCapture(binding.capture)) {
+    if (ownsGraphViewDownload(binding)) graphViewDownloadState.value = { ...graphViewDownloadState.value, error: 'invalid' }
+    return
+  }
+  const previous = graphViewDownloadResource, resource = { url: null, link: null }
+  graphViewDownloadResource = resource
+  releaseGraphViewDownload(previous)
+  const owns = () => graphViewDownloadResource === resource && ownsGraphViewDownload(binding)
+  const ready = () => {
+    if (!owns()) return false
+    if (!readyGraphViewCapture(binding.capture)) throw Object.assign(new Error('Unavailable graph frame'), { code: 'invalid' })
+    return owns()
+  }
+  try {
+    if (!ready()) return
+    graphViewDownloadState.value = { ...graphViewDownloadState.value, status: '', error: '' }
+    const body = binding.capture.capture()
+    if (!ready()) return
+    if (typeof body !== 'string' || !body) throw Object.assign(new Error('Invalid graph view'), { code: 'invalid' })
+    if (body.length > MAX_GRAPH_VIEW_SVG_BYTES || new TextEncoder().encode(body).byteLength > MAX_GRAPH_VIEW_SVG_BYTES) {
+      throw Object.assign(new Error('Graph view exceeds the byte limit'), { code: 'too_large' })
+    }
+    if (!ready()) return
+    const blob = new Blob([body], { type: 'image/svg+xml;charset=utf-8' })
+    if (!ready()) return
+    resource.url = URL.createObjectURL(blob)
+    if (!ready()) return
+    resource.link = document.createElement('a')
+    if (!ready()) return
+    resource.link.href = resource.url
+    if (!ready()) return
+    resource.link.download = 'mirofish-graph-view.svg'
+    if (!ready()) return
+    document.body.appendChild(resource.link)
+    if (!ready()) return
+    resource.link.click()
+    if (!ready()) return
+    const link = resource.link; resource.link = null; link.remove()
+    if (!ready()) return
+    graphViewDownloadState.value = { ...graphViewDownloadState.value, status: 'started' }
+  } catch (cause) {
+    if (owns()) graphViewDownloadState.value = { ...graphViewDownloadState.value,
+      error: cause?.code === 'too_large' ? 'tooLarge' : cause?.code === 'invalid' ? 'invalid' : 'failed' }
+    releaseGraphViewDownload(resource)
+  } finally {
+    if (!owns()) releaseGraphViewDownload(resource)
+  }
+}
+const publishGraphViewDownload = () => {
+  const owner = graphDownloadOwner, capture = graphViewCapture
+  if (!ownsGraphDownload(owner) || capture?.source !== owner.receipt.source || !readyGraphViewCapture(capture)) return
+  if (graphViewDownloadBinding?.owner === owner && graphViewDownloadBinding.capture === capture) return
+  retireGraphViewDownload()
+  if (capture !== graphViewCapture || !ownsGraphDownload(owner) || !readyGraphViewCapture(capture)) return
+  const binding = { owner, capture }
+  graphViewDownloadBinding = binding
+  graphViewDownloadState.value = { enabled: true, action: () => downloadGraphView(binding),
+    status: '', error: '', retained: loadedGraphRetained }
+}
+const acceptGraphViewCapture = capture => {
+  // Keep a matching new drawing during a refresh or reused-route suspension;
+  // eligibility recovery will bind it to a fresh settled parent action owner.
+  if (!ownsLoadedGraph(loadedGraphReceipt) || capture?.source !== loadedGraphReceipt.source || !readyGraphViewCapture(capture)) return
+  if (graphViewCapture !== capture) {
+    graphViewCapture = capture
+    retireGraphViewDownload()
+  }
+  if (graphViewCapture === capture) publishGraphViewDownload()
+}
+const retireGraphViewCapture = capture => {
+  if (graphViewCapture !== capture) return
+  graphViewCapture = null
+  retireGraphViewDownload()
+}
+
 const releaseGraphDownload = (resource = graphDownloadResource) => {
   if (!resource) return
   if (graphDownloadResource === resource) graphDownloadResource = null
@@ -255,6 +368,7 @@ const retireGraphDownload = (clearSource = false) => {
   graphDownloadOwner = null
   graphDownloadState.value = { enabled: false, action: undefined, status: '', error: '' }
   if (clearSource) { loadedGraphReceipt = null; loadedGraphRetained = false }
+  retireGraphViewDownload(clearSource)
   releaseGraphDownload()
 }
 const downloadLoadedGraph = owner => {
@@ -304,6 +418,7 @@ const publishGraphDownload = () => {
   graphDownloadOwner = owner
   graphDownloadState.value = { enabled: true, action: () => downloadLoadedGraph(owner),
     status: loadedGraphRetained ? 'retained' : '', error: '' }
+  publishGraphViewDownload()
 }
 const suspendGraphDownload = to => {
   graphDownloadDeparture = { to: to.redirectedFrom || to }

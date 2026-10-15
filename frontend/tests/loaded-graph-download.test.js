@@ -3,7 +3,7 @@ import test from 'node:test'
 import { build, settle, ok, graphView } from './helpers/parent-route-fixture.js'
 import { createLoadedGraphFile, MAX_LOADED_GRAPH_BYTES } from '../src/utils/loadedGraphFile.js'
 
-const fixture = () => build({ graphRoute: true, locale: 'en' })
+const fixture = () => build({ graphRoute: true, locale: 'en', assertNoWarnings: true })
 const pending = (h, name) => h.calls(name).findLast(call => !call.settled && !call.signal?.aborted)
 const state = h => h.state(graphView)
 const descriptor = h => h.graph().props.graphDownload

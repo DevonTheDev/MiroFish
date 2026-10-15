@@ -5,27 +5,50 @@ import { parse as parseJavaScript } from '@babel/parser'
 import { parse, compileScript } from '@vue/compiler-sfc'
 import * as Vue from 'vue'
 import * as d3 from 'd3'
+import * as graphViewSvg from '../../src/utils/graphViewSvg.js'
 
 // Real Vue SFC, renderer and D3. Only the DOM host is synthetic; this does not
 // verify native browser layout, pointer geometry or visual appearance.
-function hostDocument() {
+function hostDocument(observations, hooks) {
   const document = { createElement: type => element(type),
     createElementNS: (namespace, type) => element(type, namespace) }
   function element(type, namespace = 'http://www.w3.org/1999/xhtml') {
     const listeners = new Map()
-    return {
+    const styleValues = new Map()
+    const style = {
+      get length() { return styleValues.size },
+      item(index) { return [...styleValues.keys()][index] ?? '' },
+      setProperty(key, value) { styleValues.set(key, String(value)); this[key] = String(value) },
+      removeProperty(key) { styleValues.delete(key); delete this[key] },
+      getPropertyValue(key) { return styleValues.get(key) ?? '' },
+      getPropertyPriority() { return '' },
+    }
+    // Native DOM nodes are not Vue-reactive targets. Keep synthetic host
+    // identities equally stable when component refs hold them and D3 appends.
+    return Vue.markRaw({
       type, namespaceURI: namespace, ownerDocument: document,
       props: {}, children: [], parentNode: null, text: '', clientWidth: 800, clientHeight: 600,
-      style: { setProperty(key, value) { this[key] = value },
-        removeProperty(key) { delete this[key] }, getPropertyValue(key) { return this[key] ?? '' } },
+      style,
+      get nodeType() { return this.type === '#text' ? 3 : this.type === '#comment' ? 8 : 1 },
+      get localName() { return this.type },
+      get data() { return this.text },
+      get firstChild() { return this.children[0] ?? null },
+      get attributes() {
+        const values = Object.entries(this.props).filter(([name, value]) => !name.startsWith('on') && value != null)
+          .map(([name, value]) => ({ name, value: String(value), namespaceURI: null }))
+        if (style.length) values.push({ name: 'style', value: [...styleValues].map(([key, value]) => `${key}: ${value};`).join(' '), namespaceURI: null })
+        return Object.assign(values, { item(index) { return this[index] ?? null } })
+      },
       get nextSibling() { return this.parentNode?.children[this.parentNode.children.indexOf(this) + 1] ?? null },
       get textContent() { return this.type === '#comment' ? '' : this.text + this.children.map(child => child.textContent).join('') },
       set textContent(text) {
         this.children.forEach(child => { child.parentNode = null })
-        this.children = []; this.text = String(text)
+        this.children = []; this.text = ''
+        if (String(text)) this.appendChild(Object.assign(element('#text'), { text: String(text) }))
       },
-      setAttribute(key, value) { this.props[key] = String(value) },
-      getAttribute(key) { return this.props[key] ?? null },
+      setAttribute(key, value) { hooks.attribute?.(this, key, value); this.props[key] = String(value) },
+      getAttribute(key) { return key === 'style' && style.length
+        ? [...styleValues].map(([name, value]) => `${name}: ${value};`).join(' ') : this.props[key] ?? null },
       removeAttribute(key) { delete this.props[key] },
       appendChild(child) { return this.insertBefore(child, null) },
       insertBefore(child, anchor) {
@@ -62,8 +85,9 @@ function hostDocument() {
         this.props['on' + event.type[0].toUpperCase() + event.type.slice(1)]?.(event)
         if (!event.stopped) this.parentNode?.dispatchEvent(event)
       },
-      getBBox() { return { width: this.textContent.length * 6, height: 12 } },
-    }
+      getBBox() { observations.bbox++; hooks.bbox?.(this); return { width: this.textContent.length * 6, height: 12 } },
+      getBoundingClientRect() { observations.viewport++; hooks.viewport?.(this); return { width: this.clientWidth, height: this.clientHeight } },
+    })
   }
   return { document, element }
 }
@@ -72,18 +96,25 @@ export async function settle() {
   for (let i = 0; i < 4; i++) { await Promise.resolve(); await Vue.nextTick() }
 }
 
-export function mountGraphPanel(t, { messages = {}, deferGraphRedraw = false, initialGraph = null } = {}) {
+export function mountGraphPanel(t, { messages = {}, deferGraphRedraw = false, initialGraph = null,
+  controlledTicks = false, touchEnabled = false } = {}) {
   // D3's touch detection needs a browser navigator, absent in supported Node 20.
-  if (typeof globalThis.navigator === 'undefined') {
-    Object.defineProperty(globalThis, 'navigator', { configurable: true, value: { maxTouchPoints: 0 } })
-    t.after(() => { delete globalThis.navigator })
+  const savedNavigator = Object.getOwnPropertyDescriptor(globalThis, 'navigator')
+  Object.defineProperty(globalThis, 'navigator', { configurable: true, value: { maxTouchPoints: touchEnabled ? 1 : 0 } })
+  let navigatorRestored = false
+  const restoreNavigator = () => {
+    if (navigatorRestored) return
+    navigatorRestored = true
+    if (savedNavigator) Object.defineProperty(globalThis, 'navigator', savedNavigator); else delete globalThis.navigator
   }
+  t.after(restoreNavigator)
   const filename = 'GraphPanel.vue'
   const source = readFileSync(new URL('../../src/components/GraphPanel.vue', import.meta.url), 'utf8')
   const { descriptor } = parse(source, { filename })
   let code = compileScript(descriptor, { id: filename, inlineTemplate: true,
     templateOptions: { compilerOptions: { hoistStatic: false } } }).content
-  const windowListeners = new Set(), emitted = [], warnings = []
+  const windowListeners = new Set(), emitted = [], warnings = [], captures = [], retired = [], simulations = []
+  const observations = { viewport: 0, bbox: 0, ticks: 0, stops: 0, restarts: 0 }, hooks = {}
   const globals = { window: {
     addEventListener: (_type, fn) => windowListeners.add(fn),
     removeEventListener: (_type, fn) => windowListeners.delete(fn),
@@ -92,7 +123,15 @@ export function mountGraphPanel(t, { messages = {}, deferGraphRedraw = false, in
   const modules = { vue: deferGraphRedraw ? { ...Vue, nextTick: callback => {
     if (callback) { redraws.push(callback); return Promise.resolve() }
     return Vue.nextTick()
-  } } : Vue, d3 }
+  } } : Vue, d3: controlledTicks ? { ...d3, forceSimulation(nodes) {
+    const simulation = d3.forceSimulation(nodes).stop()
+    simulations.push(simulation)
+    for (const [method, counter] of [['tick', 'ticks'], ['stop', 'stops'], ['restart', 'restarts']]) {
+      const original = simulation[method]
+      simulation[method] = function(...args) { observations[counter]++; return original.apply(this, args) }
+    }
+    return simulation
+  } } : d3, '../utils/graphViewSvg.js': graphViewSvg }
   for (const statement of parseJavaScript(code, { sourceType: 'module' }).program.body
     .filter(node => node.type === 'ImportDeclaration').reverse()) {
     const dependency = modules[statement.source.value]
@@ -102,7 +141,7 @@ export function mountGraphPanel(t, { messages = {}, deferGraphRedraw = false, in
     code = code.slice(0, statement.start) + code.slice(statement.end)
   }
   const GraphPanel = vm.runInNewContext(code.replace('export default', 'const component =') + '\n;component', globals)
-  const { document, element } = hostDocument()
+  const { document, element } = hostDocument(observations, hooks)
   const renderer = Vue.createRenderer({
     createElement: (type, namespace) => namespace === 'svg'
       ? document.createElementNS('http://www.w3.org/2000/svg', type) : document.createElement(type),
@@ -117,7 +156,8 @@ export function mountGraphPanel(t, { messages = {}, deferGraphRedraw = false, in
   })
   const props = Vue.reactive({ graphData: initialGraph, loading: false, currentPhase: 2, isSimulating: false })
   const app = renderer.createApp({ render: () => Vue.h(GraphPanel, { ...props,
-    onRefresh: () => emitted.push('refresh'), onToggleMaximize: () => emitted.push('toggle-maximize') }) })
+    onRefresh: () => emitted.push('refresh'), onToggleMaximize: () => emitted.push('toggle-maximize'),
+    onGraphViewCapture: value => captures.push(value), onGraphViewRetired: value => retired.push(value) }) })
   app.config.globalProperties.$t = (key, values = {}) => {
     const message = key.split('.').reduce((value, part) => value?.[part], messages) ?? key
     return message.replace(/\{(\w+)\}/g, (_match, name) => String(values[name] ?? ''))
@@ -126,14 +166,19 @@ export function mountGraphPanel(t, { messages = {}, deferGraphRedraw = false, in
   const host = element('root')
   app.mount(host)
   let closed = false
-  const close = () => { if (!closed) { closed = true; app.unmount() } }
+  const close = () => { if (!closed) { closed = true; app.unmount(); restoreNavigator() } }
   t.after(() => {
     close()
     assert.equal(windowListeners.size, 0, 'unmount removes its resize listener')
     assert.deepEqual(warnings, [], 'mount and updates have no Vue warnings')
   })
   return {
-    host, props, emitted, close,
+    host, props, emitted, close, captures, retired, simulations, observations, hooks,
+    tick(simulation = simulations.at(-1)) {
+      assert.ok(simulation, 'a controlled real D3 simulation exists')
+      simulation.tick()
+      simulation.on('tick')?.call(simulation)
+    },
     takeRedraws: () => redraws.splice(0),
     resize() { for (const listener of windowListeners) listener() },
     async input(value) {

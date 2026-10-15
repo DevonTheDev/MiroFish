@@ -10,6 +10,7 @@ import * as Router from 'vue-router'
 import * as PendingUpload from '../../src/store/pendingUpload.js'
 import * as LocalCastPreset from '../../src/utils/localCastPreset.js'
 import * as LoadedGraphFile from '../../src/utils/loadedGraphFile.js'
+import * as GraphViewSvg from '../../src/utils/graphViewSvg.js'
 
 export const graphView = 'views/MainView.vue'
 export const graphChild = 'components/Step1GraphBuild.vue'
@@ -99,8 +100,8 @@ export function build(options = {}) {
     }
   } })
   const stub = { render: () => Vue.h('fixture-boundary') }
-  const graph = { name: 'GraphBoundary', props: ['graphData', 'loading', 'currentPhase', 'isSimulating', 'graphDownload'],
-    emits: ['refresh', 'toggle-maximize'], setup() {
+  const graph = { name: 'GraphBoundary', props: ['graphData', 'loading', 'currentPhase', 'isSimulating', 'graphDownload', 'graphViewDownload'],
+    emits: ['refresh', 'toggle-maximize', 'graph-view-capture', 'graph-view-retired'], setup() {
       ;(instances.graph ??= []).push(Vue.getCurrentInstance())
       return () => Vue.h('graph-boundary')
     } }
@@ -112,7 +113,7 @@ export function build(options = {}) {
   const components = { '../components/GraphPanel.vue': graph }
   function evaluate(source, returnName = 'component') {
     const ast = parseJavaScript(source, { sourceType: 'module' })
-    const globals = { AbortController, Blob: DownloadBlob, FormData, alert: message => warnings.push(['alert', message]), URL: fileUrl, document: fileDocument, console: { warn: (...args) => warnings.push(args), error: (...args) => warnings.push(args) },
+    const globals = { AbortController, Blob: DownloadBlob, FormData, TextEncoder, alert: message => warnings.push(['alert', message]), URL: fileUrl, document: fileDocument, console: { warn: (...args) => warnings.push(args), error: (...args) => warnings.push(args) },
       setInterval: (callback, ms) => { const id = nextTimer++; intervals.set(id, { callback, ms }); return id },
       clearInterval: id => intervals.delete(id) }
     for (const statement of ast.program.body.filter(item => item.type === 'ImportDeclaration').reverse()) {
@@ -121,6 +122,7 @@ export function build(options = {}) {
       if (path === '../store/pendingUpload' || path === '../store/pendingUpload.js') dependency = PendingUpload
       if (path === '../utils/localCastPreset') dependency = LocalCastPreset
       if (path === '../utils/loadedGraphFile.js') dependency = LoadedGraphFile
+      if (path === '../utils/graphViewSvg.js') dependency = GraphViewSvg
       if (path === '../utils/localRunPlan') {
         const utility = readFileSync(new URL('../../src/utils/localRunPlan.js', import.meta.url), 'utf8')
         const exports = [...utility.matchAll(/export (?:const|function) (\w+)/g)].map(match => match[1])
@@ -178,6 +180,7 @@ export function build(options = {}) {
   const appSource = readFileSync(new URL('../../src/App.vue', import.meta.url), 'utf8')
   assert.equal(parse(appSource).descriptor.template.content.trim(), '<router-view />')
   const app = renderer().createApp({ render: () => Vue.h(Router.RouterView) })
+  if (options.assertNoWarnings) app.config.warnHandler = message => warnings.push(['Vue warning', message])
   app.use(router)
   let i18n
   if (options.locale) {
@@ -207,7 +210,10 @@ export function build(options = {}) {
     async mount(url) { await router.push(url); await router.isReady(); app.mount(host); mounted = true; await settle() },
     async navigate(url) { await router.push(url); await settle() },
     async tick(ms) { for (const timer of [...intervals.values()]) if (timer.ms === ms) timer.callback(); await settle() },
-    close() { if (mounted) { mounted = false; app.unmount() } },
+    close() {
+      if (mounted) { mounted = false; app.unmount() }
+      if (options.assertNoWarnings) assert.deepEqual(warnings, [], 'selected route cases emit no application or Vue diagnostics')
+    },
     find(predicate) {
       const visit = target => predicate(target) ? target : target.children?.map(visit).find(Boolean)
       return visit(host)
