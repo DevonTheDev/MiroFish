@@ -1,18 +1,225 @@
 from types import SimpleNamespace
 import json
+import threading
 
 import pytest
 from flask import Flask
 
 from app.api import simulation as simulation_api
+from app import local_runtime
+from app.config import Config
+from app.models.task import TaskManager
+from app.services import preparation_cancellation, preparation_plan
 from app.services import simulation_runner as runner_module
-from app.services.simulation_manager import SimulationStatus
+from app.services.simulation_manager import SimulationManager, SimulationState, SimulationStatus
 from app.services.simulation_runner import (
     RunnerStatus,
     SimulationRunState,
     SimulationRunner,
     SimulationStopPending,
 )
+
+
+@pytest.fixture
+def prepared_publication_run(tmp_path, monkeypatch):
+    simulation_id = "sim_publication"
+    root = tmp_path / "simulations"
+    scripts = tmp_path / "scripts"
+    scripts.mkdir()
+    # The runner only checks existence; executing this file is forbidden.
+    (scripts / "run_parallel_simulation.py").write_text("raise AssertionError('must not run')\n")
+    monkeypatch.setattr(Config, "LOCAL_MODE", False)
+    monkeypatch.setattr(Config, "LOCAL_MAX_AGENTS", 10)
+    monkeypatch.setattr(Config, "LOCAL_MAX_ROUNDS", 5)
+    monkeypatch.setattr(SimulationManager, "SIMULATION_DATA_DIR", str(root))
+    monkeypatch.setattr(SimulationRunner, "RUN_STATE_DIR", str(root))
+    monkeypatch.setattr(SimulationRunner, "SCRIPTS_DIR", str(scripts))
+    for name in (
+        "_run_states", "_processes", "_monitor_threads", "_action_queues",
+        "_stdout_files", "_stderr_files", "_graph_memory_enabled", "_finalization_locks",
+    ):
+        monkeypatch.setattr(SimulationRunner, name, {})
+    monkeypatch.setattr(SimulationRunner, "_manual_stop_requests", set())
+    monkeypatch.setattr(TaskManager, "_instance", None)
+    monkeypatch.setattr(preparation_cancellation, "_controllers", {})
+    monkeypatch.setattr(runner_module.ZepGraphMemoryManager, "_updaters", {})
+    monkeypatch.setattr(runner_module.ZepGraphMemoryManager, "_lock", threading.Lock())
+
+    def forbidden(*args, **kwargs):
+        pytest.fail("unexpected child, monitor, graph updater, or local gateway execution")
+
+    monkeypatch.setattr(runner_module.subprocess, "Popen", forbidden)
+    monkeypatch.setattr(SimulationRunner, "_monitor_simulation", forbidden)
+    monkeypatch.setattr(runner_module.ZepGraphMemoryManager, "create_updater", forbidden)
+    monkeypatch.setattr(local_runtime, "get_local_gateway_url", forbidden)
+    monkeypatch.setattr(local_runtime, "child_environment", forbidden)
+    manager = SimulationManager()
+    manager._save_simulation_state(SimulationState(
+        simulation_id, "project_publication", "graph_publication",
+        status=SimulationStatus.STOPPED, profiles_generated=True, config_generated=True,
+    ))
+    folder = root / simulation_id
+    (folder / "simulation_config.json").write_text(json.dumps({
+        "agent_configs": [{"agent_id": 0}],
+        "time_config": {"total_simulation_hours": 1, "minutes_per_round": 30},
+    }))
+    (folder / "reddit_profiles.json").write_text('[{"user_id": 0}]')
+    (folder / "twitter_profiles.csv").write_text("user_id,name\n0,Fixture\n")
+    SimulationRunner._save_run_state(SimulationRunState(
+        simulation_id, runner_status=RunnerStatus.STOPPED,
+    ))
+    SimulationRunner._run_states.clear()
+    yield SimpleNamespace(simulation_id=simulation_id, folder=folder)
+    for stream in SimulationRunner._stdout_files.values():
+        if stream is not None:
+            stream.close()
+
+
+def test_default_start_requests_preserve_newer_claim_during_delayed_cold_load(
+    prepared_publication_run, monkeypatch,
+):
+    run = prepared_publication_run
+    # runner_module.threading and threading are the same module object.
+    request_thread = threading.Thread
+    old_read, release_old, claimed, release_start = (threading.Event() for _ in range(4))
+    responses, errors, launches, monitors = {}, {}, [], []
+    load = SimulationRunner._load_run_state
+    app = Flask(__name__)
+
+    def delayed_load(simulation_id):
+        loaded = load(simulation_id)
+        if threading.current_thread().name == "request-B" and not old_read.is_set():
+            assert loaded.runner_status == RunnerStatus.STOPPED
+            old_read.set()
+            assert release_old.wait(5), "B's old disk snapshot was not released"
+        return loaded
+
+    def child_environment():
+        if threading.current_thread().name == "request-A":
+            assert SimulationRunner._run_states[run.simulation_id].runner_status == RunnerStatus.STARTING
+            assert json.loads((run.folder / "run_state.json").read_text())["runner_status"] == "starting"
+            assert not SimulationRunner._processes
+            assert not SimulationRunner._monitor_threads
+            assert not runner_module.ZepGraphMemoryManager._updaters
+            claimed.set()
+            assert release_start.wait(5), "A's STARTING claim was not released"
+        return {}
+
+    class Process:
+        def __init__(self, pid):
+            self.pid = pid
+
+        def poll(self):
+            return None
+
+    def spawn(*args, **kwargs):
+        assert len(launches) < 2, "unexpected third fake launch"
+        process = Process(41000 + len(launches))
+        launches.append((threading.current_thread().name, process, kwargs["stdout"]))
+        return process
+
+    class Monitor:
+        def __init__(self, **kwargs):
+            assert kwargs["target"] is SimulationRunner._monitor_simulation
+            assert kwargs["args"][0] == run.simulation_id
+            self.started = False
+            monitors.append(self)
+
+        def start(self):
+            self.started = True
+
+        def is_alive(self):
+            return self.started
+
+    def request_start(name):
+        try:
+            # Both flags and platform are omitted, exercising the actual defaults.
+            with app.test_request_context("/api/simulation/start", method="POST", json={
+                "simulation_id": run.simulation_id,
+            }):
+                response = app.make_response(simulation_api.start_simulation())
+                responses[name] = (response.status_code, response.get_json())
+        except BaseException as error:
+            errors[name] = error
+
+    monkeypatch.setattr(SimulationRunner, "_load_run_state", delayed_load)
+    monkeypatch.setattr(local_runtime, "child_environment", child_environment)
+    monkeypatch.setattr(runner_module.subprocess, "Popen", spawn)
+    monkeypatch.setattr(runner_module.threading, "Thread", Monitor)
+    a = request_thread(target=request_start, args=("A",), name="request-A", daemon=True)
+    b = request_thread(target=request_start, args=("B",), name="request-B", daemon=True)
+    started = []
+    try:
+        b.start()
+        started.append(b)
+        assert old_read.wait(5), "B did not read the real STOPPED disk snapshot"
+        a.start()
+        started.append(a)
+        assert claimed.wait(5), "A did not publish STARTING before fake process creation"
+        release_old.set()
+        b.join(5)
+        assert not b.is_alive(), "B did not finish while A was gated"
+        assert errors == {}
+        assert "B" in responses
+        metadata_after_b = json.loads((run.folder / "state.json").read_text())["status"]
+        release_start.set()
+        a.join(5)
+        assert not a.is_alive(), "A did not finish after release"
+        assert errors == {}
+        observed = [(name, process.pid) for name, process, _ in launches]
+        assert len(launches) == 1, f"expected one fake launch; observed {len(launches)} fake launches: {observed}"
+        assert responses["A"][0] == 200
+        assert responses["A"][1]["data"]["graph_memory_update_enabled"] is False
+        assert responses["A"][1]["data"]["force_restarted"] is False
+        assert responses["B"][0] == 400
+        assert "模拟已在运行或结束处理中" in responses["B"][1]["error"]
+        # The route's pre-admission READY projection is a separate existing behavior.
+        assert metadata_after_b == "ready"
+        assert launches[0][0] == "request-A"
+        assert len(monitors) == 1 and monitors[0].started
+        assert SimulationRunner._processes == {run.simulation_id: launches[0][1]}
+        assert SimulationRunner._monitor_threads == {run.simulation_id: monitors[0]}
+    finally:
+        release_old.set()
+        release_start.set()
+        for worker in started:
+            worker.join(5)
+        for _, _, stream in launches:
+            stream.close()
+        assert not any(worker.is_alive() for worker in started), "request thread leaked"
+
+
+@pytest.mark.parametrize("status", [
+    RunnerStatus.STARTING, RunnerStatus.RUNNING, RunnerStatus.PAUSED, RunnerStatus.STOPPING,
+])
+def test_cloud_start_rejects_current_active_status(prepared_publication_run, status):
+    run = prepared_publication_run
+    state = SimulationRunState(run.simulation_id, runner_status=status)
+    SimulationRunner._save_run_state(state)
+    before = (run.folder / "run_state.json").read_bytes()
+    with pytest.raises(ValueError, match="模拟已在运行或结束处理中"):
+        SimulationRunner.start_simulation(run.simulation_id)
+    assert SimulationRunner._run_states[run.simulation_id] is state
+    assert (run.folder / "run_state.json").read_bytes() == before
+    assert not SimulationRunner._processes
+
+
+def test_local_start_rejects_persisted_starting_with_cold_cache(
+    prepared_publication_run, monkeypatch,
+):
+    run = prepared_publication_run
+    monkeypatch.setattr(Config, "LOCAL_MODE", True)
+    SimulationRunner._save_run_state(SimulationRunState(
+        run.simulation_id, runner_status=RunnerStatus.STARTING,
+    ))
+    SimulationRunner._run_states.clear()
+    before = (run.folder / "run_state.json").read_bytes()
+    with pytest.raises(preparation_plan.PlanningError) as rejected:
+        SimulationRunner.start_simulation(run.simulation_id)
+    assert rejected.value.code == "run_busy"
+    assert SimulationRunner._run_states == {}
+    assert (run.folder / "run_state.json").read_bytes() == before
+    assert not SimulationRunner._processes
 
 
 def test_manual_stop_surfaces_graph_ingestion_failure(monkeypatch):

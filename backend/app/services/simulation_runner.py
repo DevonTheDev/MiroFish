@@ -299,7 +299,8 @@ class SimulationRunner:
         # 尝试从文件加载
         state = cls._load_run_state(simulation_id)
         if state:
-            cls._run_states[simulation_id] = state
+            # A concurrent start/save may have published a newer state while we read.
+            return cls._run_states.setdefault(simulation_id, state)
         return state
     
     @classmethod

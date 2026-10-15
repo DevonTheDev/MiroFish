@@ -2,6 +2,7 @@
 
 import copy
 import json
+import threading
 
 import pytest
 
@@ -251,3 +252,80 @@ def test_valid_new_run_creates_its_directory_under_relocated_root(
         == "starting"
     )
     assert Runner.get_run_state("sim_new") is state
+
+
+def test_delayed_cold_load_returns_newer_published_state(stored, monkeypatch):
+    previous, path, _ = stored
+    previous.runner_status = RunnerStatus.STOPPED
+    Runner._save_run_state(previous)
+    Runner._run_states.clear()
+    load = Runner._load_run_state
+    current = SimulationRunState(previous.simulation_id, runner_status=RunnerStatus.STARTING)
+
+    def delayed_load(simulation_id):
+        loaded = load(simulation_id)
+        assert loaded.runner_status == RunnerStatus.STOPPED
+        Runner._save_run_state(current)
+        return loaded
+
+    monkeypatch.setattr(Runner, "_load_run_state", delayed_load)
+    assert Runner.get_run_state(previous.simulation_id) is current
+    assert Runner._run_states[previous.simulation_id] is current
+    assert json.loads(path.read_text())["runner_status"] == "starting"
+
+
+def test_cold_getter_caches_loaded_state_and_warm_getter_reuses_it(stored, monkeypatch):
+    previous, _, _ = stored
+    Runner._run_states.clear()
+    current = Runner.get_run_state(previous.simulation_id)
+    assert current is not previous
+    assert current.to_detail_dict() == previous.to_detail_dict()
+    assert Runner._run_states[previous.simulation_id] is current
+
+    def unexpected_load(_simulation_id):
+        pytest.fail("warm cache attempted a disk load")
+
+    monkeypatch.setattr(Runner, "_load_run_state", unexpected_load)
+    assert Runner.get_run_state(previous.simulation_id) is current
+
+
+@pytest.mark.parametrize("missing", [True, False], ids=["missing", "unreadable"])
+def test_cold_getter_does_not_cache_missing_or_unreadable_state(stored, missing):
+    previous, path, _ = stored
+    Runner._run_states.clear()
+    if missing:
+        path.unlink()
+    else:
+        path.write_text("{invalid JSON", encoding="utf-8")
+    assert Runner.get_run_state(previous.simulation_id) is None
+    assert previous.simulation_id not in Runner._run_states
+
+
+def test_cold_getter_completes_while_caller_holds_finalization_lock(stored, monkeypatch):
+    previous, _, _ = stored
+    Runner._run_states.clear()
+    monkeypatch.setattr(Runner, "_finalization_locks", {})
+    results, errors = [], []
+
+    def read_under_lock():
+        try:
+            with Runner._finalization_lock(previous.simulation_id):
+                results.append(Runner.get_run_state(previous.simulation_id))
+        except BaseException as error:
+            errors.append(error)
+
+    reader = threading.Thread(target=read_under_lock, name="getter-held-lock", daemon=True)
+    reader.start()
+    try:
+        reader.join(timeout=5)
+        assert not reader.is_alive(), "getter blocked under the existing non-reentrant lock"
+    finally:
+        # If a future getter wrongly re-acquires this lock, release the fixture's
+        # lock so the bounded regression does not leave a blocked worker behind.
+        if reader.is_alive():
+            Runner._finalization_lock(previous.simulation_id).release()
+            reader.join(timeout=5)
+    assert errors == []
+    assert len(results) == 1
+    assert results[0] is Runner._run_states[previous.simulation_id]
+    assert results[0].runner_status == previous.runner_status
