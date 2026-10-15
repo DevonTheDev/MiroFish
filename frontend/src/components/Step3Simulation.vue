@@ -92,9 +92,15 @@
       </div>
 
       <div class="action-controls">
+        <button v-if="stopAvailable" type="button" class="action-btn stop"
+          data-testid="stop-simulation" aria-describedby="stop-simulation-note"
+          :disabled="isStopping || isGeneratingReport || !!reportHandoff?.receipt || !!reportHandoff?.disabled"
+          :aria-busy="isStopping" :onClick="runActions.stop">
+          {{ $t(isStopping ? 'step3.requestingStop' : 'step3.stopSimulation') }}
+        </button>
         <button 
           class="action-btn primary"
-          :disabled="phase !== 2 || isGeneratingReport || !!reportHandoff?.receipt || !!reportHandoff?.disabled"
+          :disabled="phase !== 2 || isStopping || isGeneratingReport || !!reportHandoff?.receipt || !!reportHandoff?.disabled"
           data-testid="generate-report"
           :onClick="runActions.report"
         >
@@ -104,6 +110,8 @@
         </button>
       </div>
     </div>
+
+    <p v-if="stopAvailable" id="stop-simulation-note" class="stop-note">{{ $t('step3.stopSimulationNote') }}</p>
 
     <div v-if="reportHandoff?.receipt" class="report-recovery">
       <p data-testid="report-opening-status" :role="reportHandoff.failed ? 'alert' : 'status'" aria-live="polite">
@@ -329,6 +337,7 @@ const emit = defineEmits(['go-back', 'next-step', 'add-log', 'update-status', 'r
 // State
 const isGeneratingReport = ref(false)
 const phase = ref(0) // 0: 未开始, 1: 运行中, 2: 已完成
+const runTerminal = ref(null)
 const isStarting = ref(false)
 const isStopping = ref(false)
 const startError = ref(null)
@@ -383,6 +392,15 @@ let runContext = null
 const ownsView = context => !!context && mounted && context === runContext && props.simulationId === context.id
 const isObserving = context => ownsView(context) && context.started && !context.terminal
 const canStop = context => ownsView(context) && context.started && context.terminal !== 'completed'
+// Failed and completed runs both have phase 2. Track the terminal transition
+// explicitly so a successful recovery without response data hides Stop too.
+const stopAvailable = computed(() => phase.value !== 0 && runTerminal.value !== 'completed' && canStop(runContext))
+const ownsHandoff = handoff => !!handoff && handoff.owner === props.reportHandoff?.owner
+  && handoff.actions === props.reportHandoff?.actions && handoff.owner?.active
+  && handoff.actions?.active && !props.reportHandoff.disabled
+const canRequestStop = (context, handoff) => canStop(context) && ownsHandoff(handoff)
+  && !context.reportAccepted && !props.reportHandoff.receipt
+  && !isGeneratingReport.value && !context.requests.report
 
 const singleFlight = (context, stream, operation) => {
   if (!ownsView(context)) return Promise.resolve()
@@ -410,6 +428,7 @@ const finishRun = (context, status) => {
   if (!ownsView(context) || !context.started || context.terminal === 'completed') return
   if (context.terminal === 'error' && status !== 'completed') return
   context.terminal = status
+  runTerminal.value = status
   context.detailRevision++
   phase.value = 2
   stopPolling()
@@ -434,6 +453,7 @@ const addLog = (msg) => {
 // 重置所有状态（用于重新启动模拟）
 const resetAllState = () => {
   phase.value = 0
+  runTerminal.value = null
   runStatus.value = {}
   runPlatform.value = null
   runActions.value = {}
@@ -461,7 +481,7 @@ const doStartSimulation = () => {
   }
   runContext = context
   emit('report-run-started', { simulationId: context.id, run: context.reportRun })
-  bindReportAction(context)
+  bindRunActions(context)
   return singleFlight(context, 'start', async () => {
     isStarting.value = true
     startError.value = null
@@ -522,11 +542,10 @@ const doStartSimulation = () => {
 }
 
 // 停止模拟
-const handleStopSimulation = () => {
-  const context = runContext
-  if (!canStop(context)) return Promise.resolve()
+const handleStopSimulation = (context = runContext, handoff = props.reportHandoff) => {
+  if (!canRequestStop(context, handoff)) return Promise.resolve()
   return singleFlight(context, 'stop', async () => {
-    if (!canStop(context)) return
+    if (!canRequestStop(context, handoff)) return
     isStopping.value = true
     addLog(t('log.stoppingSim'))
   
@@ -711,20 +730,26 @@ const formatActionTime = (timestamp) => {
   }
 }
 
-const bindReportAction = context => {
+const bindRunActions = context => {
   const handoff = props.reportHandoff
-  runActions.value = { report: () => handleNextStep(context, handoff) }
+  runActions.value = {
+    stop: () => handleStopSimulation(context, handoff),
+    report: () => handleNextStep(context, handoff),
+  }
 }
 
+const canRequestReport = (context, handoff) => ownsView(context) && phase.value === 2
+  && !context.reportAccepted && !!handoff?.accept && ownsHandoff(handoff)
+  && !props.reportHandoff.receipt && !isStopping.value && !context.requests.stop
+
 const handleNextStep = (context = runContext, handoff = props.reportHandoff) => {
-  if (!ownsView(context) || phase.value !== 2 || context.reportAccepted || !handoff?.accept
-    || handoff.owner !== props.reportHandoff?.owner || handoff.actions !== props.reportHandoff?.actions
-    || !handoff.owner.active || !handoff.actions.active || props.reportHandoff.receipt) return Promise.resolve()
+  if (!canRequestReport(context, handoff)) return Promise.resolve()
   if (isGeneratingReport.value || context.requests.report) {
     addLog(t('log.reportRequestSent'))
     return context.requests.report
   }
   return singleFlight(context, 'report', async () => {
+    if (!canRequestReport(context, handoff)) return
     isGeneratingReport.value = true
     addLog(t('log.startingReportGen'))
   
@@ -754,7 +779,7 @@ const handleNextStep = (context = runContext, handoff = props.reportHandoff) => 
 }
 
 watch(() => props.reportHandoff?.actions, () => {
-  if (ownsView(runContext)) bindReportAction(runContext)
+  if (ownsView(runContext)) bindRunActions(runContext)
 }, { flush: 'sync' })
 
 // Scroll log to bottom
@@ -775,8 +800,8 @@ watch(() => props.simulationId, () => {
 
 onMounted(() => {
   mounted = true
-  addLog(t('log.step3Init'))
   doStartSimulation()
+  addLog(t('log.step3Init'))
 })
 
 onUnmounted(() => {
@@ -826,7 +851,25 @@ onUnmounted(() => {
   align-items: center;
   border-bottom: 1px solid #EAEAEA;
   z-index: 10;
-  height: 64px;
+  min-height: 64px;
+  flex-shrink: 0;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+
+.action-controls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.stop-note {
+  flex-shrink: 0;
+  margin: 0;
+  padding: 8px 24px;
+  color: #666;
+  font-size: 12px;
+  border-bottom: 1px solid #EAEAEA;
 }
 
 .status-group {
@@ -999,6 +1042,15 @@ onUnmounted(() => {
   background: #000;
   color: #FFF;
 }
+
+.action-btn.stop {
+  color: #A52A2A;
+  background: #FFF;
+  border: 1px solid currentColor;
+}
+
+.action-btn.stop:hover:not(:disabled) { background: #FFF1F1; }
+.action-btn:focus-visible { outline: 2px solid #A52A2A; outline-offset: 3px; }
 
 .action-btn.primary:hover:not(:disabled) {
   background: #333;

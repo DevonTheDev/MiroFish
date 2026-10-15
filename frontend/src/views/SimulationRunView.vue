@@ -62,7 +62,7 @@
           @report-run-started="selectReportRun"
           @go-back="handleGoBack"
           @next-step="handleNextStep"
-          @add-log="addLog"
+          @add-log="addRunLog"
           @update-status="updateStatus"
         />
       </div>
@@ -272,8 +272,7 @@ const retireView = (context = viewContext) => {
 }
 
 // --- Helpers ---
-const addLog = (msg, context = viewContext) => {
-  if (!ownsView(context)) return
+const appendLog = msg => {
   const time = new Date().toLocaleTimeString('en-US', { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' }) + '.' + new Date().getMilliseconds().toString().padStart(3, '0')
   systemLogs.value.push({ time, msg })
   if (systemLogs.value.length > 200) {
@@ -281,8 +280,17 @@ const addLog = (msg, context = viewContext) => {
   }
 }
 
+const addLog = (msg, context = viewContext) => {
+  if (ownsView(context)) appendLog(msg)
+}
+
+// Run outcomes survive aborted departure; metadata observation stays retired.
+const addRunLog = msg => {
+  if (ownsReport(reportOwner)) appendLog(msg)
+}
+
 const updateStatus = (status) => {
-  if (!ownsView(viewContext)) return
+  if (!ownsReport(reportOwner)) return
   currentStatus.value = status
 }
 

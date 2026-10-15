@@ -215,6 +215,9 @@
     "startSelectedSim": "启动所选平台模拟"
   },
   "step3": {
+    "stopSimulation": "停止模拟",
+    "requestingStop": "正在请求停止…",
+    "stopSimulationNote": "请求结束本次模拟。停止可能需要一些时间，已记录的模拟结果可能不完整。",
     "startGenerateReport": "开始生成结果报告",
     "generatingReport": "启动中...",
     "waitingForActions": "Waiting for agent actions...",

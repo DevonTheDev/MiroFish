@@ -215,6 +215,9 @@
     "startSelectedSim": "Start Selected Platform Simulation"
   },
   "step3": {
+    "stopSimulation": "Stop simulation",
+    "requestingStop": "Requesting stop…",
+    "stopSimulationNote": "Requests an end to this simulation. Stopping may take time, and the recorded run may be partial.",
     "startGenerateReport": "Generate Report",
     "generatingReport": "Starting...",
     "waitingForActions": "Waiting for agent actions...",
