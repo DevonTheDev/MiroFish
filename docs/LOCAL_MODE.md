@@ -1907,6 +1907,26 @@ On PowerShell use `Copy-Item .env.local.example .env` in place of `cp`.
 If `.env` already contains configuration you need, back it up first. Open
 `http://127.0.0.1:3000`. The backend binds to `127.0.0.1:5001` in local mode.
 
+`backend:local` and `dev:local` require the effective loaded configuration to have
+`MEMORY_BACKEND=local`. If the backend refuses to start, edit your existing root
+`.env` using `.env.local.example` as a guide, preserving configuration you need.
+The root `.env` overrides shell variables, so setting `MEMORY_BACKEND=local`
+only in the shell may not change the loaded mode. The `local` dependency extra
+does not select application mode. Direct launches can request the same guard
+with `python run.py --require-local` from `backend`; the flag takes no value.
+Generic `backend`, `dev` and no-flag `run.py` launches retain configuration-based
+mode selection. Unknown, abbreviated or value-bearing launcher options are
+rejected. Direct app-factory integrations bypass this launcher guard.
+
+The guard refuses non-local configuration before app construction or server
+startup, after the existing imports and configuration loading. It does not
+remove import-time logger effects or replace local configuration validation.
+`dev:local` still starts the frontend and backend in parallel under
+`concurrently --kill-others`: the frontend may briefly start or open a browser
+before backend refusal triggers sibling shutdown. This is a launcher admission
+check, not an offline or privacy guarantee. `check:local` remains a separate
+active service check.
+
 `check:local` checks Neo4j and the model server, then sends only small synthetic
 JSON, JSON-schema, tool-call and embedding probes. It checks the actual embedding
 dimension and a finite, nonzero norm required for cosine search. Generated JSON

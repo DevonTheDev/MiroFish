@@ -4,6 +4,7 @@ MiroFish Backend 启动入口
 
 import os
 import sys
+import argparse
 
 # 解决 Windows 控制台中文乱码问题：在所有导入之前设置 UTF-8 编码
 if sys.platform == 'win32':
@@ -22,8 +23,23 @@ from app import create_app
 from app.config import Config
 
 
-def main():
+def main(argv=None):
     """主函数"""
+    parser = argparse.ArgumentParser(allow_abbrev=False)
+    parser.add_argument(
+        '--require-local', action='store_true',
+        help='Require MEMORY_BACKEND=local in the loaded configuration',
+    )
+    args = parser.parse_args(argv)
+    if args.require_local and not Config.LOCAL_MODE:
+        print(
+            'Local launcher requires MEMORY_BACKEND=local in the loaded configuration. '
+            'Update your existing root .env using .env.local.example as a guide; '
+            'see docs/LOCAL_MODE.md.',
+            file=sys.stderr,
+        )
+        sys.exit(1)
+
     # 验证配置
     errors = Config.validate()
     if errors:

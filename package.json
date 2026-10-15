@@ -11,7 +11,7 @@
     "frontend": "cd frontend && npm run dev",
     "build": "cd frontend && npm run build",
     "setup:local": "npm ci && npm ci --prefix frontend && cd backend && uv sync --extra local --locked",
-    "backend:local": "cd backend && uv run --extra local --locked python run.py",
+    "backend:local": "cd backend && uv run --extra local --locked python run.py --require-local",
     "frontend:local": "cd frontend && npm run dev -- --host 127.0.0.1",
     "dev:local": "concurrently --kill-others -n \"backend,frontend\" -c \"green,cyan\" \"npm run backend:local\" \"npm run frontend:local\"",
     "check:local": "cd backend && uv run --extra local --locked python scripts/local_doctor.py --probe",
