@@ -172,6 +172,21 @@
                   </div>
                 </div>
               </div>
+              <div class="pasted-source">
+                <label for="pasted-source-text">{{ $t('home.sourceText') }}</label>
+                <textarea id="pasted-source-text" data-testid="pasted-source-text" rows="5"
+                  :value="sourceText" :disabled="loading" @input="updateSourceText"
+                  aria-describedby="pasted-source-hint pasted-source-pending"></textarea>
+                <p id="pasted-source-hint" data-testid="pasted-source-hint">{{ $t('home.sourceHint') }}</p>
+                <div class="source-actions">
+                  <button type="button" data-testid="add-pasted-source" :disabled="loading || !hasUnaddedSource"
+                    @click="addPastedSource">{{ $t('home.addSource') }}</button>
+                  <button type="button" data-testid="clear-pasted-source" :disabled="loading || !sourceText"
+                    @click="clearSourceText">{{ $t('home.clearSource') }}</button>
+                </div>
+                <p id="pasted-source-pending" data-testid="pasted-source-pending" role="status">{{ hasUnaddedSource ? $t('home.sourcePending') : '' }}</p>
+                <p v-if="sourceError" data-testid="pasted-source-error" class="source-error" role="alert">{{ $t(sourceError) }}</p>
+              </div>
             </div>
 
             <!-- 分割线 -->
@@ -182,10 +197,12 @@
             <!-- 输入区域 -->
             <div class="console-section">
               <div class="console-header">
-                <span class="console-label">{{ $t('home.simulationPrompt') }}</span>
+                <label for="simulation-requirement" class="console-label">{{ $t('home.simulationPrompt') }}</label>
               </div>
               <div class="input-wrapper">
                 <textarea
+                  id="simulation-requirement"
+                  data-testid="simulation-requirement"
                   v-model="formData.simulationRequirement"
                   class="code-input"
                   :placeholder="$t('home.promptPlaceholder')"
@@ -235,6 +252,10 @@ const formData = ref({
 
 // 文件列表
 const files = ref([])
+const sourceText = ref('')
+const sourceError = ref('')
+const MAX_PASTED_SOURCE_BYTES = 262144
+const hasUnaddedSource = computed(() => sourceText.value.trim() !== '')
 
 // 状态
 const loading = ref(false)
@@ -256,8 +277,43 @@ const fileInput = ref(null)
 
 // 计算属性:是否可以提交
 const canSubmit = computed(() => {
-  return formData.value.simulationRequirement.trim() !== '' && files.value.length > 0
+  return formData.value.simulationRequirement.trim() !== '' && files.value.length > 0 && !hasUnaddedSource.value
 })
+
+const canEditSource = () => active && router.currentRoute.value.name === 'Home' && !loading.value
+
+const updateSourceText = event => {
+  if (!canEditSource()) return
+  sourceText.value = event.target.value
+  sourceError.value = ''
+}
+
+const clearSourceText = () => {
+  if (!canEditSource()) return
+  sourceText.value = ''
+  sourceError.value = ''
+}
+
+const addPastedSource = () => {
+  if (!canEditSource() || !hasUnaddedSource.value) return
+  sourceError.value = ''
+  try {
+    // Admission and the staged File share exactly one UTF-8 payload.
+    const payload = new TextEncoder().encode(sourceText.value)
+    if (payload.byteLength > MAX_PASTED_SOURCE_BYTES) {
+      sourceError.value = 'home.sourceTooLarge'
+      return
+    }
+    const names = new Set(files.value.map(file => file.name))
+    let index = 1
+    while (names.has(`pasted-source-${index}.txt`)) index++
+    const file = new File([payload], `pasted-source-${index}.txt`, { type: 'text/plain' })
+    files.value.push(file)
+    sourceText.value = ''
+  } catch {
+    sourceError.value = 'home.sourceAddFailed'
+  }
+}
 
 // 触发文件选择
 const triggerFileInput = () => {
@@ -811,6 +867,17 @@ const startSimulation = async () => {
   font-size: 1.2rem;
   color: #999;
 }
+
+.pasted-source { margin-top: 20px; }
+.pasted-source label { display: block; margin-bottom: 8px; font-size: 0.85rem; }
+.pasted-source textarea { width: 100%; box-sizing: border-box; padding: 12px; border: 1px solid #DDD; font: inherit; resize: vertical; }
+.pasted-source p { margin: 8px 0; font-size: 0.8rem; line-height: 1.5; color: #555; }
+.pasted-source p:empty { display: none; }
+.pasted-source .source-error { color: #B42318; }
+.source-actions { display: flex; gap: 10px; flex-wrap: wrap; }
+.source-actions button { padding: 8px 12px; border: 1px solid #BBB; background: white; font: inherit; cursor: pointer; }
+.source-actions button:disabled { opacity: 0.5; cursor: default; }
+.pasted-source textarea:focus-visible, .source-actions button:focus-visible { outline: 2px solid #FF4500; outline-offset: 3px; }
 
 .console-divider {
   display: flex;

@@ -41,7 +41,7 @@ async function draft(h, selected = [new File(['seed'], 'seed.txt')], requirement
   const target = { files: selected, value: 'synthetic selection' }
   input.props.onChange({ target })
   assert.equal(target.value, '')
-  const textarea = h.find(node => node.type === 'textarea')
+  const textarea = h.find(node => node.props?.['data-testid'] === 'simulation-requirement')
   textarea.value = requirement
   textarea.listeners.input({ target: textarea })
   await settle()

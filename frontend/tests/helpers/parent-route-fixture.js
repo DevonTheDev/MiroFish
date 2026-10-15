@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict'
+import { File } from 'node:buffer'
 import { readFileSync, existsSync } from 'node:fs'
 import { createI18n } from 'vue-i18n'
 import * as I18n from 'vue-i18n'
@@ -113,7 +114,7 @@ export function build(options = {}) {
   const components = { '../components/GraphPanel.vue': graph }
   function evaluate(source, returnName = 'component') {
     const ast = parseJavaScript(source, { sourceType: 'module' })
-    const globals = { AbortController, Blob: DownloadBlob, FormData, TextEncoder, alert: message => warnings.push(['alert', message]), URL: fileUrl, document: fileDocument, console: { warn: (...args) => warnings.push(args), error: (...args) => warnings.push(args) },
+    const globals = { AbortController, Blob: DownloadBlob, File: options.fileConstructor ?? File, FormData, TextEncoder, alert: message => warnings.push(['alert', message]), URL: fileUrl, document: fileDocument, console: { warn: (...args) => warnings.push(args), error: (...args) => warnings.push(args) },
       setInterval: (callback, ms) => { const id = nextTimer++; intervals.set(id, { callback, ms }); return id },
       clearInterval: id => intervals.delete(id) }
     for (const statement of ast.program.body.filter(item => item.type === 'ImportDeclaration').reverse()) {

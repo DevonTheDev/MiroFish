@@ -10,6 +10,32 @@ PC's RAM, disk, compute and electricity. Small-model accuracy is not equivalent
 to a large hosted model. Generated simulations are exploratory, not validated
 forecasts or a basis for consequential decisions.
 
+## Start from pasted source text
+
+On Home, use **Paste source text** to provide a short source passage without
+first saving a file. Choose **Add source** to stage it as a TXT file, then enter
+the separate simulation requirement and choose **Start Engine**. You can combine
+pasted sources with selected PDF, Markdown or TXT files. The selected list shows
+each generated filename; its existing remove button removes that source.
+
+Each Add accepts at most **256 KiB (262,144 bytes)** of UTF-8 text. It preserves
+the current editor value in the staged file without trimming or truncating it;
+the browser may already have normalized pasted line endings. Blank input and
+oversized text are rejected. A failed Add leaves the editor and selected files
+intact. Successful Add clears the editor. Meaningful text left unadded blocks
+Start until you add it or choose **Clear text**. Clear changes only that editor.
+
+Add is a local file-staging action and makes no request. Start retains the
+existing upload and generation path for the configured backend in both local
+and cloud modes. The new editor limit is a convenience bound, not a model-context
+or hardware guarantee. The existing whole-request limit, TXT preprocessing and
+model admission still apply; downstream preprocessing can normalize whitespace.
+
+If Home navigation fails, the still-open Home retains its selected sources.
+After navigation, an ontology failure has no source-restore control, and a fresh
+Home or full page reload does not restore this draft. Keep a separate copy of
+text you need later. This feature adds no automatic retry or draft persistence.
+
 ## Recover from an unknown page address
 
 Once the frontend is loaded, an address that does not match a page shows
