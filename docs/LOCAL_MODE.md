@@ -76,6 +76,25 @@ attributes remain intact. Already-fitting requests are unchanged. If fixed
 content cannot fit, the existing gateway refusals, retries and rule fallback
 still apply; fitting the context does not guarantee a successful model response.
 
+## Report-section context and request limits
+
+Each report section already sees at most the first 4,000 characters of every
+completed section. In local mode with the standard LLM client, these excerpts
+may shrink before each section request, including the final forced request, as
+tool results accumulate. All prior sections share a prefix cap; their order and
+separators remain intact. A shortened positive prefix ends in `...`; an omitted
+nonempty prefix is shown as `[...]`. Very small allowances can shorten prior
+headings too. The complete saved sections remain unchanged.
+
+The complete simulation requirement, current titles and instructions, and all
+actual tool exchanges remain in the request. Already-fitting and cloud requests
+retain their existing content. Custom injected clients retain their own request
+behavior. If those fixed messages and omission markers cannot fit, the existing
+gateway refusal still fails report generation. Fitting errors also remain
+failures. This does not change outline or report-chat context, tool requirements,
+output limits, or the gateway's character guard, and does not guarantee provider
+token fit, complete output, report quality, or whole-report completion.
+
 ## Recover from an unknown page address
 
 Once the frontend is loaded, an address that does not match a page shows

@@ -1255,6 +1255,72 @@ class ReportAgent:
                 ]
             )
     
+    def _fit_local_section_messages(
+        self, messages: List[Dict[str, str]], previous_sections: List[str],
+        section_title: str, *, temperature: float, max_tokens: int,
+    ) -> List[Dict[str, str]]:
+        """Fit only prior-section excerpts in a fresh view of this call's history."""
+        if not Config.LOCAL_MODE or not previous_sections:
+            return messages
+        # Injected clients may have a different envelope; never guess their model.
+        if type(self.llm) is not LLMClient:
+            return messages
+
+        from ..local_runtime.gateway import _input_size, _normalize_payload
+        from ..utils.openai_chat_compat import build_chat_completion_kwargs
+
+        def request_size(value):
+            payload = build_chat_completion_kwargs(
+                model=self.llm.model, messages=value,
+                temperature=temperature, max_tokens=max_tokens,
+            )
+            return _input_size(_normalize_payload(
+                "/v1/chat/completions", payload,
+                max_output_tokens=Config.LOCAL_MAX_OUTPUT_TOKENS,
+                reasoning_effort=Config.LOCAL_REASONING_EFFORT,
+            ))
+
+        limit = Config.LOCAL_MAX_INPUT_CHARS
+        if request_size(messages) <= limit:
+            return messages
+
+        def with_excerpts(parts):
+            view = list(messages)
+            view[1] = dict(messages[1], content=SECTION_USER_PROMPT_TEMPLATE.format(
+                previous_content="\n\n---\n\n".join(parts),
+                section_title=section_title,
+            ))
+            return view
+
+        # Retain every separator/slot. Five reserved marker characters make the
+        # charge monotonic even when a short prefix becomes complete (no ...).
+        fixed_size = request_size(with_excerpts([""] * len(previous_sections)))
+        lengths = [len(section) for section in previous_sections if section]
+
+        def charged_size(cap):
+            return fixed_size + sum(min(length, cap) + 5 for length in lengths)
+
+        if charged_size(0) > limit:
+            return messages  # Let the existing gateway own the original refusal.
+        low, high = 0, 4000
+        while low < high:
+            middle = (low + high + 1) // 2
+            if charged_size(middle) <= limit:
+                low = middle
+            else:
+                high = middle - 1
+
+        parts = []
+        for section in previous_sections:
+            if not section or len(section) <= low:
+                parts.append(section)
+            elif low == 0:
+                parts.append("[...]")
+            else:
+                parts.append(section[:low] + "...")
+        fitted = with_excerpts(parts)
+        return fitted if request_size(fitted) <= limit else messages
+
     def _generate_section_react(
         self, 
         section: ReportSection,
@@ -1340,7 +1406,10 @@ class ReportAgent:
             
             # 调用LLM
             response = self.llm.chat(
-                messages=messages,
+                messages=self._fit_local_section_messages(
+                    messages, previous_sections, section.title,
+                    temperature=0.5, max_tokens=4096,
+                ),
                 temperature=0.5,
                 max_tokens=4096
             )
@@ -1546,7 +1615,10 @@ class ReportAgent:
         messages.append({"role": "user", "content": REACT_FORCE_FINAL_MSG})
         
         response = self.llm.chat(
-            messages=messages,
+            messages=self._fit_local_section_messages(
+                messages, previous_sections, section.title,
+                temperature=0.5, max_tokens=4096,
+            ),
             temperature=0.5,
             max_tokens=4096
         )
