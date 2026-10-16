@@ -7,20 +7,24 @@ import { reactive } from 'vue'
 const state = reactive({
   files: [],
   simulationRequirement: '',
-  isPending: false
+  isPending: false,
+  submissionId: null
 })
 
 export function setPendingUpload(files, requirement) {
-  state.files = files
+  state.files = [...files]
   state.simulationRequirement = requirement
   state.isPending = true
+  // Even identical input accepted twice belongs to two different submissions.
+  state.submissionId = Symbol('pending submission')
 }
 
 export function getPendingUpload() {
   return {
     files: state.files,
     simulationRequirement: state.simulationRequirement,
-    isPending: state.isPending
+    isPending: state.isPending,
+    submissionId: state.submissionId
   }
 }
 
@@ -28,6 +32,16 @@ export function clearPendingUpload() {
   state.files = []
   state.simulationRequirement = ''
   state.isPending = false
+  state.submissionId = null
+}
+
+// Compare and consume synchronously. Keep no-argument clearPendingUpload for
+// legacy consumers; current owners must use the identity they captured.
+export function consumePendingUpload(expectedId) {
+  if (!expectedId || !state.isPending || state.submissionId !== expectedId) return null
+  const snapshot = { ...getPendingUpload(), files: [...state.files] }
+  clearPendingUpload()
+  return snapshot
 }
 
 export default state

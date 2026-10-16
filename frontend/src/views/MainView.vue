@@ -91,7 +91,7 @@ import GraphPanel from '../components/GraphPanel.vue'
 import Step1GraphBuild from '../components/Step1GraphBuild.vue'
 import Step2EnvSetup from '../components/Step2EnvSetup.vue'
 import { generateOntology, getProject, buildGraph, getTaskStatus, getGraphData } from '../api/graph'
-import { getPendingUpload, clearPendingUpload } from '../store/pendingUpload'
+import { getPendingUpload, consumePendingUpload } from '../store/pendingUpload'
 import LanguageSwitcher from '../components/LanguageSwitcher.vue'
 import { hasLoadedGraphShape, createLoadedGraphFile } from '../utils/loadedGraphFile.js'
 import { MAX_GRAPH_VIEW_SVG_BYTES } from '../utils/graphViewSvg.js'
@@ -825,10 +825,7 @@ const selectProject = (id, recovering = false) => {
     error.value = 'Upload observation was interrupted. Return home to start the upload again.'
     addLog(error.value, context)
   } else if (adoption) {
-    const pending = getPendingUpload()
-    if (pending.files === adoption.pending.files && pending.simulationRequirement === adoption.pending.simulationRequirement) {
-      clearPendingUpload()
-    }
+    consumePendingUpload(adoption.pending.submissionId)
     projectData.value = adoption.data
     addLog(`Ontology generated successfully for project ${id}`, context)
     startBuildGraph(context)

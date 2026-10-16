@@ -32,9 +32,24 @@ or hardware guarantee. The existing whole-request limit, TXT preprocessing and
 model admission still apply; downstream preprocessing can normalize whitespace.
 
 If Home navigation fails, the still-open Home retains its selected sources.
-After navigation, an ontology failure has no source-restore control, and a fresh
-Home or full page reload does not restore this draft. Keep a separate copy of
-text you need later. This feature adds no automatic retry or draft persistence.
+While an unconsumed submission remains in this page session, Home offers
+**Restore previous submission**. This explicit action restores the submitted
+Files in their original order and the exact scenario, with replacement
+confirmation if any current input exists (including unadded text or whitespace).
+There is no automatic restoration on Home entry. Previously pasted sources
+return as their staged TXT Files, not editable text: remove and replace a File
+with a revised pasted source or selected document to shorten its contents.
+
+Restoration consumes the recovery record. The restored inputs then exist only
+in the current Home form; leaving Home or reloading loses them unless a new
+explicit **Start Engine** stages another submission. A full page reload always
+loses this in-memory recovery. Keep a separate copy of text you need later.
+Successfully adopted project submissions are consumed and are not offered.
+This feature adds no automatic retry or browser persistence. Restoring neither
+reports server failure/completion/cancellation nor retries, cancels or reopens
+server work. It does not cancel navigation: a pending departure can still leave
+Home and discard the restored form. A later explicit Start retains the existing
+new-project semantics.
 
 ## Ontology source excerpts and request limits
 

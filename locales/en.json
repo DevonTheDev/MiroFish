@@ -85,6 +85,12 @@
     "sourceTooLarge": "Source text exceeds 256 KiB. Shorten it and try Add source again.",
     "sourceAddFailed": "Could not add this source. Your text is still here; try Add source again.",
     "startFailed": "Could not open the graph builder. Your draft is still here. Try Start Engine again.",
+    "restorePreviousSubmission": "Restore previous submission",
+    "restoreHint": "Restore submitted files and scenario from this page session. Pasted sources return as files; remove and replace a file to revise its text. This does not cancel navigation or report or change server work.",
+    "restoreReplacePrompt": "Replace the current files, unadded pasted text and scenario with the previous submitted files and scenario? The pasted-text field will be cleared.",
+    "restoreReplace": "Replace current draft",
+    "restoreKeep": "Keep current draft",
+    "restoreDone": "Previous submitted files and scenario restored. Review them before Start Engine. These inputs now exist only in this form; leaving Home or reloading loses them unless you start again.",
     "workspaceLabel": "Workspace",
     "workspaceTitle": "Simulation workspace",
     "workspaceDesc": "Upload source material and describe a scenario to prepare a simulation. Use the runtime monitor to inspect local settings and gateway activity."

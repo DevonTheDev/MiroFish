@@ -133,6 +133,20 @@
         <!-- 右栏：交互控制台 -->
         <div class="right-panel">
           <div class="console-box">
+            <div v-if="restoreControls.action" class="console-section restore-submission" data-testid="restore-submission">
+              <p id="restore-submission-hint">{{ $t('home.restoreHint') }}</p>
+              <button type="button" data-testid="restore-previous-submission" aria-describedby="restore-submission-hint"
+                :disabled="loading" :onClick="restoreControls.action">{{ $t('home.restorePreviousSubmission') }}</button>
+              <div v-if="restoreControls.confirm" data-testid="restore-replacement-confirmation" role="group"
+                aria-labelledby="restore-replacement-prompt">
+                <p id="restore-replacement-prompt">{{ $t('home.restoreReplacePrompt') }}</p>
+                <button type="button" data-testid="confirm-restore-submission" :disabled="loading"
+                  :onClick="restoreControls.confirm">{{ $t('home.restoreReplace') }}</button>
+                <button type="button" data-testid="cancel-restore-submission"
+                  :onClick="restoreControls.cancel">{{ $t('home.restoreKeep') }}</button>
+              </div>
+            </div>
+            <p v-if="restored" class="console-section" data-testid="restored-submission" role="status">{{ $t('home.restoreDone') }}</p>
             <!-- 上传区域 -->
             <div class="console-section">
               <div class="console-header">
@@ -202,6 +216,7 @@
               <div class="input-wrapper">
                 <textarea
                   id="simulation-requirement"
+                  ref="requirementInput"
                   data-testid="simulation-requirement"
                   v-model="formData.simulationRequirement"
                   class="code-input"
@@ -237,11 +252,11 @@
 </template>
 
 <script setup>
-import { ref, computed, onBeforeUnmount } from 'vue'
+import { ref, shallowRef, computed, watch, onBeforeUnmount } from 'vue'
 import { RouterLink, useRouter } from 'vue-router'
 import HistoryDatabase from '../components/HistoryDatabase.vue'
 import LanguageSwitcher from '../components/LanguageSwitcher.vue'
-import { setPendingUpload } from '../store/pendingUpload.js'
+import { setPendingUpload, getPendingUpload, consumePendingUpload } from '../store/pendingUpload.js'
 
 const router = useRouter()
 
@@ -281,6 +296,73 @@ const canSubmit = computed(() => {
 })
 
 const canEditSource = () => active && router.currentRoute.value.name === 'Home' && !loading.value
+
+const requirementInput = ref(null)
+const restoreControls = shallowRef({})
+const restored = ref(false)
+let restoreOwner = null
+let editRevision = 0
+
+const retireRestore = () => {
+  restoreOwner = null
+  restoreControls.value = {}
+}
+const ownsRestore = owner => active && restoreOwner === owner && !loading.value
+  && router.currentRoute.value === owner.route && owner.route.name === 'Home'
+  && editRevision === owner.revision && getPendingUpload().isPending
+  && getPendingUpload().submissionId === owner.submissionId
+
+const applyRestore = owner => {
+  if (!ownsRestore(owner)) return
+  // There is no asynchronous boundary between validating, consuming and applying.
+  retireRestore()
+  const snapshot = consumePendingUpload(owner.submissionId)
+  if (!snapshot) return
+  files.value = [...snapshot.files]
+  formData.value.simulationRequirement = snapshot.simulationRequirement
+  sourceText.value = ''
+  sourceError.value = ''
+  error.value = ''
+  restored.value = true
+  requirementInput.value?.focus?.()
+}
+const publishRestore = () => {
+  retireRestore()
+  const pending = getPendingUpload()
+  const route = router.currentRoute.value
+  if (!active || loading.value || route.name !== 'Home'
+    || !pending.isPending || !pending.files.length) return
+  const owner = { route, revision: editRevision, submissionId: pending.submissionId }
+  restoreOwner = owner
+  restoreControls.value = { action: () => {
+    if (!ownsRestore(owner)) return
+    // Whitespace is input too: never silently discard even an unadded field.
+    if (files.value.length || sourceText.value !== '' || formData.value.simulationRequirement !== '') {
+      const confirmation = {}
+      restoreControls.value = {
+        action: restoreControls.value.action,
+        confirm: () => {
+          if (restoreControls.value.confirmation === confirmation && ownsRestore(owner)) applyRestore(owner)
+        },
+        cancel: () => {
+          if (restoreControls.value.confirmation === confirmation && ownsRestore(owner)) publishRestore()
+        },
+        confirmation,
+      }
+    } else applyRestore(owner)
+  } }
+}
+watch([() => files.value.slice(), sourceText, () => formData.value.simulationRequirement], () => {
+  editRevision++
+  restored.value = false
+  publishRestore()
+}, { flush: 'sync' })
+watch([() => getPendingUpload().submissionId, loading, () => router.currentRoute.value], publishRestore,
+  { immediate: true, flush: 'sync' })
+
+// Restore changes local form input only. Its authority follows the committed
+// Home selection; an ordinary pending navigation neither cancels nor owns it.
+onBeforeUnmount(retireRestore)
 
 const updateSourceText = event => {
   if (!canEditSource()) return
@@ -402,6 +484,10 @@ const startSimulation = async () => {
 </script>
 
 <style scoped>
+.restore-submission { background: #fff7f2; }
+.restore-submission p { font-size: 0.85rem; line-height: 1.5; }
+.restore-submission button { margin: 4px 8px 4px 0; padding: 8px 12px; cursor: pointer; }
+
 /* 全局变量与重置 */
 :root {
   --black: #000000;
