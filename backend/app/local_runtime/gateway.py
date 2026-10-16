@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import asyncio
 import concurrent.futures
+from copy import deepcopy
 from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -226,9 +227,11 @@ def _input_size(value):
     return 1
 
 
-def _prepare_payload(path, payload, settings):
+def _normalize_payload(path, payload, *, max_output_tokens, reasoning_effort):
+    """Normalize a fresh request value without sending it or applying its size guard."""
     if not isinstance(payload, dict):
         raise _GatewayError(400, "A JSON object is required")
+    payload = deepcopy(payload)
     model = payload.get("model")
     if not isinstance(model, str) or not model.strip():
         raise _GatewayError(400, "A nonempty local model name is required")
@@ -238,12 +241,12 @@ def _prepare_payload(path, payload, settings):
     if payload.get("stream", False) is not False:
         raise _GatewayError(400, "Streaming is not supported by the bounded local gateway")
     if path == "/v1/chat/completions":
-        if settings.reasoning_effort is not None:
-            payload["reasoning_effort"] = settings.reasoning_effort
+        if reasoning_effort is not None:
+            payload["reasoning_effort"] = reasoning_effort
             if "reasoning" in payload:
                 if not isinstance(payload["reasoning"], dict):
                     raise _GatewayError(400, "Nested reasoning settings must be an object")
-                payload["reasoning"]["effort"] = settings.reasoning_effort
+                payload["reasoning"]["effort"] = reasoning_effort
         messages = payload.get("messages")
         if not isinstance(messages, list) or not messages or not all(isinstance(m, dict) for m in messages):
             raise _GatewayError(400, "A nonempty messages array is required")
@@ -262,9 +265,9 @@ def _prepare_payload(path, payload, settings):
             value = payload[name]
             if type(value) is not int or value <= 0:
                 raise _GatewayError(400, "Token limits must be positive integers")
-            payload[name] = min(value, settings.max_output_tokens)
+            payload[name] = min(value, max_output_tokens)
         if not token_fields:
-            payload["max_tokens"] = settings.max_output_tokens
+            payload["max_tokens"] = max_output_tokens
     else:
         value = payload.get("input")
         # Support text and OpenAI token-ID arrays, but bound both aggregate sizes.
@@ -278,6 +281,15 @@ def _prepare_payload(path, payload, settings):
         )
         if not valid:
             raise _GatewayError(400, "A text or token input is required")
+    return payload
+
+
+def _prepare_payload(path, payload, settings):
+    payload = _normalize_payload(
+        path, payload,
+        max_output_tokens=settings.max_output_tokens,
+        reasoning_effort=settings.reasoning_effort,
+    )
     if _input_size(payload) > settings.max_input_chars:
         raise _GatewayError(413, "Input exceeds the configured local context budget")
     return payload

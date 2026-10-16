@@ -36,6 +36,38 @@ After navigation, an ontology failure has no source-restore control, and a fresh
 Home or full page reload does not restore this draft. Keep a separate copy of
 text you need later. This feature adds no automatic retry or draft persistence.
 
+## Ontology source excerpts and request limits
+
+In local mode, ontology design may use representative source excerpts to fit the
+configured request-character limit. This can miss relevant entity or relationship
+types. Uploaded source files stay intact, and graph building still uses the saved
+extracted text. This describes generation behavior; it does not identify whether
+a previously saved ontology used excerpts or establish complete graph coverage.
+
+An already-fitting request is unchanged. For an oversized request, the source
+allowance is the remaining configured request-character budget after fixed
+request content, capped at 50,000 characters. Fixed content includes system/schema
+instructions, language guidance, simulation requirement, additional context and
+normalized request fields. Requirements and additional
+context are never shortened automatically. Source excerpts retain the existing
+8,000-character chunks, 200-character overlap, up to 60 globally selected chunks,
+and head/tail excerpts with a 400-character minimum. The selected set is not
+reduced to force a fit.
+
+If fixed content leaves no room for source text, or the minimum representative
+sample cannot fit, generation returns a clear error (HTTP 413) before sending a
+model request. Shorten the requirement/additional context or provide fewer or
+shorter source documents, then try again. Large uploads can still be refused.
+The saved upload and extracted text remain intact after this failure.
+
+`LOCAL_MAX_INPUT_CHARS` (default 24,000) counts the normalized request using Python
+string lengths, including message roles and request keys. It is independent of
+the 1 MiB HTTP request-body guard, the provider's actual tokenizer/context limit,
+`LOCAL_CONTEXT_TOKENS` (default 8,192), and `LOCAL_MAX_OUTPUT_TOKENS` (default
+2,048). Passing the character guard does not guarantee valid, complete model
+output or a fit within the provider's token window. Output caps and retries are
+unchanged.
+
 ## Recover from an unknown page address
 
 Once the frontend is loaded, an address that does not match a page shows

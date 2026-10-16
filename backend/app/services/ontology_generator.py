@@ -7,7 +7,9 @@ import json
 import logging
 import re
 from typing import Dict, Any, List, Optional
+from ..config import Config
 from ..utils.llm_client import LLMClient
+from ..utils.openai_chat_compat import build_chat_completion_kwargs
 from ..utils.locale import get_language_instruction
 from ..utils.file_parser import split_text_into_chunks
 from ..utils.ontology import (
@@ -17,6 +19,14 @@ from ..utils.ontology import (
 )
 
 logger = logging.getLogger(__name__)
+
+
+class LocalOntologyInputBudgetError(ValueError):
+    """A safe local admission failure; never include source or requirement text."""
+
+    def __init__(self, reason: str):
+        self.reason = reason
+        super().__init__("Local ontology input exceeds the configured request limit")
 
 
 def _to_pascal_case(name: str) -> str:
@@ -230,6 +240,11 @@ class OntologyGenerator:
             {"role": "system", "content": system_prompt},
             {"role": "user", "content": user_message}
         ]
+
+        if Config.LOCAL_MODE:
+            messages = self._fit_local_messages(
+                messages, document_texts, simulation_requirement, additional_context
+            )
         
         # 调用LLM
         result = self.llm_client.chat_json(
@@ -253,16 +268,75 @@ class OntologyGenerator:
     LONG_TEXT_CHUNK_OVERLAP = 200
     MAX_LONG_TEXT_CHUNKS = 60
     MIN_LONG_TEXT_EXCERPT = 400
+
+    def _local_request_size(self, messages: List[Dict[str, str]]) -> int:
+        """Count the gateway's normalized envelope without starting any transport."""
+        from ..local_runtime.gateway import _input_size, _normalize_payload
+
+        payload = build_chat_completion_kwargs(
+            model=self.llm_client.model,
+            messages=messages,
+            temperature=0.3,
+            max_tokens=None,
+            response_format={"type": "json_object"},
+        )
+        return _input_size(_normalize_payload(
+            "/v1/chat/completions", payload,
+            max_output_tokens=Config.LOCAL_MAX_OUTPUT_TOKENS,
+            reasoning_effort=Config.LOCAL_REASONING_EFFORT,
+        ))
+
+    def _fit_local_messages(
+        self,
+        messages: List[Dict[str, str]],
+        document_texts: List[str],
+        simulation_requirement: str,
+        additional_context: Optional[str],
+    ) -> List[Dict[str, str]]:
+        limit = Config.LOCAL_MAX_INPUT_CHARS
+        # Keep every already-admitted request, including existing samples, intact.
+        if self._local_request_size(messages) <= limit:
+            return messages
+
+        fixed_messages = [
+            messages[0],
+            {"role": "user", "content": self._build_user_message(
+                [], simulation_requirement, additional_context
+            )},
+        ]
+        allowance = min(
+            self.MAX_TEXT_LENGTH_FOR_LLM,
+            limit - self._local_request_size(fixed_messages),
+        )
+        if allowance <= 0:
+            raise LocalOntologyInputBudgetError("fixed_content")
+
+        context = self._build_document_context(document_texts, max_chars=allowance)
+        fitted_messages = [
+            messages[0],
+            {"role": "user", "content": self._build_user_message(
+                document_texts, simulation_requirement, additional_context,
+                document_context=context,
+            )},
+        ]
+        if self._local_request_size(fitted_messages) > limit:
+            raise LocalOntologyInputBudgetError("minimum_sample")
+        return fitted_messages
     
     def _build_user_message(
         self,
         document_texts: List[str],
         simulation_requirement: str,
-        additional_context: Optional[str]
+        additional_context: Optional[str],
+        *,
+        document_context: Optional[str] = None,
     ) -> str:
         """构建用户消息"""
         
-        combined_text = self._build_document_context(document_texts)
+        combined_text = (
+            self._build_document_context(document_texts)
+            if document_context is None else document_context
+        )
         
         message = f"""## 模拟需求
 
@@ -293,13 +367,18 @@ class OntologyGenerator:
         
         return message
 
-    def _build_document_context(self, document_texts: List[str]) -> str:
+    def _build_document_context(
+        self, document_texts: List[str], *, max_chars: Optional[int] = None
+    ) -> str:
         """构建用于本体分析的文档上下文，长文本按全局分块抽样而不是只截取开头。"""
 
         combined_text = "\n\n---\n\n".join(document_texts)
         original_length = len(combined_text)
+        limit = self.MAX_TEXT_LENGTH_FOR_LLM if max_chars is None else min(
+            self.MAX_TEXT_LENGTH_FOR_LLM, max_chars
+        )
 
-        if original_length <= self.MAX_TEXT_LENGTH_FOR_LLM:
+        if original_length <= limit:
             return combined_text
 
         chunks = self._collect_document_chunks(document_texts)
@@ -307,7 +386,7 @@ class OntologyGenerator:
             return ""
 
         selected_chunks = self._select_representative_chunks(chunks)
-        excerpt_budget = self._calculate_excerpt_budget(len(selected_chunks))
+        excerpt_budget = self._calculate_excerpt_budget(len(selected_chunks), max_chars=limit)
         context = self._render_chunked_context(
             selected_chunks=selected_chunks,
             original_length=original_length,
@@ -315,7 +394,7 @@ class OntologyGenerator:
             excerpt_limit=excerpt_budget,
         )
 
-        while len(context) > self.MAX_TEXT_LENGTH_FOR_LLM and excerpt_budget > self.MIN_LONG_TEXT_EXCERPT:
+        while len(context) > limit and excerpt_budget > self.MIN_LONG_TEXT_EXCERPT:
             excerpt_budget = max(self.MIN_LONG_TEXT_EXCERPT, int(excerpt_budget * 0.85))
             context = self._render_chunked_context(
                 selected_chunks=selected_chunks,
@@ -324,9 +403,11 @@ class OntologyGenerator:
                 excerpt_limit=excerpt_budget,
             )
 
-        if len(context) > self.MAX_TEXT_LENGTH_FOR_LLM:
+        if len(context) > limit:
+            if max_chars is not None:
+                raise LocalOntologyInputBudgetError("minimum_sample")
             marker = "\n\n...(分块上下文已压缩到本体分析长度限制内)..."
-            context = context[:self.MAX_TEXT_LENGTH_FOR_LLM - len(marker)] + marker
+            context = context[:limit - len(marker)] + marker
 
         return context
 
@@ -367,14 +448,17 @@ class OntologyGenerator:
         }
         return [chunks[i] for i in sorted(selected_indexes)]
 
-    def _calculate_excerpt_budget(self, selected_count: int) -> int:
+    def _calculate_excerpt_budget(
+        self, selected_count: int, *, max_chars: Optional[int] = None
+    ) -> int:
         """根据选中的分块数量为每块分配字符预算。"""
 
         header_budget = 600
         chunk_header_budget = 120 * selected_count
+        limit = self.MAX_TEXT_LENGTH_FOR_LLM if max_chars is None else max_chars
         available = max(
             self.MIN_LONG_TEXT_EXCERPT * selected_count,
-            self.MAX_TEXT_LENGTH_FOR_LLM - header_budget - chunk_header_budget,
+            limit - header_budget - chunk_header_budget,
         )
         return max(self.MIN_LONG_TEXT_EXCERPT, available // max(selected_count, 1))
 

@@ -20,6 +20,9 @@
           <p class="description">
             {{ $t('step1.ontologyDesc') }}
           </p>
+          <p class="description local-ontology-note">
+            {{ $t('step1.localOntologyBudgetNote') }}
+          </p>
 
           <!-- Loading / Progress -->
           <div v-if="currentPhase === 0 && ontologyProgress" class="progress-section">

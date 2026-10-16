@@ -14,7 +14,7 @@ from zep_cloud import NotFoundError
 from . import graph_bp
 from ..config import Config
 from ..storage import StoragePathError
-from ..services.ontology_generator import OntologyGenerator
+from ..services.ontology_generator import OntologyGenerator, LocalOntologyInputBudgetError
 from ..services.graph_builder import BatchSubmission, GraphBuilderService
 from ..services.text_processor import TextProcessor
 from ..utils.file_parser import FileParser
@@ -411,7 +411,16 @@ def generate_ontology():
         provider_status = getattr(error, "status_code", None)
         request_id = getattr(error, "request_id", None)
 
-        if isinstance(error, LLMResponseError):
+        if isinstance(error, LocalOntologyInputBudgetError):
+            error_key = (
+                'api.localOntologyFixedContentTooLarge'
+                if error.reason == 'fixed_content'
+                else 'api.localOntologySampleTooLarge'
+            )
+            public_error = t(error_key)
+            response_status = 413
+            logger.warning("Local ontology request exceeds the configured input budget")
+        elif isinstance(error, LLMResponseError):
             public_error = str(error)
             response_status = 502
             logger.exception("LLM returned an unusable ontology response")

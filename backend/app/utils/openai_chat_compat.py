@@ -17,17 +17,16 @@ def is_gpt5_family(model: Optional[str]) -> bool:
     return model.strip().lower().startswith("gpt-5")
 
 
-def create_chat_completion(
-    client: Any,
+def build_chat_completion_kwargs(
     *,
     model: str,
     messages: List[Dict[str, Any]],
     temperature: Optional[float] = None,
     max_tokens: Optional[int] = None,
     response_format: Optional[Dict[str, Any]] = None,
-) -> Any:
+) -> Dict[str, Any]:
     """
-    Create a chat completion with model-specific request parameters.
+    Build the exact model-specific request parameters without sending them.
 
     Compatibility strategy:
     - For GPT-5 family, avoid sending temperature by default.
@@ -54,7 +53,26 @@ def create_chat_completion(
         else:
             kwargs["max_tokens"] = max_tokens
 
-    return client.chat.completions.create(**kwargs)
+    return kwargs
+
+
+def create_chat_completion(
+    client: Any,
+    *,
+    model: str,
+    messages: List[Dict[str, Any]],
+    temperature: Optional[float] = None,
+    max_tokens: Optional[int] = None,
+    response_format: Optional[Dict[str, Any]] = None,
+) -> Any:
+    """Create a chat completion with the shared model-specific envelope."""
+    return client.chat.completions.create(**build_chat_completion_kwargs(
+        model=model,
+        messages=messages,
+        temperature=temperature,
+        max_tokens=max_tokens,
+        response_format=response_format,
+    ))
 
 
 def extract_chat_completion_text(response: Any) -> str:
