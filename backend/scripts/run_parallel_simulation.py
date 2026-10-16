@@ -742,6 +742,27 @@ class PlatformSimulation:
         self.completed = False
 
 
+def _record_initial_actions(
+    db_path: str,
+    agent_names: Dict[int, str],
+    action_logger: Optional[PlatformActionLogger],
+) -> Tuple[int, int]:
+    """Drain initialization traces once; count only successfully emitted records.
+
+    This reads visible trace rows, not transaction outcomes or pending siblings.
+    Even without a logger, consume filtered reset rows and advance the cursor.
+    """
+    actual_actions, last_rowid = fetch_new_actions_from_db(
+        db_path, 0, agent_names, strict=True
+    )
+    emitted_count = 0
+    for action_data in actual_actions:
+        if action_logger:
+            action_logger.log_action(round_num=0, **action_data)
+            emitted_count += 1
+    return last_rowid, emitted_count
+
+
 async def run_twitter_simulation(
     config: Dict[str, Any],
     simulation_dir: str,
@@ -825,9 +846,8 @@ async def run_twitter_simulation(
         if action_logger:
             action_logger.log_round_start(0, 0)  # round 0, simulated_hour 0
 
-        initial_action_count = 0
+        initial_actions = {}
         if initial_posts:
-            initial_actions = {}
             for post in initial_posts:
                 agent_id = post.get("poster_agent_id", 0)
                 content = post.get("content", "")
@@ -846,26 +866,24 @@ async def run_twitter_simulation(
                             action_args={"content": content}
                         )
 
-                    if action_logger:
-                        action_logger.log_action(
-                            round_num=0,
-                            agent_id=agent_id,
-                            agent_name=agent_names.get(agent_id, f"Agent_{agent_id}"),
-                            action_type="CREATE_POST",
-                            action_args={"content": content}
-                        )
-                        total_actions += 1
-                        initial_action_count += 1
                 except Exception:
                     pass
 
-            if initial_actions:
-                await result.env.step(initial_actions)
-                submitted_count = sum(
-                    len(actions) if isinstance(actions, list) else 1
-                    for actions in initial_actions.values()
+        if initial_actions:
+            async with record_after_step(result.env, initial_actions):
+                last_rowid, initial_action_count = _record_initial_actions(
+                    db_path, agent_names, action_logger
                 )
-                log_info(f"已提交 {submitted_count} 条初始发帖动作")
+            submitted_count = sum(
+                len(actions) if isinstance(actions, list) else 1
+                for actions in initial_actions.values()
+            )
+            log_info(f"已提交 {submitted_count} 条初始发帖动作")
+        else:
+            last_rowid, initial_action_count = _record_initial_actions(
+                db_path, agent_names, action_logger
+            )
+        total_actions += initial_action_count
 
         # 记录 round 0 结束
         if action_logger:
@@ -1041,9 +1059,8 @@ async def run_reddit_simulation(
         if action_logger:
             action_logger.log_round_start(0, 0)  # round 0, simulated_hour 0
 
-        initial_action_count = 0
+        initial_actions = {}
         if initial_posts:
-            initial_actions = {}
             for post in initial_posts:
                 agent_id = post.get("poster_agent_id", 0)
                 content = post.get("content", "")
@@ -1062,22 +1079,20 @@ async def run_reddit_simulation(
                             action_args={"content": content}
                         )
 
-                    if action_logger:
-                        action_logger.log_action(
-                            round_num=0,
-                            agent_id=agent_id,
-                            agent_name=agent_names.get(agent_id, f"Agent_{agent_id}"),
-                            action_type="CREATE_POST",
-                            action_args={"content": content}
-                        )
-                        total_actions += 1
-                        initial_action_count += 1
                 except Exception:
                     pass
 
-            if initial_actions:
-                await result.env.step(initial_actions)
-                log_info(f"已发布 {len(initial_actions)} 条初始帖子")
+        if initial_actions:
+            async with record_after_step(result.env, initial_actions):
+                last_rowid, initial_action_count = _record_initial_actions(
+                    db_path, agent_names, action_logger
+                )
+            log_info(f"已发布 {len(initial_actions)} 条初始帖子")
+        else:
+            last_rowid, initial_action_count = _record_initial_actions(
+                db_path, agent_names, action_logger
+            )
+        total_actions += initial_action_count
 
         # 记录 round 0 结束
         if action_logger:
