@@ -859,6 +859,7 @@ CHAT_SYSTEM_PROMPT_TEMPLATE = """\
 - 优先给出结论，再解释原因"""
 
 CHAT_OBSERVATION_SUFFIX = "\n\n请简洁回答问题。"
+CHAT_REPORT_TRUNCATION_MARKER = "\n\n... [报告内容已截断] ..."
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -1924,6 +1925,49 @@ class ReportAgent:
             
             return report
     
+    def _fit_local_chat_messages(
+        self, messages: List[Dict[str, str]], report_content: str,
+        prompt_values: Dict[str, Any], language_instruction: str,
+    ) -> List[Dict[str, str]]:
+        """Fit only the captured optional report sample in this outgoing view."""
+        if not Config.LOCAL_MODE or not report_content or type(self.llm) is not LLMClient:
+            return messages
+
+        from ..local_runtime.gateway import _input_size, _normalize_payload
+        from ..utils.openai_chat_compat import build_chat_completion_kwargs
+
+        def request_size(value):
+            payload = build_chat_completion_kwargs(
+                model=self.llm.model, messages=value, temperature=0.5, max_tokens=4096,
+            )
+            return _input_size(_normalize_payload(
+                "/v1/chat/completions", payload,
+                max_output_tokens=Config.LOCAL_MAX_OUTPUT_TOKENS,
+                reasoning_effort=Config.LOCAL_REASONING_EFFORT,
+            ))
+
+        limit = Config.LOCAL_MAX_INPUT_CHARS
+        if request_size(messages) <= limit:
+            return messages
+
+        def with_report(prefix):
+            system = CHAT_SYSTEM_PROMPT_TEMPLATE.format(
+                **prompt_values, report_content=prefix + CHAT_REPORT_TRUNCATION_MARKER,
+            )
+            view = list(messages)
+            view[0] = dict(messages[0], content=f"{system}\n\n{language_instruction}")
+            return view
+
+        fixed_size = request_size(with_report(""))
+        if fixed_size > limit:
+            return messages  # Preserve the original gateway refusal/error path.
+        # The normalized recursive character count is additive for this one
+        # string. Reserve the complete marker, then use the largest exact prefix.
+        # For a previously clipped 15,000+marker sample, overflow ensures this
+        # prefix ends before its synthetic marker, so no partial marker survives.
+        fitted = with_report(report_content[:limit - fixed_size])
+        return fitted if request_size(fitted) <= limit else messages
+
     def chat(
         self, 
         message: str,
@@ -1959,19 +2003,22 @@ class ReportAgent:
                 if report and report.markdown_content:
                     report_content = report.markdown_content[:15000]
                     if len(report.markdown_content) > 15000:
-                        report_content += "\n\n... [报告内容已截断] ..."
+                        report_content += CHAT_REPORT_TRUNCATION_MARKER
             except Exception as e:
                 logger.warning(t('report.fetchReportFailed', error=e))
         # Apply the existing context limit to already captured report text too.
         elif len(report_content) > 15000:
-            report_content = report_content[:15000] + "\n\n... [报告内容已截断] ..."
+            report_content = report_content[:15000] + CHAT_REPORT_TRUNCATION_MARKER
         
-        system_prompt = CHAT_SYSTEM_PROMPT_TEMPLATE.format(
+        prompt_values = dict(
             simulation_requirement=self.simulation_requirement,
-            report_content=report_content if report_content else "（暂无报告）",
             tools_description=self._get_tools_description(),
         )
-        system_prompt = f"{system_prompt}\n\n{get_language_instruction()}"
+        language_instruction = get_language_instruction()
+        system_prompt = CHAT_SYSTEM_PROMPT_TEMPLATE.format(
+            **prompt_values, report_content=report_content if report_content else "（暂无报告）",
+        )
+        system_prompt = f"{system_prompt}\n\n{language_instruction}"
 
         # 构建消息
         messages = [{"role": "system", "content": system_prompt}]
@@ -1992,7 +2039,9 @@ class ReportAgent:
         
         for iteration in range(max_iterations):
             response = self.llm.chat(
-                messages=messages,
+                messages=self._fit_local_chat_messages(
+                    messages, report_content, prompt_values, language_instruction,
+                ),
                 temperature=0.5
             )
             
@@ -2034,7 +2083,9 @@ class ReportAgent:
         
         # 达到最大迭代，获取最终响应
         final_response = self.llm.chat(
-            messages=messages,
+            messages=self._fit_local_chat_messages(
+                messages, report_content, prompt_values, language_instruction,
+            ),
             temperature=0.5
         )
         

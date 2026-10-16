@@ -3188,3 +3188,45 @@ renderer checks do not replace browser visual/accessibility verification.
 不安全、不可读或正在变化的记录可能被跳过。列表中的记录不保证存在活动、访谈
 或可创建快照的数据，保存状态也不是实时进程状态。各结果链接携带所选模拟的准确
 ID，进入现有已保存活动、访谈、比较或运行快照页面，由目标页面检查数据可用性。
+
+### Local report-chat excerpt budgeting
+
+For ordinary local chat with the standard `LLMClient`, each direct chat request
+fits the optional saved-report sample to the configured normalized input-character
+budget. Chat still captures the selected report once, starts with its first
+15,000 characters and existing truncation marker, and retains at most ten complete
+historical entries. The current question, full scenario, retained history,
+instructions, tool descriptions and language instruction stay intact.
+
+If a request exceeds that budget, only the outgoing system prompt's report
+sample is reduced to its largest fitting prefix. Any omitted report suffix is
+represented by the complete existing marker `... [报告内容已截断] ...`, including
+when no report characters fit. This does not edit the saved report or visible
+report. A new view is fitted before each of the two possible chat-loop requests
+and the possible final request, using the original captured sample and current
+accumulated messages. Assistant/tool-call text and captured observations are
+preserved, including the existing 1,500-character tool-result limit and response
+instruction. No additional retrieval, direct chat completion or retry is added;
+tools retain their existing internal behavior.
+
+The charge uses the actual client's model and the existing compatibility and
+gateway normalization, including output-token clamping and reasoning settings.
+Cloud requests, custom/subclass clients, absent report context and already-fitting
+requests preserve their existing behavior. If the fixed content plus the honest
+omission marker cannot fit, the original request still reaches the existing
+gateway refusal and chat error path. Large questions, scenarios, history or
+accumulated observations can therefore still fail.
+
+The report sample can omit evidence needed for a question, and later tools are
+not guaranteed to recover it. Character admission is not evidence completeness,
+answer quality, token capacity, HTTP body-size admission, hardware capacity or a
+whole-chat success guarantee. Transport retries, local-only routing and browser
+abort/navigation ownership are unchanged; aborting a browser request does not
+promise stopping server inference.
+
+`backend/tests/test_local_chat_budget.py` contains self-contained synthetic
+regressions through the real standard client, compatibility envelope and gateway
+character guard. It covers report-only fitting and boundaries, accumulated tools,
+fixed-content refusal, report binding, locale/Unicode, actual model settings,
+unchanged bypass behavior and the existing in-memory Flask response path. It
+makes no live-provider or HTTP transport claim.
