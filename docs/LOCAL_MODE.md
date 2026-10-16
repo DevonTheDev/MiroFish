@@ -68,6 +68,14 @@ the 1 MiB HTTP request-body guard, the provider's actual tokenizer/context limit
 output or a fit within the provider's token window. Output caps and retries are
 unchanged.
 
+LLM-generated profiles already use at most the first 3,000 characters of their
+assembled entity context. In local mode, this prefix may be shortened further
+to fit the complete request within `LOCAL_MAX_INPUT_CHARS`, so later facts can
+be omitted. Full entity names, types, summaries and separately serialized
+attributes remain intact. Already-fitting requests are unchanged. If fixed
+content cannot fit, the existing gateway refusals, retries and rule fallback
+still apply; fitting the context does not guarantee a successful model response.
+
 ## Recover from an unknown page address
 
 Once the frontend is loaded, an address that does not match a page shows

@@ -20,7 +20,11 @@ from ..config import Config
 from ..local_runtime import openai_client_options
 from ..utils.logger import get_logger
 from ..utils.locale import get_language_instruction, get_locale, set_locale, t
-from ..utils.openai_chat_compat import create_chat_completion, extract_chat_completion_text
+from ..utils.openai_chat_compat import (
+    build_chat_completion_kwargs,
+    create_chat_completion,
+    extract_chat_completion_text,
+)
 from ..utils.preparation_cancellation import PreparationCancelled
 from ..utils.zep import (
     call_zep_read_with_retry,
@@ -567,6 +571,47 @@ class OasisProfileGenerator:
     def _is_group_entity(self, entity_type: str) -> bool:
         """判断是否是群体/机构类型实体"""
         return entity_type.lower() in self.GROUP_ENTITY_TYPES
+
+    def _fit_local_profile_messages(
+        self, messages: List[Dict[str, str]], context: str,
+        render_context: Callable[[str], str],
+        *, temperature: float,
+    ) -> List[Dict[str, str]]:
+        """Shorten only an existing context prefix, preserving refusal behavior."""
+        if not Config.LOCAL_MODE or not context:
+            return messages
+        try:
+            from ..local_runtime.gateway import _input_size, _normalize_payload
+
+            def request_size(candidate_messages):
+                request = build_chat_completion_kwargs(
+                    model=self.model_name, messages=candidate_messages,
+                    response_format={"type": "json_object"}, temperature=temperature,
+                )
+                return _input_size(_normalize_payload(
+                    "/v1/chat/completions", request,
+                    max_output_tokens=Config.LOCAL_MAX_OUTPUT_TOKENS,
+                    reasoning_effort=Config.LOCAL_REASONING_EFFORT,
+                ))
+
+            limit = Config.LOCAL_MAX_INPUT_CHARS
+            if request_size(messages) <= limit:
+                return messages
+            # A literal empty insertion differs from the legacy absent-context
+            # placeholder. Full entity fields and instructions remain in place.
+            fixed_messages = [messages[0], {"role": "user", "content": render_context("")}]
+            allowance = limit - request_size(fixed_messages)
+            if allowance < 0:
+                return messages
+            prefix = context[:min(3000, allowance)]
+            fitted = [messages[0], {"role": "user", "content": render_context(prefix)}]
+            if request_size(fitted) <= limit:
+                return fitted
+        except Exception:
+            # Invalid normalization or rendering must still reach the existing
+            # completion retries and rule_fallback, not an outer basic_fallback.
+            pass
+        return messages
     
     def _generate_profile_with_llm(
         self,
@@ -588,14 +633,11 @@ class OasisProfileGenerator:
         
         is_individual = self._is_individual_entity(entity_type)
         
-        if is_individual:
-            prompt = self._build_individual_persona_prompt(
-                entity_name, entity_type, entity_summary, entity_attributes, context
-            )
-        else:
-            prompt = self._build_group_persona_prompt(
-                entity_name, entity_type, entity_summary, entity_attributes, context
-            )
+        prompt_builder = (self._build_individual_persona_prompt if is_individual
+                          else self._build_group_persona_prompt)
+        prompt = prompt_builder(
+            entity_name, entity_type, entity_summary, entity_attributes, context
+        )
 
         # 尝试多次生成，直到成功或达到最大重试次数
         max_attempts = 3
@@ -605,15 +647,25 @@ class OasisProfileGenerator:
             recovery = _ProfileCreationOutcome()
             helper_changed_text = False
             try:
+                temperature = 0.7 - (attempt * 0.1)
+                messages = [
+                    {"role": "system", "content": self._get_system_prompt(is_individual)},
+                    {"role": "user", "content": prompt},
+                ]
+                messages = self._fit_local_profile_messages(
+                    messages, context,
+                    lambda prefix: prompt_builder(
+                        entity_name, entity_type, entity_summary, entity_attributes, context,
+                        _context_override=prefix,
+                    ),
+                    temperature=temperature,
+                )
                 response = create_chat_completion(
                     self.client,
                     model=self.model_name,
-                    messages=[
-                        {"role": "system", "content": self._get_system_prompt(is_individual)},
-                        {"role": "user", "content": prompt}
-                    ],
+                    messages=messages,
                     response_format={"type": "json_object"},
-                    temperature=0.7 - (attempt * 0.1),  # 每次重试降低温度
+                    temperature=temperature,  # 每次重试降低温度
                     # 不设置max_tokens，让LLM自由发挥
                 )
                 
@@ -782,12 +834,16 @@ class OasisProfileGenerator:
         entity_type: str,
         entity_summary: str,
         entity_attributes: Dict[str, Any],
-        context: str
+        context: str,
+        *,
+        _context_override: Optional[str] = None,
     ) -> str:
         """构建个人实体的详细人设提示词"""
         
         attrs_str = json.dumps(entity_attributes, ensure_ascii=False) if entity_attributes else "无"
         context_str = context[:3000] if context else "无额外上下文"
+        if _context_override is not None:
+            context_str = _context_override
         
         return f"""为实体生成详细的社交媒体用户人设,最大程度还原已有现实情况。
 
@@ -831,12 +887,16 @@ class OasisProfileGenerator:
         entity_type: str,
         entity_summary: str,
         entity_attributes: Dict[str, Any],
-        context: str
+        context: str,
+        *,
+        _context_override: Optional[str] = None,
     ) -> str:
         """构建群体/机构实体的详细人设提示词"""
         
         attrs_str = json.dumps(entity_attributes, ensure_ascii=False) if entity_attributes else "无"
         context_str = context[:3000] if context else "无额外上下文"
+        if _context_override is not None:
+            context_str = _context_override
         
         return f"""为机构/群体实体生成详细的社交媒体账号设定,最大程度还原已有现实情况。
 
