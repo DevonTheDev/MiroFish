@@ -95,6 +95,26 @@ failures. This does not change outline or report-chat context, tool requirements
 output limits, or the gateway's character guard, and does not guarantee provider
 token fit, complete output, report quality, or whole-report completion.
 
+## Report-outline facts and request limits
+
+Outline planning already samples the first ten retrieved facts. In local mode
+with the standard LLM client, an oversized outline request keeps the largest
+prefix of complete facts that fits `LOCAL_MAX_INPUT_CHARS`. It may omit all
+sampled facts; it never truncates or reorders a retained fact. The full scenario,
+graph statistics, entity-type order, system and language instructions remain in
+the request. Retrieved context and saved data are unchanged.
+
+The check uses the actual client's model-specific JSON completion envelope and
+the gateway's normalized recursive character charge, including dictionary keys
+and nonstring primitive charges. This is neither a token count nor HTTP byte
+size. Already-fitting, cloud, no-fact and custom-client requests retain their
+existing behavior. If the fixed content alone cannot fit, the original request
+still reaches the gateway refusal and the existing generic three-section
+outline fallback. Fitting and completion errors use that same fallback. JSON
+parsing, the explicit response-format capability retry, retrieval and completion
+counts on matching successful paths are unchanged. This does not establish
+provider token fit, report quality or whole-report completion.
+
 ## Recover from an unknown page address
 
 Once the frontend is loaded, an address that does not match a page shows

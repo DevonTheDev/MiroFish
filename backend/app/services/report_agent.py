@@ -1201,21 +1201,25 @@ class ReportAgent:
             progress_callback("planning", 30, t('progress.generatingOutline'))
         
         system_prompt = f"{PLAN_SYSTEM_PROMPT}\n\n{get_language_instruction()}"
-        user_prompt = PLAN_USER_PROMPT_TEMPLATE.format(
+        prompt_values = dict(
             simulation_requirement=self.simulation_requirement,
             total_nodes=context.get('graph_statistics', {}).get('total_nodes', 0),
             total_edges=context.get('graph_statistics', {}).get('total_edges', 0),
             entity_types=list(context.get('graph_statistics', {}).get('entity_types', {}).keys()),
             total_entities=context.get('total_entities', 0),
-            related_facts_json=json.dumps(context.get('related_facts', [])[:10], ensure_ascii=False, indent=2),
+        )
+        related_facts = context.get('related_facts', [])[:10]
+        user_prompt = PLAN_USER_PROMPT_TEMPLATE.format(
+            **prompt_values,
+            related_facts_json=json.dumps(related_facts, ensure_ascii=False, indent=2),
         )
 
         try:
             response = self.llm.chat_json(
-                messages=[
+                messages=self._fit_local_outline_messages([
                     {"role": "system", "content": system_prompt},
                     {"role": "user", "content": user_prompt}
-                ],
+                ], related_facts, prompt_values),
                 temperature=0.3
             )
             
@@ -1255,6 +1259,49 @@ class ReportAgent:
                 ]
             )
     
+    def _fit_local_outline_messages(
+        self, messages: List[Dict[str, str]], related_facts: List[str],
+        prompt_values: Dict[str, Any],
+    ) -> List[Dict[str, str]]:
+        """Keep the largest complete fact prefix admitted by the local guard."""
+        if not Config.LOCAL_MODE or not related_facts or type(self.llm) is not LLMClient:
+            return messages
+
+        from ..local_runtime.gateway import _input_size, _normalize_payload
+        from ..utils.openai_chat_compat import build_chat_completion_kwargs
+
+        def request_size(value):
+            payload = build_chat_completion_kwargs(
+                model=self.llm.model, messages=value, temperature=0.3,
+                max_tokens=4096, response_format={"type": "json_object"},
+            )
+            return _input_size(_normalize_payload(
+                "/v1/chat/completions", payload,
+                max_output_tokens=Config.LOCAL_MAX_OUTPUT_TOKENS,
+                reasoning_effort=Config.LOCAL_REASONING_EFFORT,
+            ))
+
+        limit = Config.LOCAL_MAX_INPUT_CHARS
+        if request_size(messages) <= limit:
+            return messages
+
+        def with_facts(count):
+            view = list(messages)
+            view[1] = dict(messages[1], content=PLAN_USER_PROMPT_TEMPLATE.format(
+                **prompt_values,
+                related_facts_json=json.dumps(related_facts[:count], ensure_ascii=False, indent=2),
+            ))
+            return view
+
+        empty = with_facts(0)
+        if request_size(empty) > limit:
+            return messages  # Preserve the original refusal and outline fallback.
+        for count in range(len(related_facts) - 1, 0, -1):
+            view = with_facts(count)
+            if request_size(view) <= limit:
+                return view
+        return empty
+
     def _fit_local_section_messages(
         self, messages: List[Dict[str, str]], previous_sections: List[str],
         section_title: str, *, temperature: float, max_tokens: int,
