@@ -675,11 +675,12 @@ class SimulationConfigGenerator:
         # 使用配置的上下文截断长度
         context_truncated = context[:self.EVENT_CONFIG_CONTEXT_LENGTH]
         
-        prompt = f"""基于以下模拟需求，生成事件配置。
+        def render_prompt(context_sample):
+            return f"""基于以下模拟需求，生成事件配置。
 
 模拟需求: {simulation_requirement}
 
-{context_truncated}
+{context_sample}
 
 ## 可用实体类型及示例
 {type_info}
@@ -704,9 +705,14 @@ class SimulationConfigGenerator:
     "reasoning": "<简要说明>"
 }}"""
 
+        prompt = render_prompt(context_truncated)
+
         system_prompt = "你是舆论分析专家。返回纯JSON格式。注意 poster_type 必须精确匹配可用实体类型。"
         system_prompt = f"{system_prompt}\n\n{get_language_instruction()}\nIMPORTANT: The 'poster_type' field value MUST be in English PascalCase exactly matching the available entity types. Only 'content', 'narrative_direction', 'hot_topics' and 'reasoning' fields should use the specified language."
 
+        prompt = self._fit_local_event_prompt(
+            prompt, system_prompt, context_truncated, render_prompt,
+        )
         try:
             return self._call_llm_with_retry(prompt, system_prompt)
         except Exception as e:
@@ -718,6 +724,50 @@ class SimulationConfigGenerator:
                 "reasoning": "使用默认配置"
             }
     
+    def _fit_local_event_prompt(
+        self, prompt: str, system_prompt: str, context_sample: str,
+        render_prompt: Callable[[str], str],
+    ) -> str:
+        """Fit only the optional event context within the normalized local request."""
+        if not Config.LOCAL_MODE or type(getattr(self, "client", None)) is not OpenAI:
+            return prompt
+
+        try:
+            from ..local_runtime.gateway import _input_size, _normalize_payload
+            from ..utils.openai_chat_compat import build_chat_completion_kwargs
+
+            def request_size(value):
+                payload = build_chat_completion_kwargs(
+                    model=self.model_name,
+                    messages=[
+                        {"role": "system", "content": system_prompt},
+                        {"role": "user", "content": value},
+                    ],
+                    response_format={"type": "json_object"}, temperature=0.7,
+                )
+                return _input_size(_normalize_payload(
+                    "/v1/chat/completions", payload,
+                    max_output_tokens=Config.LOCAL_MAX_OUTPUT_TOKENS,
+                    reasoning_effort=Config.LOCAL_REASONING_EFFORT,
+                ))
+
+            limit = Config.LOCAL_MAX_INPUT_CHARS
+            if request_size(prompt) <= limit:
+                return prompt
+            fixed_size = request_size(render_prompt(""))
+            if fixed_size > limit:
+                return prompt
+
+            # The original capped sample occurs once as plain message text.
+            # Preserve its markerless prefix semantics, even at zero allowance.
+            fitted = render_prompt(context_sample[:limit - fixed_size])
+            if request_size(fitted) <= limit:
+                return fitted
+        except Exception:
+            # Keep gateway errors, the three attempts and event fallback unchanged.
+            pass
+        return prompt
+
     def _parse_event_config(self, result: Dict[str, Any]) -> EventConfig:
         """解析事件配置结果"""
         return EventConfig(

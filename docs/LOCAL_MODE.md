@@ -3230,3 +3230,19 @@ character guard. It covers report-only fitting and boundaries, accumulated tools
 fixed-content refusal, report binding, locale/Unicode, actual model settings,
 unchanged bypass behavior and the existing in-memory Flask response path. It
 makes no live-provider or HTTP transport claim.
+
+
+### Local simulation event context limits
+
+Event configuration starts with at most 8,000 characters of shared context. For
+the standard local OpenAI client, this optional prefix is shortened further when
+needed to fit the complete normalized request within `LOCAL_MAX_INPUT_CHARS`.
+The full separately supplied simulation requirement, entity types and examples,
+instructions and request options are preserved. Already-fitting requests remain
+unchanged. Cloud and custom/subclass clients keep their existing behavior.
+
+This remains a raw prefix without a truncation marker; it can end mid-sentence,
+omit later document or entity context, or be empty. If the fixed content alone
+exceeds the limit or sizing fails, the original request retains the existing
+gateway refusal, three-attempt retry loop and default-event fallback. This does
+not change time or agent configuration, token limits or model context capacity.
