@@ -136,8 +136,10 @@ def _configuration():
 
     try:
         model, reasoning = Config.LLM_MODEL_NAME, Config.LOCAL_REASONING_EFFORT
-        if (not _text(model, 256) or model != model.strip() or "://" in model
-                or model.lower().endswith((":cloud", "-cloud"))):
+        if not _text(model, 256):
+            return None
+        model = model.strip()
+        if not model or "://" in model or model.lower().endswith((":cloud", "-cloud")):
             return None
         if reasoning is not None and (not _text(reasoning, 64) or reasoning != reasoning.strip()):
             return None
