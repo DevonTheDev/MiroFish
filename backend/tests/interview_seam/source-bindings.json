@@ -1,0 +1,376 @@
+{
+  "format": 1,
+  "status": "SOURCE_ONLY_UNRUN",
+  "dependencies": {
+    "camel-ai": {
+      "version": "0.2.78",
+      "commit": "9a64b19e1eab529173da5f18c230064c564aeb5c"
+    },
+    "camel-oasis": {
+      "version": "0.2.5",
+      "commit": "e97a1d83761605a24a7dc91fa4d4e9defffa7e23"
+    }
+  },
+  "sources": [
+    {
+      "file": "camel__agents__chat_agent.py.txt",
+      "module": "camel.agents.chat_agent",
+      "class": "ChatAgent",
+      "original_path": "camel/agents/chat_agent.py",
+      "source_url": "https://github.com/camel-ai/camel/blob/9a64b19e1eab529173da5f18c230064c564aeb5c/camel/agents/chat_agent.py",
+      "original_sha256": "85d3bb745103c02a516df39732554f45a15ce7ea4a3e5c2ae941b26797b2ea67",
+      "original_git_blob_sha1": "6ef16aecdacfcb7d6cb08ba3ab26ce2f57d41a25",
+      "slice_sha256": "57bb2f369eef52897d09ff0d9aa72ba8707bff4bbf848a98bb1851ed3a718a42",
+      "members": [
+        {
+          "member": "system_message",
+          "start_line": 696,
+          "end_line": 699,
+          "sha256": "0c44baded039d6c5d20183f23a3eac5c237dae858847b7822ee5af453317d4e9"
+        },
+        {
+          "member": "memory",
+          "start_line": 723,
+          "end_line": 726,
+          "sha256": "3c4b778bba6bd8f6db8c3672ef1faa19f26560d84e831a37563901f67650454e"
+        },
+        {
+          "member": "_aget_model_response",
+          "start_line": 2233,
+          "end_line": 2296,
+          "sha256": "c88aa3239907891450394f93184c372c3601218a0f326d82eeb375c1fcf9d968"
+        }
+      ]
+    },
+    {
+      "file": "camel__memories__records.py.txt",
+      "module": "camel.memories.records",
+      "class": "MemoryRecord",
+      "original_path": "camel/memories/records.py",
+      "source_url": "https://github.com/camel-ai/camel/blob/9a64b19e1eab529173da5f18c230064c564aeb5c/camel/memories/records.py",
+      "original_sha256": "ac6ddcf09537193fc1dcf11f21174499a1c33b1ebe42072ac46d8491768aa6b2",
+      "original_git_blob_sha1": "c47fe6d03c4110e1552ce4ddea67ff61c555ba3f",
+      "slice_sha256": "65f8060689912195d2e8d59c9b17698092903428321a992fce778aadd15d51c3",
+      "members": [
+        {
+          "member": "to_openai_message",
+          "start_line": 182,
+          "end_line": 184,
+          "sha256": "7d81c1fc4d86ef45714308e6b8ee2febec6c81edc3fe4dcb64578c51dfbb5c5e"
+        }
+      ]
+    },
+    {
+      "file": "camel__messages__base.py.txt",
+      "module": "camel.messages.base",
+      "class": "BaseMessage",
+      "original_path": "camel/messages/base.py",
+      "source_url": "https://github.com/camel-ai/camel/blob/9a64b19e1eab529173da5f18c230064c564aeb5c/camel/messages/base.py",
+      "original_sha256": "1d6ae85c5be4b440a6efc7d3d6b6fc8982047eefb88867aa09cf62bfb5e52a66",
+      "original_git_blob_sha1": "b55ef48c58d367d0f6a3ba13f8243c4117fbd2a9",
+      "slice_sha256": "ba2ca926c6ec8c656d4e54b64920ef023be973713097976f9289f8e1119d02c5",
+      "members": [
+        {
+          "member": "role_name",
+          "start_line": 78,
+          "end_line": 78,
+          "sha256": "1294a17e2e0d1f5d0bf6801c51b96eb8728b170fc1e2f768ecefd6dd9a3fc132"
+        },
+        {
+          "member": "role_type",
+          "start_line": 79,
+          "end_line": 79,
+          "sha256": "61e98104ae5fce84c3eea9b40b7bbf8e5084ec21f137e722b365247714578699"
+        },
+        {
+          "member": "meta_dict",
+          "start_line": 80,
+          "end_line": 80,
+          "sha256": "8b7836c6ff3dee02ac13fb2a86f8d8613b412a39012fece9ef1c69978fe78145"
+        },
+        {
+          "member": "content",
+          "start_line": 81,
+          "end_line": 81,
+          "sha256": "bc55f528a0e6b207a0802dcdb53a88cfb44c8a89c4a18a5e7562990b09dcd819"
+        },
+        {
+          "member": "video_bytes",
+          "start_line": 83,
+          "end_line": 83,
+          "sha256": "914376167cf02ae6d0bf9ec0cac1f4906baea48f56f6f0ddc915add488ff8361"
+        },
+        {
+          "member": "image_list",
+          "start_line": 84,
+          "end_line": 84,
+          "sha256": "8558fecbe1a5ccc9a9b173e9c608b415473a65ab108b532e4dd593d83f563c1a"
+        },
+        {
+          "member": "image_detail",
+          "start_line": 85,
+          "end_line": 85,
+          "sha256": "8fb6cbd7d634382bcc70bb7fa1aee89045554e17b6c517195a42a7fa091f49bb"
+        },
+        {
+          "member": "video_detail",
+          "start_line": 86,
+          "end_line": 86,
+          "sha256": "a62211946803206f661db48afa848f91162cc9d8163da4f0e889588093f2b039"
+        },
+        {
+          "member": "parsed",
+          "start_line": 87,
+          "end_line": 87,
+          "sha256": "763fa8105fe81d21e3d420986783bdbd6c2edd0d44b4dee080272787da9deed0"
+        },
+        {
+          "member": "make_user_message",
+          "start_line": 89,
+          "end_line": 133,
+          "sha256": "2ff5a923eab32ea8c5cd9d11d146001dc98252c58033a59a5a1374fc9b2698fe"
+        },
+        {
+          "member": "make_assistant_message",
+          "start_line": 135,
+          "end_line": 179,
+          "sha256": "1ee10275f50f55c1b1c63378efd21ada82a9af48c0a88db81293f7f01005ec73"
+        },
+        {
+          "member": "to_openai_message",
+          "start_line": 396,
+          "end_line": 416,
+          "sha256": "3293306578644e112cb6bdf9de2e7126d22b81e099696aac3616879c967eca96"
+        },
+        {
+          "member": "to_openai_system_message",
+          "start_line": 418,
+          "end_line": 425,
+          "sha256": "58b445bbbf577e5347300480bfa27fe021911eaebad71ce95b5b878c98971b6f"
+        },
+        {
+          "member": "to_openai_user_message",
+          "start_line": 427,
+          "end_line": 563,
+          "sha256": "df927b174db7889fa2ba59fa85c638a6ca54cb5af7e51eabe841df332b4e80cc"
+        },
+        {
+          "member": "to_openai_assistant_message",
+          "start_line": 565,
+          "end_line": 583,
+          "sha256": "5e64aca6c990ac39f02c160e67db68f2a1a21bd6b0d7af1857f008f544ba7a7c"
+        }
+      ]
+    },
+    {
+      "file": "camel__models__base_model.py.txt",
+      "module": "camel.models.base_model",
+      "class": "BaseModelBackend",
+      "original_path": "camel/models/base_model.py",
+      "source_url": "https://github.com/camel-ai/camel/blob/9a64b19e1eab529173da5f18c230064c564aeb5c/camel/models/base_model.py",
+      "original_sha256": "6adcbda08668c23b793318b4681ee27c752640efbbf1431f5052cf366d749468",
+      "original_git_blob_sha1": "023f543a1e50427c2af4e98e20950ab56f6a28af",
+      "slice_sha256": "2b2df85edea6aa1bcdbb8b15be4016985375f1bf0eb12c540f764e14cbf5de8a",
+      "members": [
+        {
+          "member": "__init__",
+          "start_line": 99,
+          "end_line": 123,
+          "sha256": "582435b0158569585ebd7b34cd1ea30661a934a5ed5e4e3f9a98b45e6c8beb31"
+        },
+        {
+          "member": "arun",
+          "start_line": 437,
+          "end_line": 487,
+          "sha256": "179fc69a984edd968fff17d81e28ffa295f30e4335b719316f0bfb46caa0e1d4"
+        }
+      ]
+    },
+    {
+      "file": "camel__models__model_manager.py.txt",
+      "module": "camel.models.model_manager",
+      "class": "ModelManager",
+      "original_path": "camel/models/model_manager.py",
+      "source_url": "https://github.com/camel-ai/camel/blob/9a64b19e1eab529173da5f18c230064c564aeb5c/camel/models/model_manager.py",
+      "original_sha256": "967ddb095fd058cdd5e41af02b08e6c4879137ca2322f3c404c307ba7d0c9625",
+      "original_git_blob_sha1": "b55623a4485c88dfa9b2509de8b330664cde2633",
+      "slice_sha256": "8650950c347a871d5f34936b004fe5a99ee21632ffd9df5a01f5b761ba67b085",
+      "members": [
+        {
+          "member": "__init__",
+          "start_line": 66,
+          "end_line": 87,
+          "sha256": "50a77927815f9a23b4f246069a7ac324dc1fd9de62a2582ac443bca6f032fe0b"
+        },
+        {
+          "member": "model_type",
+          "start_line": 89,
+          "end_line": 96,
+          "sha256": "3e9227f23033cc0bcb4c157e6ea4f915197c9bfd938d1967b32eab22d0b08379"
+        },
+        {
+          "member": "round_robin",
+          "start_line": 174,
+          "end_line": 180,
+          "sha256": "415764add7d59e21f6766a20cbfbbb1a5a80814db90caf7249e6d829595091a5"
+        },
+        {
+          "member": "always_first",
+          "start_line": 182,
+          "end_line": 188,
+          "sha256": "42ce91bcb5d665bf64b337c24091913029f78b217b22175a485cf17d9656accc"
+        },
+        {
+          "member": "random_model",
+          "start_line": 190,
+          "end_line": 196,
+          "sha256": "fb19ec65cf2f996f30fd1dcf548db86973ce9a08b8ae255287bac603ea5df854"
+        },
+        {
+          "member": "arun",
+          "start_line": 242,
+          "end_line": 288,
+          "sha256": "3d21b6c8c60dc8037f8a707b953fdd7a3159f3ba25af49c8c7d51ccbec057db2"
+        }
+      ]
+    },
+    {
+      "file": "camel__models__openai_compatible_model.py.txt",
+      "module": "camel.models.openai_compatible_model",
+      "class": "OpenAICompatibleModel",
+      "original_path": "camel/models/openai_compatible_model.py",
+      "source_url": "https://github.com/camel-ai/camel/blob/9a64b19e1eab529173da5f18c230064c564aeb5c/camel/models/openai_compatible_model.py",
+      "original_sha256": "2be02a3b762e945d52e7f638966312fe4136e8b9caea09b6cd50d988f36cce3d",
+      "original_git_blob_sha1": "14f7d8271d5cc08dcdce3e64b72276be419758c8",
+      "slice_sha256": "3d71110b03b8da7a76eb13ab8953a0a918a3a8c989822dd619ac15c0960c46fb",
+      "members": [
+        {
+          "member": "_arun",
+          "start_line": 206,
+          "end_line": 269,
+          "sha256": "4d5f11504bbc541f3ada549dfd00abd46896c0aa84862c0d65f398f0e7f71ac3"
+        },
+        {
+          "member": "_arequest_chat_completion",
+          "start_line": 287,
+          "end_line": 301,
+          "sha256": "2b89c1a4d6f0b95dca05f5a32120f6756fa5e35eb689320af9f59d07473f6610"
+        }
+      ]
+    },
+    {
+      "file": "camel__prompts__base.py.txt",
+      "module": "camel.prompts.base",
+      "class": "TextPrompt",
+      "original_path": "camel/prompts/base.py",
+      "source_url": "https://github.com/camel-ai/camel/blob/9a64b19e1eab529173da5f18c230064c564aeb5c/camel/prompts/base.py",
+      "original_sha256": "cf9b15b9ab772b84cc578c6c70b2dccf3ac7f001c1093c845bf3f813fbae62aa",
+      "original_git_blob_sha1": "10765e61a24681e38fea28ee865ef261737d7e1d",
+      "slice_sha256": "dd2dff154b7ba4320394bc09bdc9d854aa7c5f3135875cc0dd36061af4511173",
+      "members": [
+        {
+          "member": "return_prompt_wrapper",
+          "start_line": 24,
+          "end_line": 69,
+          "sha256": "dfe6becfe188896e72226714f430bc2b75c851808862586e0b19d190b796f474"
+        },
+        {
+          "member": "wrap_prompt_functions",
+          "start_line": 72,
+          "end_line": 88,
+          "sha256": "d1754d1b0074f3563b860c529cb7910dd3d6cc455fef47090fd637e61cf211fa"
+        },
+        {
+          "member": "TextPrompt",
+          "start_line": 91,
+          "end_line": 124,
+          "sha256": "eee121e69453e52d3fbcfac78448313ebb353395ba43058d65c9c071e6bd967d"
+        }
+      ]
+    },
+    {
+      "file": "camel__types__unified_model_type.py.txt",
+      "module": "camel.types.unified_model_type",
+      "class": "UnifiedModelType",
+      "original_path": "camel/types/unified_model_type.py",
+      "source_url": "https://github.com/camel-ai/camel/blob/9a64b19e1eab529173da5f18c230064c564aeb5c/camel/types/unified_model_type.py",
+      "original_sha256": "82cfd6af469caea9fcd648f277ace6fcecc25289767744101f5f905ecbb1571a",
+      "original_git_blob_sha1": "a9d32a36004b5ce19f36d6ef4fd7cb218ae69fbc",
+      "slice_sha256": "09ed734250bbb0b2098e87d23358391b9b674fe4c4eba68b31b1a1582695edae",
+      "members": [
+        {
+          "member": "UnifiedModelType",
+          "start_line": 23,
+          "end_line": 206,
+          "sha256": "1a045eb37006954a98579f863c8f4708aaf054d676c1e8dd24d21d9804b98c54"
+        }
+      ]
+    },
+    {
+      "file": "oasis__environment__env.py.txt",
+      "module": "oasis.environment.env",
+      "class": "OasisEnv",
+      "original_path": "oasis/environment/env.py",
+      "source_url": "https://github.com/camel-ai/oasis/blob/e97a1d83761605a24a7dc91fa4d4e9defffa7e23/oasis/environment/env.py",
+      "original_sha256": "5c5a8202f0d5a7b357f37fa4a6876ae7eb145183308eb45f460d6ec60d3190a6",
+      "original_git_blob_sha1": "4d815c60afedd0ee0bb1193f0df5e229d9ffc9dd",
+      "slice_sha256": "0de27801b1e460caf8e6604a3ee3dc37dcdbdcf76dbae2eb1c2927286b50e53a",
+      "members": [
+        {
+          "member": "_perform_interview_action",
+          "start_line": 130,
+          "end_line": 134,
+          "sha256": "407ffcdfa6a24ea7fc517e1801437591fa46a42d40cc2e14f78957498d0cd840"
+        }
+      ]
+    },
+    {
+      "file": "oasis__social_agent__agent.py.txt",
+      "module": "oasis.social_agent.agent",
+      "class": "SocialAgent",
+      "original_path": "oasis/social_agent/agent.py",
+      "source_url": "https://github.com/camel-ai/oasis/blob/e97a1d83761605a24a7dc91fa4d4e9defffa7e23/oasis/social_agent/agent.py",
+      "original_sha256": "1294936b222aca0f74d377fbaca49018e0e6534ea24c2355e8b667b077c0d217",
+      "original_git_blob_sha1": "5747a5dfd770ca853e70e94ad134a87ff5b4433a",
+      "slice_sha256": "efdf4adf46f9fb4117e4571398f6123627fb7f440fd9991798db140f111249e5",
+      "members": [
+        {
+          "member": "perform_interview",
+          "start_line": 197,
+          "end_line": 249,
+          "sha256": "66901c63a0e99c03056f0323f76f1e54ecb68ae6489c8109dac4016c76f7d97c"
+        }
+      ]
+    },
+    {
+      "file": "oasis__social_platform__config__user.py.txt",
+      "module": "oasis.social_platform.config.user",
+      "class": "UserInfo",
+      "original_path": "oasis/social_platform/config/user.py",
+      "source_url": "https://github.com/camel-ai/oasis/blob/e97a1d83761605a24a7dc91fa4d4e9defffa7e23/oasis/social_platform/config/user.py",
+      "original_sha256": "9ac325d0c8d80a4a440e48604e463c187d8f8d88e41d8fdd65439a02c77b7443",
+      "original_git_blob_sha1": "a36b4253700e73a9e635048519f5712da3c3953e",
+      "slice_sha256": "7ea0fc5f77ce3ab237ff044d6a4c929dca43ea625bc50c5fdd4e0f972007f7cd",
+      "members": [
+        {
+          "member": "UserInfo",
+          "start_line": 22,
+          "end_line": 111,
+          "sha256": "ef49efabac927c341cf5899f219406938a7b7b05960644a775f41f091cbc3566"
+        }
+      ]
+    }
+  ],
+  "licenses": [
+    {
+      "file": "CAMEL-LICENSE",
+      "sha256": "89dd270769b2e641b4c577a2988bb9cd9adb1cb4ba110bf1be42a4cc81da4f69",
+      "git_blob_sha1": "d9056118eb57cf418bf993f1b8f17e46d5e71999"
+    },
+    {
+      "file": "OASIS-LICENSE",
+      "sha256": "950deb34b1341a0ac95236fae92fe247c318c3a83a62c9ebacbe1882530ab1f6",
+      "git_blob_sha1": "c46213dce5875ed087fc9fe3ce329b69d98713ed"
+    }
+  ]
+}

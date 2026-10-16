@@ -1,0 +1,98 @@
+# ========= Copyright 2023-2024 @ CAMEL-AI.org. All Rights Reserved. =========
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+# ========= Copyright 2023-2024 @ CAMEL-AI.org. All Rights Reserved. =========
+
+# MODIFIED: exact selected source members only; imports/class shell omitted or replaced.
+# Fixture substitutions and original bindings are documented in README.md.
+from __future__ import annotations
+
+class BaseModelBackend:
+
+    def __init__(
+        self,
+        model_type: Union[ModelType, str],
+        model_config_dict: Optional[Dict[str, Any]] = None,
+        api_key: Optional[str] = None,
+        url: Optional[str] = None,
+        token_counter: Optional[BaseTokenCounter] = None,
+        timeout: Optional[float] = None,
+        max_retries: int = 3,
+    ) -> None:
+        self.model_type: UnifiedModelType = UnifiedModelType(model_type)
+        if model_config_dict is None:
+            model_config_dict = {}
+        self.model_config_dict = model_config_dict
+        self._api_key = api_key
+        self._url = url
+        self._token_counter = token_counter
+        self._timeout = timeout
+        self._max_retries = max_retries
+        # Initialize logging configuration
+        self._log_enabled = (
+            os.environ.get("CAMEL_MODEL_LOG_ENABLED", "False").lower()
+            == "true"
+        )
+        self._log_dir = os.environ.get("CAMEL_LOG_DIR", "camel_logs")
+
+    @observe()
+    async def arun(
+        self,
+        messages: List[OpenAIMessage],
+        response_format: Optional[Type[BaseModel]] = None,
+        tools: Optional[List[Dict[str, Any]]] = None,
+    ) -> Union[
+        ChatCompletion,
+        AsyncStream[ChatCompletionChunk],
+        AsyncChatCompletionStreamManager[BaseModel],
+    ]:
+        r"""Runs the query to the backend model asynchronously.
+
+        Args:
+            messages (List[OpenAIMessage]): Message list with the chat history
+                in OpenAI API format.
+            response_format (Optional[Type[BaseModel]]): The response format
+                to use for the model. (default: :obj:`None`)
+            tools (Optional[List[Tool]]): The schema of tools to use for the
+                model for this request. Will override the tools specified in
+                the model configuration (but not change the configuration).
+                (default: :obj:`None`)
+
+        Returns:
+            Union[ChatCompletion, AsyncStream[ChatCompletionChunk], Any]:
+                `ChatCompletion` in the non-stream mode,
+                `AsyncStream[ChatCompletionChunk]` in the stream mode, or
+                `AsyncChatCompletionStreamManager[BaseModel]` in the structured
+                stream mode.
+        """
+        # Log the request if logging is enabled
+        log_path = self._log_request(messages)
+
+        if tools is None:
+            tools = self.model_config_dict.get("tools", None)
+        elif not tools:
+            tools = None
+
+        logger.info("Running model: %s", self.model_type)
+        logger.info("Messages: %s", messages)
+        logger.info("Response format: %s", response_format)
+        logger.info("Tools: %s", tools)
+
+        result = await self._arun(messages, response_format, tools)
+        logger.info("Result: %s", result)
+
+        # Log the response if logging is enabled
+        if log_path:
+            self._log_response(log_path, result)
+
+        return result
+

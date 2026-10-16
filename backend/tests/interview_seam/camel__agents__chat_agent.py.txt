@@ -1,0 +1,95 @@
+# ========= Copyright 2023-2024 @ CAMEL-AI.org. All Rights Reserved. =========
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+# ========= Copyright 2023-2024 @ CAMEL-AI.org. All Rights Reserved. =========
+
+# MODIFIED: exact selected source members only; imports/class shell omitted or replaced.
+# Fixture substitutions and original bindings are documented in README.md.
+from __future__ import annotations
+
+class ChatAgent:
+
+    @property
+    def system_message(self) -> Optional[BaseMessage]:
+        r"""Returns the system message for the agent."""
+        return self._system_message
+
+    @property
+    def memory(self) -> AgentMemory:
+        r"""Returns the agent memory."""
+        return self._memory
+
+    @observe()
+    async def _aget_model_response(
+        self,
+        openai_messages: List[OpenAIMessage],
+        num_tokens: int,
+        current_iteration: int = 0,
+        response_format: Optional[Type[BaseModel]] = None,
+        tool_schemas: Optional[List[Dict[str, Any]]] = None,
+        prev_num_openai_messages: int = 0,
+    ) -> ModelResponse:
+        r"""Internal function for agent async step model response."""
+        last_error = None
+
+        for attempt in range(self.retry_attempts):
+            try:
+                response = await self.model_backend.arun(
+                    openai_messages, response_format, tool_schemas or None
+                )
+                if response:
+                    break
+            except RateLimitError as e:
+                last_error = e
+                if attempt < self.retry_attempts - 1:
+                    delay = min(self.retry_delay * (2**attempt), 60.0)
+                    delay = random.uniform(0, delay)  # Add jitter
+                    logger.warning(
+                        f"Rate limit hit (attempt {attempt + 1}"
+                        f"/{self.retry_attempts}). "
+                        f"Retrying in {delay:.1f}s"
+                    )
+                    await asyncio.sleep(delay)
+                else:
+                    logger.error(
+                        f"Rate limit exhausted after "
+                        f"{self.retry_attempts} attempts"
+                    )
+            except Exception:
+                logger.error(
+                    f"Model error: {self.model_backend.model_type}",
+                    exc_info=True,
+                )
+                raise
+        else:
+            # Loop completed without success
+            raise ModelProcessingError(
+                f"Unable to process messages: "
+                f"{str(last_error) if last_error else 'Unknown error'}"
+            )
+
+        # Log success
+        sanitized = self._sanitize_messages_for_logging(
+            openai_messages, prev_num_openai_messages
+        )
+        logger.info(
+            f"Model {self.model_backend.model_type} "
+            f"[{current_iteration}]: {sanitized}"
+        )
+
+        if not isinstance(response, ChatCompletion):
+            raise TypeError(
+                f"Expected ChatCompletion, got {type(response).__name__}"
+            )
+
+        return self._handle_batch_response(response)
+

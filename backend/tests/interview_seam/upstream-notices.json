@@ -1,0 +1,34 @@
+[
+  {
+    "repository": "camel-ai/camel",
+    "commit": "9a64b19e1eab529173da5f18c230064c564aeb5c",
+    "truncated": false,
+    "notice_entries": [],
+    "license_entries": [
+      {
+        "path": "LICENSE",
+        "mode": "100644",
+        "type": "blob",
+        "sha": "d9056118eb57cf418bf993f1b8f17e46d5e71999",
+        "size": 11343,
+        "url": "https://api.github.com/repos/camel-ai/camel/git/blobs/d9056118eb57cf418bf993f1b8f17e46d5e71999"
+      }
+    ]
+  },
+  {
+    "repository": "camel-ai/oasis",
+    "commit": "e97a1d83761605a24a7dc91fa4d4e9defffa7e23",
+    "truncated": false,
+    "notice_entries": [],
+    "license_entries": [
+      {
+        "path": "LICENSE",
+        "mode": "100644",
+        "type": "blob",
+        "sha": "c46213dce5875ed087fc9fe3ce329b69d98713ed",
+        "size": 11344,
+        "url": "https://api.github.com/repos/camel-ai/oasis/git/blobs/c46213dce5875ed087fc9fe3ce329b69d98713ed"
+      }
+    ]
+  }
+]

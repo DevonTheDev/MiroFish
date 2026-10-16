@@ -39,6 +39,12 @@ def make_oasis_environment(**kwargs):
     from oasis.environment.env import OasisEnv
 
     class CheckedOasisEnv(OasisEnv):
+        async def _perform_interview_action(self, agent, interview_prompt):
+            from app.local_runtime.oasis import _local_interview_scope
+
+            with _local_interview_scope(agent, interview_prompt):
+                return await super()._perform_interview_action(agent, interview_prompt)
+
         async def _perform_llm_action(self, agent):
             try:
                 result = await super()._perform_llm_action(agent)
