@@ -658,16 +658,28 @@ class TwitterSimulationRunner:
                     content = post.get("content", "")
                     try:
                         agent = self.env.agent_graph.get_agent(agent_id)
-                        initial_actions[agent] = ManualAction(
-                            action_type=ActionType.CREATE_POST,
-                            action_args={"content": content}
-                        )
+                        if agent in initial_actions:
+                            if not isinstance(initial_actions[agent], list):
+                                initial_actions[agent] = [initial_actions[agent]]
+                            initial_actions[agent].append(ManualAction(
+                                action_type=ActionType.CREATE_POST,
+                                action_args={"content": content}
+                            ))
+                        else:
+                            initial_actions[agent] = ManualAction(
+                                action_type=ActionType.CREATE_POST,
+                                action_args={"content": content}
+                            )
                     except Exception as e:
                         print(f"  警告: 无法为Agent {agent_id}创建初始帖子: {e}")
 
                 if initial_actions:
                     await self.env.step(initial_actions)
-                    print(f"  已发布 {len(initial_actions)} 条初始帖子")
+                    submitted_count = sum(
+                        len(actions) if isinstance(actions, list) else 1
+                        for actions in initial_actions.values()
+                    )
+                    print(f"  已提交 {submitted_count} 条初始发帖动作")
 
             # Only persisted, executed actions count; advance past seeds before round 1.
             actual_actions, last_rowid = fetch_new_actions_from_db(

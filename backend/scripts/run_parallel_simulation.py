@@ -833,10 +833,18 @@ async def run_twitter_simulation(
                 content = post.get("content", "")
                 try:
                     agent = result.env.agent_graph.get_agent(agent_id)
-                    initial_actions[agent] = ManualAction(
-                        action_type=ActionType.CREATE_POST,
-                        action_args={"content": content}
-                    )
+                    if agent in initial_actions:
+                        if not isinstance(initial_actions[agent], list):
+                            initial_actions[agent] = [initial_actions[agent]]
+                        initial_actions[agent].append(ManualAction(
+                            action_type=ActionType.CREATE_POST,
+                            action_args={"content": content}
+                        ))
+                    else:
+                        initial_actions[agent] = ManualAction(
+                            action_type=ActionType.CREATE_POST,
+                            action_args={"content": content}
+                        )
 
                     if action_logger:
                         action_logger.log_action(
@@ -853,7 +861,11 @@ async def run_twitter_simulation(
 
             if initial_actions:
                 await result.env.step(initial_actions)
-                log_info(f"已发布 {len(initial_actions)} 条初始帖子")
+                submitted_count = sum(
+                    len(actions) if isinstance(actions, list) else 1
+                    for actions in initial_actions.values()
+                )
+                log_info(f"已提交 {submitted_count} 条初始发帖动作")
 
         # 记录 round 0 结束
         if action_logger:

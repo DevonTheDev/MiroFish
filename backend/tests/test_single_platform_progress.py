@@ -176,8 +176,15 @@ def test_single_run_completes_monitor_before_interview_wait_with_actual_actions(
     assert events[0]["event_type"] == "simulation_start"
     assert events[0]["total_rounds"] == 3
     actions = [event for event in events if "action_type" in event]
-    seed_count = 1 if platform == "twitter" else 2
+    seed_count = 2
     assert len(actions) == seed_count + 4
+    assert sorted(action["action_args"]["content"] for action in actions
+                  if action["round"] == 0) == ["First seed", "Second seed"]
+    with sqlite3.connect(run.path.parent.parent / f"{platform}_simulation.db") as connection:
+        assert sorted(connection.execute("SELECT user_id, content FROM post").fetchall()) == [
+            (0, "First seed"), (0, "Second seed"),
+        ]
+    assert run.env.steps == 3  # One seed step, then two active model rounds.
     assert [a["round"] for a in actions] == [0] * seed_count + [1, 1, 3, 3]
     assert all(a["agent_name"] == "Alice" for a in actions)
     assert "Unexecuted seed" not in json.dumps(actions)
