@@ -7,6 +7,15 @@
     <p v-if="waiting" role="status">{{ $t('localPlan.waiting') }}</p>
     <p v-else-if="checking" role="status">{{ $t('localPlan.checking') }}</p>
     <p v-if="error" class="planner-error" role="alert">{{ $t(error) }}</p>
+    <div v-if="showStop || stopStatus || stopOutcome" role="status" aria-live="polite" :aria-busy="stopPending || checking" data-testid="local-stop-status">
+      <p v-if="stopOutcome">{{ $t(stopOutcome) }}</p>
+      <p v-if="stopStatus">{{ $t(stopStatus) }}</p>
+      <template v-if="showStop">
+        <p id="local-stop-hint" class="hint">{{ $t('localPlan.stopHint') }}</p>
+        <button type="button" data-testid="stop-local-simulation" :disabled="!canStop" :aria-busy="stopPending"
+          aria-describedby="local-stop-hint" :onClick="stopAction">{{ $t(stopPending ? 'localPlan.stopRequesting' : 'localPlan.stop') }}</button>
+      </template>
+    </div>
     <template v-if="plan?.mode === 'local'">
       <p v-if="limitsValid" class="limits">{{ $t('localPlan.limits', { agents: plan.limits.max_agents, selectable: plan.limits.max_selectable_agents, rounds: plan.limits.max_rounds, concurrency: plan.limits.max_concurrency }) }}</p>
       <p v-else class="planner-error">{{ $t('localPlan.invalidLimits') }}</p>
@@ -94,6 +103,7 @@ const props = defineProps({ plan: Object, checking: Boolean, waiting: Boolean, b
   entities: { type: Array, default: () => [] }, selectedIds: { type: Array, default: () => [] },
   searchQuery: { type: String, default: '' }, selectedOnly: Boolean, searchLimit: Number,
   typeFilter: String, useLlm: Boolean, maxRounds: Number, roundsValid: Boolean, roundsAction: Function, complete: Boolean, cancellationStatus: String,
+  showStop: Boolean, canStop: Boolean, stopPending: Boolean, stopStatus: String, stopOutcome: String, stopAction: Function,
   cancellationBlocked: Boolean, showCancel: Boolean, canCancel: Boolean, cancelRetry: Boolean, cancelAction: Function })
 defineEmits(['refresh', 'load', 'select', 'filter', 'search', 'view', 'clear-filters', 'profile-mode', 'prepare', 'reuse'])
 const types = computed(() => [...new Set(props.entities.map(entity => entity.entity_type))].sort())

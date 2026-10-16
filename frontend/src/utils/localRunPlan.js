@@ -6,9 +6,16 @@ export const validLocalLimits = limits => !!limits && limits.valid === true
   && limits.max_selectable_agents === Math.min(limits.max_agents, 1000)
   && limits.max_catalog_entities <= 1000
 
-export const validLocalPlan = plan => validLocalLimits(plan?.limits)
+export const validLocalOwnership = (plan, simulationId = plan?.simulation_id) => !!plan
+  && plan.mode === 'local' && plan.simulation_id === simulationId
+  && ['created', 'preparing', 'ready', 'running', 'stopping', 'paused', 'stopped', 'completed', 'failed'].includes(plan.status)
   && typeof plan.owner?.busy === 'boolean' && typeof plan.prepared?.available === 'boolean'
   && typeof plan.can_prepare === 'boolean' && typeof plan.can_reuse === 'boolean'
+  && (plan.owner.busy ? ['preparation_busy', 'run_busy', 'updater_busy', 'lifecycle_busy', 'ownership_unavailable', 'graph_busy'].includes(plan.owner.reason_code) : plan.owner.reason_code == null && plan.owner.task_id == null)
+  && (plan.owner.reason_code === 'preparation_busy' ? portableId(plan.owner.task_id) : plan.owner.task_id == null)
+  && (plan.cancellation == null || typeof plan.cancellation.blocked === 'boolean')
+
+export const validLocalPlan = plan => validLocalLimits(plan?.limits) && validLocalOwnership(plan)
 
 // Only an exact backend projection grants cancellation. Legacy task IDs alone
 // never imply that their workers implement cancellation.

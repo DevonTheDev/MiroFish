@@ -21,16 +21,25 @@ const click = async (h, name) => { const button = control(h, name); assert.ok(bu
 const start = h => h.find(node => node.type === 'button' && String(node.props.class).includes('action-btn primary'))
 async function currentPlan(h, data = plan()) {
   pending(h, 'getPreparationPlan').resolve(ok(data)); await settle()
-  pending(h, 'getEnvStatus').resolve(ok({ env_alive: false })); await settle()
-  pending(h, 'getSimulation').resolve(ok({ status: 'created' })); await settle()
+  if (pending(h, 'getEnvStatus')) {
+    pending(h, 'getEnvStatus').resolve(ok({ env_alive: false })); await settle()
+    pending(h, 'getSimulation').resolve(ok({ status: 'created' })); await settle()
+  }
   if (pending(h, 'getPreparationPlan')) { pending(h, 'getPreparationPlan').resolve(ok(data)); await settle() }
 }
 async function planned(h, data = plan()) { await h.mount('/simulation/A'); await currentPlan(h, data) }
-async function observe(h, data) { await h.tick(2000); pending(h, 'getPrepareStatus').resolve(ok(data)); await settle() }
+async function observe(h, data) {
+  await h.tick(2000); pending(h, 'getPrepareStatus').resolve(ok(data)); await settle()
+  if (data.preparation_phase === 'ready' && pending(h, 'getPreparationPlan')) {
+    pending(h, 'getPreparationPlan').resolve(ok(plan({ owner: { busy: false, reason_code: null, task_id: null },
+      prepared: { available: true, info: { profiles_count: 0 } }, can_reuse: true, preparation_task: data,
+      cancellation: { blocked: false, phase: 'ready', task_id: data.task_id, reason_code: null } }))); await settle()
+  }
+}
 function blocked(h) {
   assert.equal(h.state(setupChild).canPrepareLocal, false)
   assert.equal(h.state(setupChild).canReuseLocal, false)
-  assert.equal(start(h).props.disabled, true)
+  assert.ok(!start(h) || start(h).props.disabled, 'Start is absent or disabled while preparation is blocked')
   h.state(setupChild).handleStartSimulation()
   assert.equal(h.router.currentRoute.value.name, 'Simulation')
 }

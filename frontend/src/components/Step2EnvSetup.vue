@@ -19,6 +19,8 @@
         :cancellation-status="cancellationStatus" :cancellation-blocked="cancellationBlocked"
         :show-cancel="showCancelPreparation" :can-cancel="canCancelPreparation" :cancel-retry="cancelRetry"
         :cancel-action="cancelPreparationAction"
+        :show-stop="showLocalStop" :can-stop="canStopLocal" :stop-pending="stopPending"
+        :stop-status="stopFeedback" :stop-outcome="stopOutcome" :stop-action="stopLocalAction"
         @refresh="plannerActions.refresh" @load="plannerActions.load" @select="plannerActions.select"
         @filter="plannerActions.filter" @profile-mode="plannerActions.profileMode"
         @search="plannerActions.search" @view="plannerActions.view" @clear-filters="plannerActions.clearFilters"
@@ -28,6 +30,10 @@
         :can-save="!!presetExport" :can-open="presetCanOpen" :reading="presetReading" :candidate="presetCandidate"
         :error="presetError" :compatibility-error="presetCompatibility.error" :can-apply="presetCanApply"
         :applied="presetApplied" :actions="presetActions" />
+      <div v-if="runtimeMode !== 'cloud' && phase === 0" class="action-group">
+        <button type="button" class="action-btn secondary" data-testid="setup-back"
+          :disabled="!canReturnToProcess" :onClick="plannerActions.back">← {{ $t('step2.backToGraphBuild') }}</button>
+      </div>
       <template v-if="runtimeMode === 'cloud' || phase > 0">
       <!-- Step 01: 模拟实例 -->
       <div class="step-card" :class="{ 'active': phase === 0, 'completed': phase > 0 }">
@@ -548,14 +554,15 @@
 
           <div class="action-group dual">
             <button 
-              class="action-btn secondary"
+              class="action-btn secondary" data-testid="setup-back"
+              :disabled="!canReturnToProcess"
               :onClick="plannerActions.back"
             >
               ← {{ $t('step2.backToGraphBuild') }}
             </button>
             <button 
-              class="action-btn primary"
-              :disabled="phase < 4 || cancellationBlocked || cancelPending || (runtimeMode === 'local' && !localRoundsValid)"
+              class="action-btn primary" data-testid="setup-start"
+              :disabled="!canStartSimulation"
               :onClick="plannerActions.start"
             >
               {{ $t('step2.startSelectedSim') }} ➝
@@ -679,14 +686,15 @@
 </template>
 
 <script setup>
-import { ref, computed, watch, onMounted, onUnmounted, nextTick } from 'vue'
+import { ref, shallowRef, computed, watch, onMounted, onUnmounted, nextTick } from 'vue'
 import { useI18n } from 'vue-i18n'
 import LocalRunPlanner from './LocalRunPlanner.vue'
 import LocalCastPresetPanel from './LocalCastPresetPanel.vue'
 import { LOCAL_CAST_PRESET_MAX_BYTES, parseLocalCastPresetBytes, exportLocalCastPreset, validLocalCastPresetCatalog, acceptCompatibleLocalCastPreset } from '../utils/localCastPreset'
-import { validLocalPlan, validLocalCatalog, validPreparationTask, configuredRounds, validLocalMaximum, effectiveRounds, planningErrorKey } from '../utils/localRunPlan'
+import { validLocalPlan, validLocalOwnership, validLocalCatalog, validPreparationTask, configuredRounds, validLocalMaximum, effectiveRounds, planningErrorKey } from '../utils/localRunPlan'
 import {
   prepareSimulation,
+  stopSimulation,
   cancelPreparation,
   getPreparationPlan,
   previewPreparation,
@@ -700,12 +708,17 @@ const { t } = useI18n()
 const props = defineProps({
   simulationId: String,  // 从父组件传入
   cleanupReady: { type: Boolean, default: true },
+  entryActive: { type: Boolean, default: true },
+  entryOwner: { type: Object, default: null },
+  entrySession: { type: Object, default: null },
+  entryToken: { type: Number, default: 0 },
+  entryMode: { type: String, default: 'unknown' },
   projectData: Object,
   graphData: Object,
   systemLogs: Array
 })
 
-const emit = defineEmits(['go-back', 'next-step', 'add-log', 'update-status', 'runtime-mode'])
+const emit = defineEmits(['go-back', 'next-step', 'add-log', 'update-status', 'runtime-mode', 'setup-admission'])
 
 // State
 const phase = ref(0) // 0: 初始化, 1: 生成人设, 2: 生成配置, 3: 完成
@@ -766,6 +779,9 @@ const planLoading = ref(false)
 const planError = ref('')
 const loadingCast = ref(false)
 const actionPending = ref(false)
+const stopPending = ref(false)
+const stopFeedback = ref('')
+const stopOutcome = ref('')
 const catalogLoaded = ref(false)
 const catalog = ref([])
 // The admitted preview owns the project/graph binding; parent metadata cannot
@@ -807,18 +823,40 @@ const canCancelPreparation = computed(() => showCancelPreparation.value && !canc
 // Pass this captured callback directly to the button. An old rendered handler
 // must not pick up a replacement task through a mutable component event handler.
 const cancelPreparationAction = computed(() => {
-  const context = preparationContext, id = taskId.value
+  const context = preparationContext.value, id = taskId.value
   return () => requestPreparationCancellation(context, id)
 })
 const localLimitsValid = computed(() => validLocalPlan(localPlan.value))
 const waitingForCleanup = computed(() => runtimeMode.value === 'local' && !props.cleanupReady)
-const plannerBusy = computed(() => planLoading.value || loadingCast.value || actionPending.value || cancelPending.value || (phase.value > 0 && phase.value < 4))
-const canPrepareLocal = computed(() => runtimeMode.value === 'local' && props.cleanupReady && localLimitsValid.value
+const plannerBusy = computed(() => !props.entryActive || stopPending.value || planLoading.value || loadingCast.value || actionPending.value || cancelPending.value || (phase.value > 0 && phase.value < 4))
+const canPrepareLocal = computed(() => ownsView(preparationContext.value) && runtimeMode.value === 'local' && props.cleanupReady && localLimitsValid.value
   && !cancellationBlocked.value && !plannerBusy.value && !planError.value && !localPlan.value.owner.busy && localPlan.value.can_prepare && !localPlan.value.prepared.available)
-const canReuseLocal = computed(() => runtimeMode.value === 'local' && props.cleanupReady && localLimitsValid.value
+const canReuseLocal = computed(() => ownsView(preparationContext.value) && runtimeMode.value === 'local' && props.cleanupReady && localLimitsValid.value
   && !cancellationBlocked.value && !plannerBusy.value && !planError.value && !localPlan.value.owner.busy && localPlan.value.can_reuse && localPlan.value.prepared.available)
 const localRoundsValid = computed(() => localLimitsValid.value && validLocalMaximum(localMaxRounds.value, localPlan.value?.limits?.max_rounds))
 const effectiveLocalRounds = computed(() => effectiveRounds(simulationConfig.value, localMaxRounds.value, localPlan.value?.limits?.max_rounds))
+
+// The entry flag only permits observation. Current plan ownership and every
+// in-flight verification still gate setup, Back and Start independently.
+const localAdmission = computed(() => ownsView(preparationContext.value) && props.cleanupReady
+  && runtimeMode.value === 'local' && localLimitsValid.value && !localPlan.value.owner.busy
+  && !planLoading.value && !stopPending.value && !planError.value
+  && !cancellationBlocked.value && !cancelPending.value && !cancelNeedsObservation.value
+  && (localPlan.value.can_prepare || localPlan.value.can_reuse))
+const canReturnToProcess = computed(() => ownsView(preparationContext.value)
+  && (runtimeMode.value === 'cloud' || (localAdmission.value && !plannerBusy.value)))
+const canStartSimulation = computed(() => ownsView(preparationContext.value)
+  && phase.value === 4 && preparationContext.value?.terminal === 'completed'
+  && !cancellationBlocked.value && !cancelPending.value
+  && (runtimeMode.value === 'cloud' || (localAdmission.value && localRoundsValid.value)))
+const showLocalStop = computed(() => ownsView(preparationContext.value) && runtimeMode.value === 'local'
+  && props.cleanupReady && validLocalOwnership(localPlan.value, props.simulationId)
+  && localPlan.value.owner.busy && ['run_busy', 'updater_busy'].includes(localPlan.value.owner.reason_code))
+const canStopLocal = computed(() => showLocalStop.value && !plannerBusy.value && !cancelNeedsObservation.value)
+const stopLocalAction = computed(() => {
+  const context = preparationContext.value, plan = localPlan.value
+  return () => requestLocalStop(context, plan)
+})
 
 // 日志去重：记录上一次输出的关键信息
 let lastLoggedMessage = ''
@@ -831,7 +869,7 @@ const customMaxRounds = ref(40)   // 默认推荐40轮
 
 // Watch stage to update phase
 watch(currentStage, (newStage) => {
-  const context = preparationContext
+  const context = preparationContext.value
   if (!isActive(context) || context.preparedConfirmed || cancellationBlocked.value) return
   if (newStage === '生成Agent人设' || newStage === 'generating_profiles') {
     phase.value = 1
@@ -871,12 +909,14 @@ let configTimer = null
 
 // One identity owns this selection, including A → B → A and its final reads.
 let mounted = false
-let preparationContext = null
+const preparationContext = shallowRef(null)
 const createPreparationContext = id => ({
-  id, controller: new AbortController(), cancelController: new AbortController(), requests: {}, cancelEpoch: 0,
+  id, entryToken: props.entryToken, entryOwner: props.entryOwner, controller: new AbortController(), cancelController: new AbortController(), requests: {}, cancelEpoch: 0,
   terminal: null, preparedConfirmed: false,
 })
-const ownsView = context => !!context && mounted && context === preparationContext && props.simulationId === context.id
+const ownsView = context => !!context && mounted && props.entryActive && context === preparationContext.value
+  && props.simulationId === context.id && props.entryToken === context.entryToken
+  && (!context.entryOwner || (context.entryOwner === props.entryOwner && context.entryOwner.active))
 const isActive = context => ownsView(context) && !context.terminal
 const ownsTask = (context, id) => isActive(context) && taskId.value === id
 
@@ -919,10 +959,12 @@ const finishPreparation = (context, status) => {
   emit('update-status', status)
 }
 
-const replacePreparation = () => {
-  if (preparationContext) { preparationContext.controller.abort(); preparationContext.cancelController.abort() }
+const replacePreparation = (afterStop = false) => {
+  const previous = preparationContext.value
+  if (ownsView(previous)) emit('setup-admission', { simulationId: previous.id, entryToken: previous.entryToken, allowed: false, canStart: false })
+  if (preparationContext.value) { preparationContext.value.controller.abort(); preparationContext.value.cancelController.abort() }
   retirePreset()
-  preparationContext = null
+  preparationContext.value = null
   stopAllPolling()
   preparedDataRecoveryMessage.value = ''
   retryingPreparedData.value = false
@@ -934,6 +976,9 @@ const replacePreparation = () => {
   planError.value = ''
   loadingCast.value = false
   actionPending.value = false
+  stopPending.value = false
+  stopFeedback.value = afterStop ? 'localPlan.stopChecking' : ''
+  stopOutcome.value = afterStop ? ({ accepted: 'localPlan.stopAccepted', pending: 'localPlan.stopPendingResult', refused: 'localPlan.stopRefused', unknown: 'localPlan.stopUnknown' }[afterStop] || '') : ''
   catalogLoaded.value = false
   catalog.value = []
   catalogSnapshot.value = null
@@ -967,11 +1012,13 @@ const replacePreparation = () => {
   lastLoggedProfileCount = 0
   lastLoggedConfigStage = ''
   if (!mounted || !props.simulationId) return
-  preparationContext = createPreparationContext(props.simulationId)
+  preparationContext.value = createPreparationContext(props.simulationId)
   addLog(t('log.step2Init'))
-  const context = preparationContext
+  const context = preparationContext.value
+  context.afterStop = !!afterStop
+  context.stopOutcome = afterStop || null
   plannerActions.value = {
-    refresh: () => { if (ownsView(context) && !plannerBusy.value) replacePreparation() },
+    refresh: () => { if (ownsView(context) && !plannerBusy.value) replacePreparation(context.stopOutcome) },
     load: () => loadLocalCast(context),
     select: (id, checked) => {
       if (!isActive(context) || !canPrepareLocal.value || !catalog.value.some(entity => entity.uuid === id)) return
@@ -1002,7 +1049,7 @@ const replacePreparation = () => {
       localMaxRounds.value = value === '' ? null : Number(value)
     },
     start: () => { if (ownsView(context)) handleStartSimulation() },
-    back: () => { if (ownsView(context)) emit('go-back') },
+    back: () => { if (ownsView(context) && canReturnToProcess.value) emit('go-back') },
     prepare: () => prepareLocal(context, false),
     reuse: () => prepareLocal(context, true),
   }
@@ -1036,7 +1083,7 @@ const presetCompatibility = computed(() => {
   catch (error) { return { preset: null, error: presetErrorKey(error) } }
 })
 const presetCanApply = computed(() => !!presetCompatibility.value.preset && phase.value === 0 && canPrepareLocal.value
-  && isActive(preparationContext))
+  && isActive(preparationContext.value))
 const presetExport = computed(() => {
   if (!presetCatalogReady.value) return null
   try {
@@ -1049,7 +1096,7 @@ const presetExport = computed(() => {
 const presetActions = computed(() => {
   // Read reactive generation as well as capturing the unique context identity.
   plannerGeneration.value
-  const context = preparationContext, epoch = presetEpoch.value, snapshot = catalogSnapshot.value
+  const context = preparationContext.value, epoch = presetEpoch.value, snapshot = catalogSnapshot.value
   const capturedCandidate = presetCandidate.value, capturedExport = presetExport.value
   return {
     open: async event => {
@@ -1133,7 +1180,7 @@ const addLog = (msg) => {
   emit('add-log', msg)
 }
 
-const handlePrepareFailure = (message, context = preparationContext) => {
+const handlePrepareFailure = (message, context = preparationContext.value) => {
   if (!isActive(context)) return
   if (runtimeMode.value === 'local') {
     planError.value = 'localPlan.requestError'
@@ -1150,7 +1197,7 @@ const retryPreparedData = previous => {
   stopAllPolling()
   const context = createPreparationContext(previous.id)
   context.recoveryEligible = true
-  preparationContext = context
+  preparationContext.value = context
   retryingPreparedData.value = true
   phase.value = 2
   currentStage.value = ''
@@ -1160,12 +1207,12 @@ const retryPreparedData = previous => {
   expectedTotal.value = null
   simulationConfig.value = null
   selectedProfile.value = null
-  // The context is not reactive: explicitly replace every cloud action closure.
+  // Explicitly replace every cloud action closure with this new observer.
   // Preserve taskId and both round choices; this does not restart preparation.
   retryPreparedDataAction.value = () => retryPreparedData(context)
   plannerActions.value = {
     start: () => { if (ownsView(context)) handleStartSimulation() },
-    back: () => { if (ownsView(context)) emit('go-back') },
+    back: () => { if (ownsView(context) && canReturnToProcess.value) emit('go-back') },
   }
   emit('update-status', 'processing')
   const observedTaskId = taskId.value
@@ -1200,7 +1247,7 @@ const retryPreparedData = previous => {
 
 // 处理开始模拟按钮点击
 const handleStartSimulation = () => {
-  if (!ownsView(preparationContext) || preparationContext.terminal !== 'completed' || cancellationBlocked.value || cancelPending.value) return
+  if (!canStartSimulation.value) return
   // 构建传递给父组件的参数
   const params = {}
   
@@ -1289,8 +1336,26 @@ const requestPreparationCancellation = async (context, id) => {
   }
 }
 
+// One explicit user action calls the existing endpoint exactly once. Regardless
+// of its outcome, only a new owned plan can release setup admission.
+const requestLocalStop = async (context, plan) => {
+  if (!ownsView(context) || localPlan.value !== plan || !canStopLocal.value) return
+  stopPending.value = true
+  stopFeedback.value = 'localPlan.stopRequesting'
+  stopOutcome.value = ''
+  let outcome = 'unknown'
+  try {
+    const response = await stopSimulation({ simulation_id: context.id }, context.cancelController.signal)
+    outcome = response?.pending === true ? 'pending' : response?.success === true ? 'accepted' : 'refused'
+  } catch {
+    // A missing response says nothing about whether the server accepted Stop.
+  } finally {
+    if (ownsView(context)) replacePreparation(outcome)
+  }
+}
+
 // 自动开始准备模拟
-const startPrepareSimulation = (context = preparationContext, payload = null) => singleFlight(context, 'prepare', async () => {
+const startPrepareSimulation = (context = preparationContext.value, payload = null) => singleFlight(context, 'prepare', async () => {
   if (!payload && runtimeMode.value !== 'cloud') return
   let requestTaskId = taskId.value
   // 标记第一步完成，开始第二步
@@ -1300,11 +1365,23 @@ const startPrepareSimulation = (context = preparationContext, payload = null) =>
   emit('update-status', 'processing')
   
   try {
-    const res = await prepareSimulation(payload || {
+    const request = () => prepareSimulation(payload || {
       simulation_id: context.id,
       use_llm_for_profiles: true,
       parallel_profile_count: 5
     }, context.controller.signal)
+    // A recovered same-entry cloud observer consumes the original attempt or
+    // receipt. Aborted navigation never replays its automatic Prepare mutation.
+    const session = !payload && runtimeMode.value === 'cloud' ? props.entrySession : null
+    if (session && !session.cloudPrepare) {
+      const attempt = {}
+      session.cloudPrepare = attempt // Reserve before any mutation dispatch.
+      attempt.promise = Promise.resolve().then(() => {
+        if (!isActive(context)) throw new Error('Retired cloud preparation entry')
+        return request()
+      })
+    }
+    const res = await (session ? session.cloudPrepare.promise : request())
     if (!ownsTask(context, requestTaskId)) return
     
     if (res.success && res.data) {
@@ -1371,20 +1448,32 @@ const resolvePreparationPlan = context => singleFlight(context, 'plan', async ()
       emit('update-status', 'error')
       return
     }
+    if ((props.entryMode !== 'unknown' && props.entryMode !== plan.mode)
+      || (plan.mode === 'local' && !validLocalOwnership(plan, context.id))) {
+      planError.value = 'localPlan.requestError'; emit('update-status', 'error'); return
+    }
     runtimeMode.value = plan.mode
-    emit('runtime-mode', plan.mode)
+    emit('runtime-mode', { mode: plan.mode, simulationId: context.id, entryToken: context.entryToken })
     if (plan.mode === 'cloud') { startPrepareSimulation(context); return }
     localPlan.value = plan
     if (!observedAfterCleanup || !props.cleanupReady) { context.waitingCleanup = true; return }
     context.waitingCleanup = false
+    if (context.afterStop) stopFeedback.value = !plan.owner.busy && validLocalPlan(plan)
+      && !plan.cancellation?.blocked && (plan.can_prepare || plan.can_reuse) ? 'localPlan.stopVerified' : 'localPlan.stopBlocked'
+    if (plan.owner.busy && plan.owner.reason_code !== 'preparation_busy') {
+      phase.value = 0
+      emit('update-status', 'blocked')
+      return
+    }
     if (!validLocalPlan(plan)) { planError.value = 'localPlan.invalidLimits'; emit('update-status', 'error'); return }
     if (!validLocalMaximum(localMaxRounds.value, plan.limits.max_rounds)) localMaxRounds.value = plan.limits.max_rounds
     if (plan.cancellation?.blocked === true) {
       cancellationBlocked.value = true
       simulationConfig.value = null
     }
+    if (context.afterStop && !plan.owner.busy) { emit('update-status', cancellationBlocked.value ? 'blocked' : 'idle'); return }
     const projectedTask = plan.preparation_task
-    const expectedTaskId = plan.owner?.task_id || plan.cancellation?.task_id
+    const expectedTaskId = plan.owner?.task_id || plan.cancellation?.task_id || projectedTask?.task_id
     if (validPreparationTask(projectedTask, context.id, expectedTaskId)) {
       taskId.value = projectedTask.task_id
       phase.value = 1
@@ -1413,7 +1502,10 @@ const resolvePreparationPlan = context => singleFlight(context, 'plan', async ()
   } catch (error) {
     if (isActive(context)) { planError.value = planningErrorKey(error); emit('update-status', 'error') }
   } finally {
-    if (ownsView(context)) planLoading.value = false
+    if (ownsView(context)) {
+      planLoading.value = false
+      if (context.afterStop && planError.value) stopFeedback.value = 'localPlan.stopUnverified'
+    }
   }
 }).then(() => {
   if (isActive(context) && context.waitingCleanup && props.cleanupReady) return resolvePreparationPlan(context)
@@ -1461,7 +1553,7 @@ const prepareLocal = (context, reuse) => {
   return startPrepareSimulation(context, payload).finally(() => { if (ownsView(context)) actionPending.value = false })
 }
 
-const startPolling = (context = preparationContext) => {
+const startPolling = (context = preparationContext.value) => {
   if (!isActive(context) || pollTimer !== null) return
   pollTimer = setInterval(() => pollPrepareStatus(context), 2000)
 }
@@ -1473,7 +1565,7 @@ const stopPolling = () => {
   }
 }
 
-const startProfilesPolling = (context = preparationContext) => {
+const startProfilesPolling = (context = preparationContext.value) => {
   if (!isActive(context) || profilesTimer !== null) return
   profilesTimer = setInterval(() => fetchProfilesRealtime(context), 3000)
 }
@@ -1485,7 +1577,7 @@ const stopProfilesPolling = () => {
   }
 }
 
-const pollPrepareStatus = (context = preparationContext) => singleFlight(context, 'status', async () => {
+const pollPrepareStatus = (context = preparationContext.value) => singleFlight(context, 'status', async () => {
   const observedTaskId = taskId.value, epoch = context.cancelEpoch
   try {
     const res = await getPrepareStatus({
@@ -1567,7 +1659,7 @@ const pollPrepareStatus = (context = preparationContext) => singleFlight(context
   }
 })
 
-const fetchProfilesRealtime = (context = preparationContext, final = false) => singleFlight(context, 'profiles', async () => {
+const fetchProfilesRealtime = (context = preparationContext.value, final = false) => singleFlight(context, 'profiles', async () => {
   const observedTaskId = taskId.value
   if (cancellationBlocked.value) return
   try {
@@ -1620,7 +1712,7 @@ const fetchProfilesRealtime = (context = preparationContext, final = false) => s
 })
 
 // 配置轮询
-const startConfigPolling = (context = preparationContext) => {
+const startConfigPolling = (context = preparationContext.value) => {
   if (!isActive(context) || cancellationBlocked.value || configTimer !== null) return
   configTimer = setInterval(() => {
     if (context.preparedConfirmed) loadPreparedData(context)
@@ -1635,7 +1727,7 @@ const stopConfigPolling = () => {
   }
 }
 
-const fetchConfigRealtime = (context = preparationContext, final = false) => singleFlight(context, 'config', async () => {
+const fetchConfigRealtime = (context = preparationContext.value, final = false) => singleFlight(context, 'config', async () => {
   const observedTaskId = taskId.value
   if (cancellationBlocked.value) return
   try {
@@ -1706,13 +1798,55 @@ const fetchConfigRealtime = (context = preparationContext, final = false) => sin
   }
 })
 
-const loadPreparedData = (context = preparationContext) => {
-  if (!isActive(context) || cancellationBlocked.value) return Promise.resolve()
+const observeReadyAdmission = async (context, observedTaskId) => {
+  if (runtimeMode.value !== 'local') return true
+  if (!ownsTask(context, observedTaskId) || stopPending.value) return false
+  planLoading.value = true
+  try {
+    const response = await getPreparationPlan(context.id, context.controller.signal)
+    if (!ownsTask(context, observedTaskId) || stopPending.value) return false
+    const plan = response?.data
+    if (response?.success !== true || !validLocalOwnership(plan, context.id) || !validLocalPlan(plan)) throw new Error('Unconfirmed admission')
+    localPlan.value = plan
+    if (plan.cancellation?.blocked) cancellationBlocked.value = true
+    const projection = plan.preparation_task
+    if (projection != null && (!validPreparationTask(projection, context.id, plan.owner.task_id || plan.cancellation?.task_id || projection.task_id)
+      || (observedTaskId && projection.task_id !== observedTaskId))) throw new Error('Changed preparation task')
+    if (plan.owner.busy || cancellationBlocked.value || !plan.can_reuse || !plan.prepared.available) {
+      context.preparedConfirmed = false
+      if (plan.owner.busy && plan.owner.reason_code === 'preparation_busy' && plan.owner.task_id === observedTaskId) {
+        startPolling(context)
+      } else {
+        stopAllPolling()
+        phase.value = 0
+      }
+      emit('update-status', 'blocked')
+      return false
+    }
+    planError.value = ''
+    return true
+  } catch {
+    if (ownsTask(context, observedTaskId)) {
+      planError.value = 'localPlan.requestError'
+      phase.value = 0
+      stopAllPolling()
+      emit('update-status', 'error')
+    }
+    return false
+  } finally {
+    if (ownsView(context)) planLoading.value = false
+  }
+}
+
+const loadPreparedData = (context = preparationContext.value) => {
+  if (!isActive(context) || cancellationBlocked.value || stopPending.value) return Promise.resolve()
   const observedTaskId = taskId.value
   // Retire preview replies synchronously at the authoritative ready handoff.
   context.preparedConfirmed = true
   stopAllPolling()
   return singleFlight(context, 'final', async () => {
+    if (!await observeReadyAdmission(context, observedTaskId)) return
+    if (!ownsTask(context, observedTaskId) || stopPending.value || cancellationBlocked.value) return
     phase.value = 2
     addLog(t('log.loadingExistingConfig'))
 
@@ -1747,9 +1881,10 @@ const loadPreparedData = (context = preparationContext) => {
             addLog(t('log.configSummaryPostsAlt', { count: configState.summary.initial_posts_count }))
           }
 
+          if (runtimeMode.value === 'local' && !localAdmission.value) return
           addLog(t('log.envSetupComplete'))
-          phase.value = 4
           finishPreparation(context, 'completed')
+          phase.value = 4
         } else if (configState.is_generating) {
           addLog(t('log.configGenerating'))
           startConfigPolling(context)
@@ -1774,8 +1909,20 @@ watch(() => props.systemLogs?.length, () => {
   })
 })
 
+watch(() => props.entryActive, active => {
+  if (!active && preparationContext.value) {
+    preparationContext.value.controller.abort()
+    preparationContext.value.cancelController.abort()
+    stopAllPolling()
+  }
+}, { flush: 'sync' })
+watch([canReturnToProcess, canStartSimulation], ([allowed, canStart]) => {
+  if (!ownsView(preparationContext.value)) return
+  emit('setup-admission', { simulationId: preparationContext.value.id, entryToken: preparationContext.value.entryToken, allowed, canStart })
+}, { flush: 'sync' })
+
 watch(() => props.cleanupReady, ready => {
-  const context = preparationContext
+  const context = preparationContext.value
   if (ready && isActive(context) && context.waitingCleanup) {
     const pending = context.requests.plan || Promise.resolve()
     pending.then(() => { if (isActive(context) && context.waitingCleanup) resolvePreparationPlan(context) })
@@ -1793,9 +1940,9 @@ onMounted(() => {
 
 onUnmounted(() => {
   mounted = false
-  if (preparationContext) { preparationContext.controller.abort(); preparationContext.cancelController.abort() }
+  if (preparationContext.value) { preparationContext.value.controller.abort(); preparationContext.value.cancelController.abort() }
   retirePreset()
-  preparationContext = null
+  preparationContext.value = null
   stopAllPolling()
   preparedDataRecoveryMessage.value = ''
   retryingPreparedData.value = false

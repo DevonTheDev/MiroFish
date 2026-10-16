@@ -40,6 +40,8 @@ async function plan(h, id = 'A', data = savedPlan(id)) {
 async function reuse(h) {
   await click(h, 'reuse-preparation')
   pending(h, 'prepareSimulation').resolve(ok({ already_prepared: true })); await settle()
+  // A terminal/reuse reply needs current idle admission before final reads.
+  if (pending(h, 'getPreparationPlan')) { pending(h, 'getPreparationPlan').resolve(ok(savedPlan(h.state(setupChild).simulationId || h.child(setupChild).props.simulationId))); await settle() }
   return pending(h, 'getSimulationProfilesRealtime')
 }
 async function finish(h, rows) {

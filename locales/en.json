@@ -1927,6 +1927,17 @@
     }
   },
   "localPlan": {
+    "stopAccepted": "Stop was acknowledged. Its work and cleanup may still be finishing.",
+    "stopPendingResult": "Stop is still pending.",
+    "stopRefused": "Stop was not accepted.",
+    "stopUnknown": "Could not confirm the Stop result; it may have been accepted.",
+    "stop": "Stop this simulation to continue setup",
+    "stopHint": "This requests Stop for the selected simulation. Setup stays blocked until a fresh status check confirms that its work and cleanup have finished.",
+    "stopRequesting": "Requesting Stop…",
+    "stopChecking": "Checking whether setup can continue…",
+    "stopVerified": "The current status check allows setup to continue. Choose the next setup action.",
+    "stopBlocked": "Setup is still blocked. Refresh the status to check again; Stop may not resolve every cleanup blocker.",
+    "stopUnverified": "Could not verify whether setup can continue. Refresh the status before trying again.",
     "title": "Plan a local simulation",
     "refresh": "Refresh plan",
     "waiting": "Waiting for the previous environment cleanup attempt to finish.",

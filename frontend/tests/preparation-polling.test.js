@@ -6,7 +6,7 @@ import axios from 'axios'
 import vm from 'node:vm'
 import * as localRunPlan from '../src/utils/localRunPlan.js'
 import { parse, compileScript } from '@vue/compiler-sfc'
-import { computed, effectScope, nextTick, reactive, ref, watch } from 'vue'
+import { computed, effectScope, nextTick, reactive, ref, shallowRef, watch } from 'vue'
 
 // Run the complete actual setup script with real Vue effects. Template rendering,
 // HTTP responses and the passage of time are boundaries, not duplicated logic.
@@ -21,7 +21,7 @@ setup += '\n;({phase, taskId, prepareProgress, currentStage, profiles, entityTyp
 const settle = async () => { for (let i = 0; i < 8; i++) { await Promise.resolve(); await nextTick() } }
 const apiNames = ['prepareSimulation', 'getPrepareStatus', 'getSimulationProfilesRealtime', 'getSimulationConfig', 'getSimulationConfigRealtime']
 function harness(simulationId = 'A') {
-  const props = reactive({ simulationId, projectData: {}, graphData: {}, systemLogs: [] })
+  const props = reactive({ simulationId, cleanupReady: true, entryActive: true, entryToken: 0, entryMode: 'unknown', entryOwner: null, entrySession: null, projectData: {}, graphData: {}, systemLogs: [] })
   const scope = effectScope(), intervals = new Map(), mounted = [], unmounted = [], emitted = [], warnings = []
   const requests = Object.fromEntries(apiNames.map(name => [name, []]))
   const api = Object.fromEntries(apiNames.map(name => [name, (...args) => new Promise((resolve, reject) => {
@@ -30,7 +30,7 @@ function harness(simulationId = 'A') {
   })]))
   let nextTimer = 0 // ID zero is a valid timer handle.
   const state = scope.run(() => vm.runInNewContext(setup, {
-    ref, computed, watch, nextTick, AbortController, ...api, ...localRunPlan,
+    ref, shallowRef, computed, watch, nextTick, AbortController, ...api, ...localRunPlan,
     getPreparationPlan: id => Promise.resolve({ success: true, data: { simulation_id: id, mode: 'cloud' } }),
     defineProps: () => props, defineEmits: () => (...args) => emitted.push(args),
     useI18n: () => ({ t: key => key }),

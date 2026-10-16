@@ -27,12 +27,22 @@ export async function settle() {
 // Render actual compiled SFC scripts AND templates through the actual router.
 // Only HTTP, timers, and unrelated view/graph/language boundaries are facades.
 // A custom host avoids a browser dependency without replacing Vue's renderer.
-function renderer() {
-  const node = (type, text = '') => ({ type, text, tagName: type.toUpperCase(), props: {},
+function renderer(historyDocument = null) {
+  const node = (type, text = '') => {
+    const value = { type, text, tagName: type.toUpperCase(), props: {},
     children: [], parent: null, style: {}, listeners: {},
+    ...(historyDocument ? {
+      ownerDocument: historyDocument,
+      contains(target) { for (let current = target; current; current = current.parent) if (current === this) return true; return false },
+      focus() { historyDocument.activeElement = this },
+    } : {}),
+    get isConnected() { if (!historyDocument) return undefined; let current = this; while (current.parent) current = current.parent; return current.type === 'root' || current === historyDocument.body },
     addEventListener(event, callback) { this.listeners[event] = callback },
     removeEventListener(event) { delete this.listeners[event] },
-    setAttribute(key, value) { this.props[key] = value }, removeAttribute(key) { delete this.props[key] } })
+    setAttribute(key, value) { this.props[key] = value }, removeAttribute(key) { delete this.props[key] } }
+    // Native DOM nodes preserve identity when assigned to Vue template refs.
+    return historyDocument ? Vue.markRaw(value) : value
+  }
   const remove = child => {
     if (!child.parent) return
     const index = child.parent.children.indexOf(child)
@@ -47,6 +57,7 @@ function renderer() {
     child.parent = parent
   }
   return Vue.createRenderer({
+    ...(historyDocument ? { querySelector: selector => selector === 'body' ? historyDocument.body : null } : {}),
     createElement: type => node(type), createText: text => node('#text', text),
     createComment: text => node('#comment', text), insert, remove,
     insertStaticContent(content, parent, anchor) {
@@ -62,6 +73,13 @@ function renderer() {
 
 export function build(options = {}) {
   const requests = {}, instances = {}, intervals = new Map(), warnings = []
+  // Opt-in History host support leaves the established route fixtures unchanged.
+  // Home, History and Teleport still use their real compiled templates/actions.
+  const historyDocument = options.historyRoute ? {
+    body: { type: 'body', children: [], parent: null }, activeElement: null,
+    addEventListener() {}, removeEventListener() {},
+  } : null
+  const historyTimeouts = new Map()
   const downloads = options.downloads ?? [], revoked = options.revoked ?? [], objectUrls = new Map()
   const downloadHooks = options.downloadHooks ?? {}, anchors = []
   class DownloadBlob extends Blob {
@@ -107,7 +125,7 @@ export function build(options = {}) {
       return () => Vue.h('graph-boundary')
     } }
   const modules = { vue: options.disableTransitions ? { ...Vue,
-    Transition: { props: ['name', 'mode'], setup(_props, { slots }) { return () => slots.default?.() } },
+    Transition: { props: ['name', 'mode', 'onAfterLeave'], setup(_props, { slots }) { return () => slots.default?.() } },
     TransitionGroup: { props: ['name', 'mode'], setup(_props, { slots }) { return () => slots.default?.() } },
   } : Vue, 'vue-router': { ...Router, createWebHistory: Router.createMemoryHistory },
     'vue-i18n': options.locale ? I18n : { useI18n: () => ({ t: (key, params) => key + (params ? JSON.stringify(params) : ''), tm: () => [] }) } }
@@ -117,6 +135,11 @@ export function build(options = {}) {
     const globals = { AbortController, Blob: DownloadBlob, File: options.fileConstructor ?? File, FormData, TextEncoder, alert: message => warnings.push(['alert', message]), URL: fileUrl, document: fileDocument, console: { warn: (...args) => warnings.push(args), error: (...args) => warnings.push(args) },
       setInterval: (callback, ms) => { const id = nextTimer++; intervals.set(id, { callback, ms }); return id },
       clearInterval: id => intervals.delete(id) }
+    if (options.historyRoute) Object.assign(globals, {
+      setTimeout: (callback, ms) => { const id = nextTimer++; historyTimeouts.set(id, { callback, ms }); return id },
+      clearTimeout: id => historyTimeouts.delete(id),
+      IntersectionObserver: class { observe() {} disconnect() {} },
+    })
     for (const statement of ast.program.body.filter(item => item.type === 'ImportDeclaration').reverse()) {
       const path = statement.source.value
       let dependency = modules[path] ?? (path.includes('/api/') ? api : null)
@@ -172,6 +195,10 @@ export function build(options = {}) {
   components['../components/Step3Simulation.vue'] = component(runChild)
   components['../views/SimulationView.vue'] = component(setupView)
   components['../views/SimulationRunView.vue'] = component(runView)
+  if (options.historyRoute) {
+    components['../components/HistoryDatabase.vue'] = component('components/HistoryDatabase.vue')
+    components['../views/Home.vue'] = component('views/Home.vue')
+  }
   if (options.graphRoute) {
     components['../components/Step1GraphBuild.vue'] = component(graphChild)
     components['../views/MainView.vue'] = component(graphView)
@@ -180,7 +207,7 @@ export function build(options = {}) {
   const router = evaluate(readFileSync(new URL('../../src/router/index.js', import.meta.url), 'utf8'))
   const appSource = readFileSync(new URL('../../src/App.vue', import.meta.url), 'utf8')
   assert.equal(parse(appSource).descriptor.template.content.trim(), '<router-view />')
-  const app = renderer().createApp({ render: () => Vue.h(Router.RouterView) })
+  const app = renderer(historyDocument).createApp({ render: () => Vue.h(Router.RouterView) })
   if (options.assertNoWarnings) app.config.warnHandler = message => warnings.push(['Vue warning', message])
   app.use(router)
   let i18n
@@ -217,7 +244,7 @@ export function build(options = {}) {
     },
     find(predicate) {
       const visit = target => predicate(target) ? target : target.children?.map(visit).find(Boolean)
-      return visit(host)
+      return visit(host) || (historyDocument && visit(historyDocument.body)) || undefined
     },
   }
 }

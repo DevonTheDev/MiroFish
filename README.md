@@ -698,3 +698,11 @@ MiroFish's simulation engine is powered by **[OASIS (Open Agent Social Interacti
    <img alt="666ghj/MiroFish Star History Chart" src="static/image/star-history-light.svg" />
  </picture>
 </a>
+
+## Reopening local simulation setup
+
+Opening a saved local simulation’s **Env Setup**, or refreshing its setup status, leaves the simulation running. The page checks the selected simulation’s current preparation plan before enabling setup actions.
+
+When that plan identifies a running simulation or retained updater, **Stop this simulation to continue setup** requests the existing Stop action once. The page then checks status again. A Stop acknowledgement alone does not unlock setup: active work, unresolved cleanup, uncertain ownership, invalid local limits, or cancellation can keep it blocked. Refresh checks status without retrying Stop. Saved preparation remains available through explicit **Reuse** once admission permits it.
+
+An active preparation keeps its own progress and cancellation controls. Start and Back into graph setup stay gated while ownership or verification blocks admission; Home remains available. Confirmed cloud entry retains its existing cleanup policy.

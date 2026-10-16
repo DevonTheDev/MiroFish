@@ -26,6 +26,8 @@ async function plan(h, id = 'A') {
 async function reuse(h) {
   await click(h, 'reuse-preparation')
   pending(h, 'prepareSimulation').resolve(ok({ already_prepared: true })); await settle()
+  // A terminal/reuse reply needs current idle admission before final reads.
+  if (pending(h, 'getPreparationPlan')) { pending(h, 'getPreparationPlan').resolve(ok(savedPlan(h.state(setupChild).simulationId || h.child(setupChild).props.simulationId))); await settle() }
   return pending(h, 'getSimulationProfilesRealtime')
 }
 const profileData = (names = ['Saved one', 'Saved two']) => ({ profiles: names.map(name => ({ name, entity_type: 'Person' })) })
@@ -52,6 +54,8 @@ for (const outcome of ['rejected', 'unsuccessful', 'missing-data', 'null-data'])
       await h.mount('/simulation/A'); await plan(h)
       stopStatus = watch(() => h.state(setupView).currentStatus, status => statuses.push(status), { flush: 'sync' })
       const request = await reuse(h)
+      const renderedStart = start(h).props.onClick
+      assert.equal(typeof renderedStart, 'function', 'capture the actual rendered Start callback before failure')
       fail(request, outcome); await settle()
       assert.equal(h.calls('getSimulationConfigRealtime').length, 0, 'failed final profiles must not request final config')
       assert.equal(h.state(setupChild).phase, 0)
@@ -59,8 +63,8 @@ for (const outcome of ['rejected', 'unsuccessful', 'missing-data', 'null-data'])
       assert.equal(h.state(setupChild).planError, 'localPlan.requestError')
       assert.equal(h.state(setupChild).localPlan.prepared.available, true)
       assert.equal(request.signal.aborted, true)
-      assert.ok(start(h).props.disabled)
-      start(h).props.onClick(); await settle()
+      assert.ok(!start(h) || start(h).props.disabled, 'Start is absent or disabled after local final-data failure')
+      renderedStart(); await settle()
       assert.equal(h.calls('startSimulation').length, 0)
       assert.equal(h.router.currentRoute.value.name, 'Simulation')
       assert.ok(!JSON.stringify(h.state(setupView).systemLogs).includes('/private/details'))

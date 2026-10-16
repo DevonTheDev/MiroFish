@@ -55,16 +55,23 @@
       <!-- Right Panel: Step2 环境搭建 -->
       <div class="panel-wrapper right" :style="rightPanelStyle">
         <Step2EnvSetup
+          :key="entryGeneration"
           :simulationId="currentSimulationId"
+          :entryActive="entryActive"
+          :entryOwner="entryOwner"
+          :entrySession="entrySession"
+          :entryToken="entryGeneration"
+          :entryMode="runtimeMode"
           :cleanupReady="cleanupReady"
           :projectData="projectData"
           :graphData="graphData"
           :systemLogs="systemLogs"
-          @go-back="handleGoBack"
-          @next-step="handleNextStep"
+          @go-back="viewActions.back"
+          @next-step="viewActions.next"
           @add-log="addLog"
           @update-status="updateStatus"
-          @runtime-mode="updateRuntimeMode"
+          :onRuntimeMode="viewActions.mode"
+          :onSetupAdmission="viewActions.admission"
         />
       </div>
     </main>
@@ -72,8 +79,8 @@
 </template>
 
 <script setup>
-import { ref, computed, watch, onBeforeUnmount } from 'vue'
-import { useRoute, useRouter, onBeforeRouteLeave } from 'vue-router'
+import { ref, shallowRef, computed, watch, onBeforeUnmount } from 'vue'
+import { useRoute, useRouter, onBeforeRouteLeave, onBeforeRouteUpdate } from 'vue-router'
 import GraphPanel from '../components/GraphPanel.vue'
 import Step2EnvSetup from '../components/Step2EnvSetup.vue'
 import { getProject, getGraphData } from '../api/graph'
@@ -102,6 +109,12 @@ const systemLogs = ref([])
 const viewActions = ref({})
 const cleanupReady = ref(false)
 const runtimeMode = ref('unknown')
+const entryGeneration = ref(0)
+const entryActive = ref(false)
+const entryOwner = shallowRef(null)
+const entrySession = shallowRef(null)
+const setupAdmission = ref(false)
+const startAdmission = ref(false)
 const currentStatus = ref('planning') // processing | completed | error
 
 // --- Computed Layout Styles ---
@@ -134,6 +147,7 @@ const ownsView = context => !!context && context.active && context === viewConte
 const retireView = (context = viewContext) => {
   if (!context) return
   context.active = false
+  if (context === viewContext) { entryActive.value = false; setupAdmission.value = false; startAdmission.value = false }
   context.controller.abort()
   context.graphRequest?.controller.abort()
 }
@@ -153,11 +167,26 @@ const updateStatus = (status) => {
   currentStatus.value = status
 }
 
-const updateRuntimeMode = mode => {
-  const context = viewContext
-  if (!ownsView(context) || !['local', 'cloud'].includes(mode)) return
-  runtimeMode.value = mode
-  if (mode === 'cloud' && projectData.value?.graph_id && !context.graphRequest) loadGraph(projectData.value.graph_id, context)
+// Only the exact child selection may establish mode. Unknown/failed reads
+// never select the legacy cloud cleanup policy.
+const updateRuntimeMode = (context, receipt) => {
+  if (!ownsView(context) || receipt?.simulationId !== context.id || receipt.entryToken !== context.token
+    || !['local', 'cloud'].includes(receipt.mode) || context.modeEstablished) return
+  context.modeEstablished = true
+  runtimeMode.value = receipt.mode
+  const observed = () => {
+    if (!ownsView(context)) return
+    cleanupReady.value = true // Entry observation, never proof of idle ownership.
+    loadSimulationData(context)
+  }
+  if (receipt.mode === 'local' || context.resumedMode === receipt.mode) observed()
+  else checkAndStopRunningSimulation(context).then(observed)
+}
+
+const updateSetupAdmission = (context, receipt) => {
+  if (!ownsView(context) || receipt?.simulationId !== context.id || receipt.entryToken !== context.token) return
+  setupAdmission.value = receipt.allowed === true
+  startAdmission.value = receipt.canStart === true
 }
 
 // --- Layout Methods ---
@@ -171,15 +200,17 @@ const toggleMaximize = (target) => {
 
 const handleGoBack = () => {
   const context = viewContext
-  if (!ownsView(context)) return
+  if (!ownsView(context) || !setupAdmission.value) return
   const projectId = projectData.value?.project_id
+  const destination = projectId ? { name: 'Process', params: { projectId } } : '/'
+  context.navigationTarget = router.resolve(destination).fullPath
   retireView(context)
-  router.push(projectId ? { name: 'Process', params: { projectId } } : '/')
+  router.push(destination)
 }
 
 const handleNextStep = (params = {}) => {
   const context = viewContext
-  if (!ownsView(context)) return
+  if (!ownsView(context) || !startAdmission.value) return
   addLog(t('log.enterStep3'), context)
   if (params.maxRounds) {
     addLog(t('log.customRoundsConfig', { rounds: params.maxRounds }), context)
@@ -189,13 +220,14 @@ const handleNextStep = (params = {}) => {
   const routeParams = { name: 'SimulationRun', params: { simulationId: context.id } }
   if (params.maxRounds) routeParams.query = { maxRounds: params.maxRounds }
   // Retire cleanup before navigation can mount a new run of the same simulation.
+  context.navigationTarget = router.resolve(routeParams).fullPath
   retireView(context)
   router.push(routeParams)
 }
 
 // --- Data Logic ---
 
-// Returning from Step 3 keeps the existing graceful-close/force-stop policy.
+// Confirmed cloud entry keeps the existing graceful-close/force-stop policy.
 const checkAndStopRunningSimulation = async (context) => {
   if (!ownsView(context)) return
   try {
@@ -307,9 +339,11 @@ const refreshGraph = () => {
   }
 }
 
-watch(currentSimulationId, id => {
+const initializeView = (id, resumedMode = 'unknown', session = { cloudPrepare: null }) => {
   retireView()
   viewContext = null
+  entryOwner.value = null
+  entrySession.value = session
   viewActions.value = {}
   projectData.value = null
   graphData.value = null
@@ -317,22 +351,60 @@ watch(currentSimulationId, id => {
   systemLogs.value = []
   currentStatus.value = 'planning'
   cleanupReady.value = false
-  runtimeMode.value = 'unknown'
+  runtimeMode.value = resumedMode
+  entryGeneration.value += 1
   if (!id) return
-  const context = { id, active: true, controller: new AbortController(), graphRequest: null }
+  const context = { id, token: entryGeneration.value, active: true, controller: new AbortController(), graphRequest: null, modeEstablished: false, resumedMode, session }
   viewContext = context
-  viewActions.value = { refreshGraph: () => { if (ownsView(context)) refreshGraph() } }
+  entryOwner.value = context
+  entryActive.value = true
+  viewActions.value = {
+    refreshGraph: () => { if (ownsView(context)) refreshGraph() },
+    mode: receipt => updateRuntimeMode(context, receipt),
+    admission: receipt => updateSetupAdmission(context, receipt),
+    back: () => { if (ownsView(context)) handleGoBack() },
+    next: params => { if (ownsView(context)) handleNextStep(params) },
+  }
   addLog(t('log.simViewInit'), context)
-  checkAndStopRunningSimulation(context).then(() => {
-    if (ownsView(context)) {
-      cleanupReady.value = true
-      loadSimulationData(context)
-    }
-  })
-}, { immediate: true, flush: 'sync' })
+}
+watch(currentSimulationId, id => initializeView(id), { immediate: true, flush: 'sync' })
 
-onBeforeRouteLeave(() => retireView())
-onBeforeUnmount(() => retireView())
+// Retire mutation-capable callbacks at the guard boundary, including reused
+// routes. An aborted departure creates a new observer; it never revives actions.
+let departure = null
+const navigationOrder = new WeakMap()
+let latestNavigation = 0
+const beginDeparture = to => {
+  const root = to.redirectedFrom || to
+  if (navigationOrder.has(root) && navigationOrder.get(root) < latestNavigation) return false
+  if (!navigationOrder.has(root)) navigationOrder.set(root, ++latestNavigation)
+  if (departure?.root === root) return departure.allowed ? undefined : false
+  const allowed = viewContext?.navigationTarget === to.fullPath || !['Process', 'SimulationRun'].includes(to.name)
+    || (to.name === 'SimulationRun' ? startAdmission.value : setupAdmission.value)
+  if (viewContext) viewContext.navigationTarget = null
+  departure = { root, context: viewContext, mode: runtimeMode.value, allowed }
+  retireView()
+  if (!allowed) return false
+}
+const recoverEntry = (to, committed = false) => {
+  const pending = departure
+  if (!pending || (pending.root !== (to.redirectedFrom || to)
+    && !(committed && router.currentRoute.value === to))) return
+  if (route.name === 'Simulation' && currentSimulationId.value === route.params.simulationId
+    && pending.context === viewContext && !viewContext?.active) {
+    // A failed departure remains the same entry policy. Renew observers and
+    // action ownership without allowing a local-to-cloud switch or cleanup replay.
+    initializeView(currentSimulationId.value, pending.mode, pending.context.session)
+  }
+  departure = null
+}
+onBeforeRouteLeave(beginDeparture)
+onBeforeRouteUpdate(beginDeparture)
+// Observe query-only and superseding navigation before later guards can hold it.
+const removeBeforeEach = router.beforeEach(beginDeparture)
+const removeAfterEach = router.afterEach((to, _from, failure) => recoverEntry(to, !failure))
+const removeError = router.onError((_error, to) => recoverEntry(to))
+onBeforeUnmount(() => { removeBeforeEach(); removeAfterEach(); removeError(); retireView() })
 </script>
 
 <style scoped>

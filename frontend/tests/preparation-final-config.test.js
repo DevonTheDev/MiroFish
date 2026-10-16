@@ -35,6 +35,8 @@ async function finalConfig(h) {
 async function reuse(h) {
   await click(h, 'reuse-preparation')
   pending(h, 'prepareSimulation').resolve(ok({ already_prepared: true })); await settle()
+  // A terminal/reuse reply needs current idle admission before final reads.
+  if (pending(h, 'getPreparationPlan')) { pending(h, 'getPreparationPlan').resolve(ok(savedPlan(h.state(setupChild).simulationId || h.child(setupChild).props.simulationId))); await settle() }
   return finalConfig(h)
 }
 async function ready(h) {
@@ -52,6 +54,8 @@ for (const outcome of ['missing-data', 'null-data', 'rejected']) {
       await h.mount('/simulation/A'); await plan(h)
       stopStatus = watch(() => h.state(setupView).currentStatus, status => statuses.push(status), { flush: 'sync' })
       const request = await reuse(h)
+      const renderedStart = start(h).props.onClick
+      assert.equal(typeof renderedStart, 'function', 'capture the actual rendered Start callback before failure')
       if (outcome === 'rejected') request.reject(new Error('Synthetic config failure /private/details'))
       else request.resolve(missingConfig(outcome))
       await settle()
@@ -63,8 +67,8 @@ for (const outcome of ['missing-data', 'null-data', 'rejected']) {
       assert.equal(h.state(setupChild).simulationConfig, null)
       assert.equal(request.signal.aborted, true)
       assert.equal(h.intervals.size, 0)
-      assert.ok(start(h).props.disabled)
-      start(h).props.onClick(); await settle()
+      assert.ok(!start(h) || start(h).props.disabled, 'Start is absent or disabled after local final-data failure')
+      renderedStart(); await settle()
       assert.equal(h.calls('startSimulation').length, 0)
       assert.equal(h.router.currentRoute.value.name, 'Simulation')
       assert.ok(!JSON.stringify(h.state(setupView).systemLogs).includes('/private/details'))

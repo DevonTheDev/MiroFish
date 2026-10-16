@@ -9,7 +9,10 @@ export const pending = (h, name) => h.calls(name).findLast(call => !call.settled
 const control = (h, name) => h.find(node => node.props?.['data-testid'] === name)
 const click = async (h, name) => { const button = control(h, name); assert.ok(button, name); assert.ok(!button.props.disabled, name + ' enabled'); button.props.onClick(); await settle() }
 const entities = ['a','b','c'].map(uuid => ({ uuid, name: 'Person ' + uuid, entity_type: 'Person', summary: 'Summary', text_truncated: false }))
-async function cleanup(h) { pending(h, 'getEnvStatus').resolve(ok({ env_alive: false })); await settle(); pending(h, 'getSimulation').resolve(ok({ status: 'created' })); await settle() }
+async function cleanup(h) {
+  // Only confirmed cloud entry performs environment cleanup.
+  if (pending(h, 'getEnvStatus')) { pending(h, 'getEnvStatus').resolve(ok({ env_alive: false })); await settle(); pending(h, 'getSimulation').resolve(ok({ status: 'created' })); await settle() }
+}
 async function planned(h, plan = localPlan()) {
   await h.mount('/simulation/A')
   assert.equal(h.calls('prepareSimulation').length, 0, 'mode is unresolved')
@@ -19,6 +22,7 @@ async function planned(h, plan = localPlan()) {
 }
 async function ready(h, config = { time_config: { total_simulation_hours: 1, minutes_per_round: 30 } }) {
   pending(h, 'prepareSimulation').resolve(ok({ already_prepared: true })); await settle()
+  if (pending(h, 'getPreparationPlan')) { pending(h, 'getPreparationPlan').resolve(ok(h.state(setupChild).localPlan)); await settle() }
   pending(h, 'getSimulationProfilesRealtime').resolve(ok({ profiles: [] })); await settle()
   pending(h, 'getSimulationConfigRealtime').resolve(ok({ status: 'ready', is_generating: false, config_generated: true, config })); await settle()
 }
