@@ -199,10 +199,11 @@ def _unavailable_metrics():
     }
 
 
-def _observations():
+def _observations(*, include_distinct_statistics=True):
     return {
-        "counts": Counter(), "types": Counter(), "rounds": set(),
-        "agents": {platform: set() for platform in _PLATFORMS},
+        "counts": Counter(), "types": Counter(),
+        "rounds": set() if include_distinct_statistics else None,
+        "agents": {platform: set() for platform in _PLATFORMS} if include_distinct_statistics else None,
         "invalid": Counter(), "unknown_invalid": 0,
     }
 
@@ -214,9 +215,9 @@ def _invalid(observations, platform):
         observations["unknown_invalid"] += 1
 
 
-def _read_log(path, platform, *, on_action=None):
+def _read_log(path, platform, *, on_action=None, include_distinct_statistics=True):
     """Read once, returning bounded observations or refusing the whole source."""
-    observations = _observations()
+    observations = _observations(include_distinct_statistics=include_distinct_statistics)
     records = total_bytes = line_number = 0
     with _open_source(path) as stream:
         if os.fstat(stream.fileno()).st_size > MAX_LOG_BYTES:
@@ -262,8 +263,9 @@ def _read_log(path, platform, *, on_action=None):
                 _invalid(observations, affected)
                 continue
             observations["counts"][row_platform] += 1
-            observations["agents"][row_platform].add(agent_id)
-            observations["rounds"].add(round_num)
+            if include_distinct_statistics:
+                observations["agents"][row_platform].add(agent_id)
+                observations["rounds"].add(round_num)
             observations["types"][action_type] += 1
             if len(observations["types"]) > MAX_ACTION_TYPES:
                 raise _SourceTooLarge()
@@ -272,12 +274,14 @@ def _read_log(path, platform, *, on_action=None):
     return observations
 
 
-def _summary(paths, simulation_id, before, *, collector=None):
+def _summary(paths, simulation_id, before, *, collector=None, include_distinct_statistics=True):
     """Apply saved-source admission, optionally collecting admitted action pages.
 
     A collector stages each source independently: a late read/limit failure must
     discard its rows and cursor contribution. Global type refusal clears every
     source. The ordinary comparison path does not create or retain payloads.
+    Page-only callers may omit distinct statistics without changing admission;
+    intentionally uncomputed internal metrics remain None.
     """
     summary, enabled = _context(paths, simulation_id, before)
     status = summary["status"]
@@ -298,7 +302,8 @@ def _summary(paths, simulation_id, before, *, collector=None):
         return summary
 
     metrics = summary["metrics"]
-    types, rounds = Counter(), set()
+    types = Counter()
+    rounds = set() if include_distinct_statistics else None
     readable = False
     global_partial = False
     for source in selected:
@@ -307,8 +312,11 @@ def _summary(paths, simulation_id, before, *, collector=None):
         if collector is not None:
             collector.begin(source)
         try:
-            observations = (_read_log(paths[source], platform) if collector is None else
-                            _read_log(paths[source], platform, on_action=collector.collect))
+            observations = _read_log(
+                paths[source], platform,
+                on_action=collector.collect if collector is not None else None,
+                include_distinct_statistics=include_distinct_statistics,
+            )
         except (OSError, _SourceUnreadable):
             if collector is not None:
                 collector.discard()
@@ -332,7 +340,8 @@ def _summary(paths, simulation_id, before, *, collector=None):
             return summary
         if collector is not None:
             collector.commit()
-        rounds.update(observations["rounds"])
+        if include_distinct_statistics:
+            rounds.update(observations["rounds"])
         covered = [platform] if platform else [
             name for name in _PLATFORMS
             if enabled[name] is True or name in observations["counts"] or name in observations["invalid"]
@@ -350,7 +359,7 @@ def _summary(paths, simulation_id, before, *, collector=None):
             metrics["platforms"][name] = {
                 "availability": "partial" if invalid or unknown_invalid else "complete",
                 "recorded_actions": observations["counts"][name],
-                "active_agents": len(observations["agents"][name]),
+                "active_agents": len(observations["agents"][name]) if include_distinct_statistics else None,
             }
         global_partial = global_partial or bool(observations["invalid"])
 
@@ -362,7 +371,7 @@ def _summary(paths, simulation_id, before, *, collector=None):
     if readable:
         summary["availability"] = "partial" if global_partial else "complete"
         metrics["recorded_actions"] = sum(value["recorded_actions"] or 0 for value in metrics["platforms"].values())
-        metrics["rounds_with_actions"] = len(rounds)
+        metrics["rounds_with_actions"] = len(rounds) if include_distinct_statistics else None
         metrics["action_types"] = [{"action_type": name, "count": types[name]} for name in sorted(types)]
     return summary
 

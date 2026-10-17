@@ -266,7 +266,7 @@ def test_committed_and_staged_buckets_stay_bounded_when_second_source_overflows_
                 raise OSError("PRIVATE_SECOND_SOURCE_FAILURE")
             return self.stream.readline(maximum)
 
-    def observed_read(source, platform, *, on_action=None):
+    def observed_read(source, platform, *, on_action=None, include_distinct_statistics=True):
         collector = on_action.__self__
         def observed_collect(*args):
             nonlocal largest_committed, largest_staged
@@ -274,7 +274,8 @@ def test_committed_and_staged_buckets_stay_bounded_when_second_source_overflows_
             largest_committed = max(largest_committed, len(collector.rounds))
             largest_staged = max(largest_staged, len(collector.staged_rounds))
             assert len(collector.rounds) <= 1000 and len(collector.staged_rounds) <= 1000
-        return original_read(source, platform, on_action=observed_collect)
+        return original_read(source, platform, on_action=observed_collect,
+                             include_distinct_statistics=include_distinct_statistics)
 
     monkeypatch.setattr(shared, "_open_source", lambda source: BrokenStream(original_open(source)) if str(source) == str(path) else original_open(source))
     monkeypatch.setattr(shared, "_read_log", observed_read)

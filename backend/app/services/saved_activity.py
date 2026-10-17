@@ -248,7 +248,8 @@ def read_saved_activity(simulation_root, run_root, simulation_id, *, platform=No
         if revision is not None and revision != source_revision:
             raise saved.ComparisonError("sources_changed", "Saved files changed. Refresh and try again.", 409)
         collector = _PageCollector(filters, offset, limit)
-        summary = saved._summary(paths, simulation_id, before, collector=collector)
+        summary = saved._summary(paths, simulation_id, before, collector=collector,
+                                 include_distinct_statistics=False)
         platform_availability = {name: value["availability"] for name, value in summary["metrics"]["platforms"].items()}
         availability = platform_availability[platform] if platform else summary["availability"]
         if availability == "unavailable":
