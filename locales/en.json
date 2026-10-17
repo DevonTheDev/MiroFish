@@ -974,6 +974,7 @@
     }
   },
   "savedActivity": {
+    "openReferencedPost": "Open referenced saved post",
     "title": "Saved activity",
     "historyEntry": "Explore saved activity",
     "scope": "Explore the latest saved run for this simulation ID. Restarting replaces its saved files; previous attempts are not archived here.",

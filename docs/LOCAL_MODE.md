@@ -1696,6 +1696,19 @@ offset is at most 500,000, decimal ID/round filters accept at most 64 digits, an
 action-type filter accepts at most 256 characters. Later pages require the accepted
 revision. The existing live `/actions` endpoint retains its previous behavior.
 
+Expanded LIKE_POST, DISLIKE_POST and CREATE_COMMENT details offer **Open referenced
+saved post** when their own `action_args.post_id` is a nonnegative signed64 integer
+or canonical decimal string. This page-only `referenced_post_id` response field
+is a decimal string or null, preserving IDs above JavaScript’s safe-integer limit.
+Booleans, floats, malformed strings, other actions and unrelated ID fields remain
+unlinked. Failed or unknown attempts may still carry a reference. The link uses
+the accepted simulation and row platform and reads that exact ID from the latest
+saved database. Missing/unavailable posts remain explicit; activity revisions do
+not create a historical snapshot or cross-reader atomicity. Version-1 page downloads omit
+only this derived live-page field from copied rows, preserving their existing
+file schema and ability to reopen. The separate all-actions export and metrics
+also keep their schemas.
+
 The saved-reader file/path and log budgets described below also apply here.
 Retained encoded action-page data is limited to 2 MiB and the JSON response to
 4 MiB. An oversized response is refused rather than truncated; choose a smaller

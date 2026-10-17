@@ -20,12 +20,12 @@ test('actual production saved reader and live export expose a local reopening en
   view.requests.calls.getSavedActivity[0].resolve(ok(data)); await flush()
   assert.ok(view.byId('results'), 'Actual production observation must pass the live view validator')
   await view.click('download')
-  assert.equal(await view.downloads[0].blob.text(), JSON.stringify({ format_version: 1, ...data }, null, 2) + '\n')
+  assert.equal(await view.downloads[0].blob.text(), JSON.stringify({ format_version: 1, ...data, actions: data.actions.map(({ referenced_post_id, ...row }) => row) }, null, 2) + '\n')
   assert.ok(view.byId('open-activity-files'), 'The live saved activity page must expose reopening of its exported file')
 })
 
 const observations = fixture.observations
-const page = name => ({ format_version: 1, ...observations[name] })
+const page = name => ({ format_version: 1, ...observations[name], actions: observations[name].actions.map(({ referenced_post_id, ...row }) => row) })
 const event = () => ({ button: 0, preventDefault() {}, stopPropagation() {} })
 const rowIds = view => view.all(node => String(node.props['data-testid'] ?? '').startsWith('action-row-'))
   .map(node => node.props['data-testid'].slice('action-row-'.length))

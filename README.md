@@ -415,6 +415,12 @@ It distinguishes missing or partial logs from a complete zero-match result and
 requires Refresh if files change between pages. See the
 [saved activity guide](docs/LOCAL_MODE.md#explore-latest-saved-activity).
 
+In an expanded LIKE_POST, DISLIKE_POST or CREATE_COMMENT record, **Open referenced
+saved post** opens the exact recorded post ID on its recorded platform when that
+reference is valid. Failed and unknown attempts can also reference a post. The
+destination reads the latest saved database and reports missing or unavailable
+posts; it does not establish a historical snapshot or that the action succeeded.
+
 Choose **Download all saved actions JSON** from an accepted terminal observation
 to save all admitted actions in its observed source set, regardless of the page
 or filters. It reads each selected log once and refuses the entire download if

@@ -82,7 +82,7 @@
               <td>{{ t(`comparison.platforms.${action.platform}`) }}</td><td>{{ action.round_num }}</td>
               <td><span>{{ action.agent_id }}</span><span v-if="action.agent_name !== null" class="agent-name">{{ action.agent_name }}</span></td>
               <td>{{ action.action_type }}</td><td>{{ action.timestamp ?? '—' }}</td><td>{{ t(`savedActivity.outcomes.${action.success === true ? 'success' : action.success === false ? 'failed' : 'unknown'}`) }}</td>
-              <td><template v-if="action.match_preview !== null"><p class="note">{{ t('savedActivity.matchPreview') }}</p><pre :data-testid="`match-preview-${action.record_id}`">{{ action.match_preview }}</pre></template><details><summary>{{ t('savedActivity.details') }}</summary><p class="record-id">{{ action.record_id }}</p><pre>{{ action.details_json }}</pre></details></td>
+              <td><template v-if="action.match_preview !== null"><p class="note">{{ t('savedActivity.matchPreview') }}</p><pre :data-testid="`match-preview-${action.record_id}`">{{ action.match_preview }}</pre></template><details><summary>{{ t('savedActivity.details') }}</summary><p class="record-id">{{ action.record_id }}</p><pre>{{ action.details_json }}</pre><button v-if="acceptedCurrent && action.referenced_post_id !== null" type="button" :data-testid="`referenced-post-${action.record_id}`" :onClick="referencedPostHandler(result, action)">{{ t('savedActivity.openReferencedPost') }}</button></details></td>
             </tr></tbody>
           </table>
         </div>
@@ -118,6 +118,11 @@ const statuses = ['idle', 'created', 'preparing', 'ready', 'starting', 'running'
 const warningCodes = ['config_unavailable', 'run_state_unavailable', 'run_not_terminal', 'partial_run', 'platform_log_missing', 'platform_not_configured', 'invalid_records', 'source_unreadable', 'source_too_large', 'no_action_logs']
 const errorCodes = ['invalid_selection', 'invalid_filters', 'invalid_pagination', 'invalid_revision', 'revision_required', 'unsafe_path', 'simulation_not_found', 'simulation_unreadable', 'simulation_active', 'sources_changed', 'response_too_large']
 const revisionPattern = /^[a-f0-9]{64}$/
+const referencedPostActions = ['LIKE_POST', 'DISLIKE_POST', 'CREATE_COMMENT']
+const maxPostId = '9223372036854775807'
+function validPostId(value) {
+  return typeof value === 'string' && value.length <= 19 && /0|[1-9][0-9]*/.exec(value)?.[0] === value && (value.length < 19 || value <= maxPostId)
+}
 const exportBusy = ref(false), exportError = ref(''), exportStatus = ref(''), exportCoverage = ref(null)
 const exportErrorCodes = ['invalid_selection', 'invalid_filters', 'invalid_revision', 'revision_required', 'unsafe_path', 'simulation_not_found', 'simulation_unreadable', 'simulation_active', 'run_not_terminal', 'sources_changed', 'export_too_large', 'export_incomplete', 'invalid_response', 'unsupported_reader', 'timeout']
 const result = ref(null), loading = ref(false), error = ref(''), dirty = ref(false)
@@ -213,7 +218,8 @@ function validResponse(data, selected) {
     const previewValid = selected.filters.q === null ? action.match_preview === null : typeof action.match_preview === 'string' && [...action.match_preview].length >= 1 && [...action.match_preview].length <= 240
     // Content matching (including full Unicode casefold) belongs to the reader;
     // validate its derived envelope without treating q/case/outcome as row keys.
-    return previewValid && (selected.filters.outcome === null || outcome === selected.filters.outcome) && platforms.includes(action.platform) && exactInteger(action.round_num) && exactInteger(action.agent_id) && optionalText(action.agent_name) && optionalText(action.timestamp) && typeof action.action_type === 'string' && (action.success === true || action.success === false || action.success === null) && typeof action.details_json === 'string' && exactFilterKeys.every(key => selected.filters[key] === null || action[key] === selected.filters[key])
+    const referenceValid = Object.prototype.hasOwnProperty.call(action, 'referenced_post_id') && (action.referenced_post_id === null || referencedPostActions.includes(action.action_type) && validPostId(action.referenced_post_id))
+    return referenceValid && previewValid && (selected.filters.outcome === null || outcome === selected.filters.outcome) && platforms.includes(action.platform) && exactInteger(action.round_num) && exactInteger(action.agent_id) && optionalText(action.agent_name) && optionalText(action.timestamp) && typeof action.action_type === 'string' && (action.success === true || action.success === false || action.success === null) && typeof action.details_json === 'string' && exactFilterKeys.every(key => selected.filters[key] === null || action[key] === selected.filters[key])
   })
 }
 async function load() {
@@ -249,7 +255,7 @@ async function load() {
 }
 function editDraft(key, value) {
   dirty.value = true
-  cancelPendingAgentEntry()
+  cancelPendingEntry()
   retire()
   draft.value = { ...draft.value, [key]: value }
 }
@@ -273,6 +279,7 @@ async function navigateSelected(selected) {
   }
 }
 function applyFilters() {
+  cancelPendingEntry()
   retire()
   try {
     const selected = { simulation_id: simulationId.value, filters: filters(draft.value), offset: 0, limit: pageNumber(draft.value.limit, 50, 1, 100), revision: observedRevision }
@@ -280,6 +287,7 @@ function applyFilters() {
   } catch (cause) { error.value = cause.selectionCode ?? 'invalid_filters' }
 }
 function refresh() {
+  cancelPendingEntry()
   let selected
   try { selected = selection() } catch {
     // A malformed page/revision can be recovered without weakening filter checks.
@@ -292,8 +300,8 @@ function refresh() {
 const acceptedCurrent = computed(() => !!result.value && !dirty.value && !loading.value && !!activeRequest && owns(activeRequest))
 const canDownloadAll = computed(() => acceptedCurrent.value && !pendingNavigation && ['completed', 'stopped', 'failed'].includes(result.value.context.status))
 const roundsLocation = computed(() => ({ name: 'SavedActivityRounds', params: { simulationId: result.value?.simulation_id }, query: { ...(result.value?.filters.platform ? { platform: result.value.filters.platform } : {}), revision: result.value?.source_revision } }))
-function cancelPendingAgentEntry() {
-  if (pendingNavigation?.kind !== 'agents-entry' || route.fullPath === pendingNavigation.path) return
+function cancelPendingEntry() {
+  if (!['agents-entry', 'post-entry'].includes(pendingNavigation?.kind) || route.fullPath === pendingNavigation.path) return
   pendingNavigation.retired = true; pendingNavigation = null
   // A draft edit cancels the older guarded entry without applying the draft.
   void router.replace(route.fullPath).catch(() => {})
@@ -314,6 +322,28 @@ function agentsEntryHandler(saved) {
     } finally { if (pendingNavigation === navigation) pendingNavigation = null }
   }
 }
+function referencedPostHandler(saved, action) {
+  const owner = { saved, action, request: activeRequest, lifetime: routeLifetime, path: route.fullPath,
+    revision: saved.source_revision, simulationId: saved.simulation_id, recordId: action.record_id,
+    actionType: action.action_type, platform: action.platform, postId: action.referenced_post_id }
+  return async () => {
+    if (disposed || route.name !== 'SavedActivity' || result.value !== owner.saved || activeRequest !== owner.request || routeLifetime !== owner.lifetime || route.fullPath !== owner.path || !acceptedCurrent.value || !owns(owner.request)) return
+    if (!owner.saved.actions.includes(owner.action) || owner.saved.simulation_id !== owner.simulationId || simulationId.value !== owner.simulationId || owner.saved.source_revision !== owner.revision || owner.action.record_id !== owner.recordId || owner.action.action_type !== owner.actionType || owner.action.platform !== owner.platform || owner.action.referenced_post_id !== owner.postId) return
+    if (!platforms.includes(owner.platform) || !referencedPostActions.includes(owner.actionType) || !validPostId(owner.postId)) return
+    const target = { name: 'SavedPosts', params: { simulationId: owner.simulationId }, query: { platform: owner.platform, post_id: owner.postId } }
+    // Retire the accepted result before dispatch so this captured click is one-use.
+    retire(); acknowledgement = null
+    const navigation = { path: router.resolve(target).fullPath, fromPath: owner.path, lifetime: routeLifetime, kind: 'post-entry', retired: false }
+    pendingNavigation = navigation
+    const ownsNavigation = () => !disposed && pendingNavigation === navigation && !navigation.retired && routeLifetime === navigation.lifetime && route.name === 'SavedActivity' && route.fullPath === navigation.fromPath
+    try {
+      await router.push(target)
+      if (ownsNavigation()) error.value = 'generic'
+    } catch {
+      if (ownsNavigation()) error.value = 'generic'
+    } finally { if (pendingNavigation === navigation) pendingNavigation = null }
+  }
+}
 const canPrevious = computed(() => !!result.value && !dirty.value && !loading.value && result.value.offset > 0)
 const canNext = computed(() => !!result.value && !dirty.value && !loading.value && result.value.has_more && result.value.offset + result.value.limit <= 500000)
 function goPage(offset) {
@@ -324,7 +354,10 @@ function downloadPage() {
   if (!result.value || dirty.value || loading.value || !activeRequest || !owns(activeRequest)) return
   revokeDownload()
   const saved = result.value
-  downloadUrl = URL.createObjectURL(new Blob([JSON.stringify({ format_version: 1, ...saved }, null, 2) + '\n'], { type: 'application/json;charset=utf-8' }))
+  // Version-1 files keep their existing schema; this live-page projection is
+  // omitted from detached row copies without changing the accepted response.
+  const actions = saved.actions.map(({ referenced_post_id, ...record }) => record)
+  downloadUrl = URL.createObjectURL(new Blob([JSON.stringify({ format_version: 1, ...saved, actions }, null, 2) + '\n'], { type: 'application/json;charset=utf-8' }))
   const link = document.createElement('a')
   link.href = downloadUrl; link.download = `${saved.simulation_id}-saved-activity-page-${saved.offset}.json`
   document.body.appendChild(link); link.click(); link.remove()
@@ -407,7 +440,7 @@ watch(() => route.fullPath, () => {
   if (navigation?.path === route.fullPath && navigation.retired) return
   retire(); syncDraft(); load()
 }, { immediate: true, flush: 'sync' })
-onBeforeUnmount(() => { disposed = true; acknowledgement = null; cancelPendingAgentEntry(); retire(); pendingNavigation = null })
+onBeforeUnmount(() => { disposed = true; acknowledgement = null; cancelPendingEntry(); retire(); pendingNavigation = null })
 </script>
 
 <style scoped>

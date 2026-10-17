@@ -4,7 +4,7 @@ import { mountSavedActivity, deferredApi, flush, ok } from './helpers/saved-acti
 
 const revision = 'a'.repeat(64), nextRevision = 'b'.repeat(64)
 const defaults = { platform: null, agent_id: null, round_num: null, action_type: null, q: null, case_sensitive: false, outcome: null }
-const row = (overrides = {}) => ({ record_id: 'twitter:1', platform: 'twitter', round_num: '0', agent_id: '900719925474099312345', agent_name: 'Saved agent', timestamp: null, action_type: 'POST', success: false, details_json: '{"result":{"text":"Straße <img src=x onerror=alert(1)>"}}', match_preview: null, ...overrides })
+const row = (overrides = {}) => ({ record_id: 'twitter:1', platform: 'twitter', round_num: '0', agent_id: '900719925474099312345', agent_name: 'Saved agent', timestamp: null, action_type: 'POST', success: false, referenced_post_id: null, details_json: '{"result":{"text":"Straße <img src=x onerror=alert(1)>"}}', match_preview: null, ...overrides })
 const activity = (overrides = {}) => ({ simulation_id: 'sim_A', source_revision: revision, observed_at: '2026-10-03T09:00:00Z', context: { status: 'completed', created_at: null, updated_at: null, started_at: null, completed_at: null, requested_rounds: '20', last_saved_round: '0' }, availability: 'complete', platform_availability: { twitter: 'complete', reddit: 'unavailable' }, warnings: [], filters: { ...defaults }, order: 'source_record', offset: 0, limit: 50, returned_count: 1, matched_count: 1, has_more: false, actions: [row()], ...overrides })
 async function setup(t, query = '', locale = 'en') {
   const d = deferredApi(), h = await mountSavedActivity({ api: d.api, initialPath: '/simulation/sim_A/activity' + (query ? '?' + query : ''), locale })
@@ -49,7 +49,9 @@ test('bilingual phrase, case and saved outcome controls apply with exact filters
       assert.match(h.text(), /first matching.*240|240.*first matching/i)
     }
     await h.click('download')
-    assert.deepEqual(JSON.parse(await h.downloads[0].blob.text()), { format_version: 1, ...dataFor(call, { actions: [row({ match_preview: preview })] }) })
+    const saved = dataFor(call, { actions: [row({ match_preview: preview })] })
+    const actions = saved.actions.map(({ referenced_post_id, ...record }) => record)
+    assert.deepEqual(JSON.parse(await h.downloads[0].blob.text()), { format_version: 1, ...saved, actions })
   }
 })
 

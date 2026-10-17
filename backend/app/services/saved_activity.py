@@ -110,6 +110,23 @@ def _source_revision(simulation_id, before):
     return hashlib.sha256(_json([_REVISION_VERSION, simulation_id, before]).encode("ascii")).hexdigest()
 
 
+def _referenced_post_id(row):
+    """Project only an explicit supported attempt's exact signed64 post key."""
+    if row["action_type"] not in ("LIKE_POST", "DISLIKE_POST", "CREATE_COMMENT"):
+        return None
+    args = row.get("action_args")
+    if not isinstance(args, dict):
+        return None
+    value = args.get("post_id")
+    if type(value) is int:
+        return str(value) if 0 <= value <= 9223372036854775807 else None
+    if (isinstance(value, str) and 1 <= len(value) <= 19
+            and re.fullmatch(r"0|[1-9][0-9]*", value) is not None
+            and (len(value) < 19 or value <= "9223372036854775807")):
+        return value
+    return None
+
+
 def _first_string_match(row, phrase, case_sensitive):
     """Find within one decoded value at a time, in saved insertion/list order.
 
@@ -202,6 +219,7 @@ class _PageCollector:
             "agent_name": saved._text(row.get("agent_name")),
             "timestamp": saved._text(row.get("timestamp")), "action_type": row["action_type"],
             "success": success,
+            "referenced_post_id": _referenced_post_id(row),
             "match_preview": _match_preview(*match, filters["case_sensitive"]) if match is not None else None,
             "details_json": _json(row),
         }

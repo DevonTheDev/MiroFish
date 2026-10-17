@@ -14,7 +14,7 @@ const fixture = JSON.parse(execFileSync('python3', [
   fileURLToPath(new URL('./helpers/saved-activity-files-reader-fixture.py', import.meta.url)),
 ], { encoding: 'utf8', timeout: 10000, maxBuffer: 4 * 1024 * 1024 }))
 const observations = fixture.observations
-const page = name => ({ format_version: 1, ...observations[name] })
+const page = name => ({ format_version: 1, ...observations[name], actions: observations[name].actions.map(({ referenced_post_id, ...row }) => row) })
 const encoded = value => JSON.stringify(value, null, 2) + '\n'
 const actualFile = (value, name = 'captured-page.json') => new File([encoded(value)], name, { type: 'application/json' })
 const rowIds = view => view.all(node => String(node.props['data-testid'] ?? '').startsWith('action-row-'))

@@ -974,6 +974,7 @@
     }
   },
   "savedActivity": {
+    "openReferencedPost": "打开引用的已保存帖子",
     "title": "已保存活动",
     "historyEntry": "查看已保存活动",
     "scope": "查看此模拟 ID 最新一次已保存运行。重新启动会替换已保存文件；此处不保留之前的运行记录。",

@@ -67,7 +67,7 @@ function renderer() {
   return { host, root, body }
 }
 
-export async function mountSavedActivity({ api, initialPath = '/simulation/sim_A/activity', locale = 'en', downloadHooks = {}, viewPaths = [] } = {}) {
+export async function mountSavedActivity({ api, initialPath = '/simulation/sim_A/activity', locale = 'en', downloadHooks = {}, viewPaths = [], viewUnmount = false } = {}) {
   const requests = api ? null : deferredApi()
   api ??= requests.api
   const warnings = [], downloads = [], revokedUrls = [], anchors = []
@@ -133,7 +133,10 @@ export async function mountSavedActivity({ api, initialPath = '/simulation/sim_A
   const messages = Object.fromEntries(['en', 'zh'].map(key => [key,
     JSON.parse(readFileSync(new URL('../../../locales/' + key + '.json', import.meta.url), 'utf8'))]))
   const i18n = createI18n({ legacy: false, locale, fallbackLocale: 'en', messages })
-  const app = host.createApp({ render: () => Vue.h(Router.RouterView) })
+  const viewMounted = viewUnmount ? Vue.ref(true) : null
+  const app = host.createApp({ render: viewUnmount
+    ? () => viewMounted.value ? Vue.h(Router.RouterView) : null
+    : () => Vue.h(Router.RouterView) })
   app.use(router); app.use(i18n)
   app.config.warnHandler = warning => warnings.push(warning)
   await router.push(initialPath); await router.isReady(); app.mount(root); await flush()
@@ -166,6 +169,7 @@ export async function mountSavedActivity({ api, initialPath = '/simulation/sim_A
     async navigate(path) { await router.push(path); await flush() },
     async back() { router.back(); await flush() },
     async forward() { router.forward(); await flush() },
+    async unmountView() { assert.ok(viewMounted, 'viewUnmount mode must be explicitly selected'); viewMounted.value = false; await flush() },
     unmount() { app.unmount() },
   }
 }

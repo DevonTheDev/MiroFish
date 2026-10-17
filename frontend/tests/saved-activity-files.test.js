@@ -26,7 +26,8 @@ test('opens the actual SavedActivityView page download and preserves historical 
   assert.equal(format_version, 1)
   const h = await mountSavedActivity({ initialPath: `/simulation/${data.simulation_id}/activity?offset=1&limit=1&revision=${data.source_revision}` })
   t.after(() => h.unmount())
-  h.requests.calls.getSavedActivity[0].resolve(ok(observation)); await flush()
+  const live = { ...observation, actions: observation.actions.map(row => ({ ...row, referenced_post_id: null })) }
+  h.requests.calls.getSavedActivity[0].resolve(ok(live)); await flush()
   await h.click('download')
   assert.equal(h.downloads.length, 1)
   assert.deepEqual(await read(h.downloads[0].blob), data)

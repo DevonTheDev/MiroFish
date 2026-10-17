@@ -26,7 +26,7 @@ export function envelope(count = 1) {
 }
 export function page(id = simulationId, status = 'completed') {
   const data = envelope(); data.simulation_id = id; data.context.status = status
-  return { simulation_id: id, source_revision: revision, observed_at: data.observed_at, context: data.context, availability: 'complete', platform_availability: { twitter: 'complete', reddit: 'unavailable' }, warnings: [], filters: { platform: null, agent_id: null, round_num: null, action_type: null, q: null, case_sensitive: false, outcome: null }, order: 'source_record', offset: 0, limit: 50, returned_count: 1, matched_count: 2, has_more: true, actions: data.actions.map(row => ({ ...row, match_preview: null })) }
+  return { simulation_id: id, source_revision: revision, observed_at: data.observed_at, context: data.context, availability: 'complete', platform_availability: { twitter: 'complete', reddit: 'unavailable' }, warnings: [], filters: { platform: null, agent_id: null, round_num: null, action_type: null, q: null, case_sensitive: false, outcome: null }, order: 'source_record', offset: 0, limit: 50, returned_count: 1, matched_count: 2, has_more: true, actions: data.actions.map(row => ({ ...row, match_preview: null, referenced_post_id: null })) }
 }
 function evaluate(code, imports = {}, globals = {}, result) {
   const ast = parseJavaScript(code, { sourceType: 'module' })

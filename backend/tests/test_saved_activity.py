@@ -84,7 +84,7 @@ def test_real_loggers_preserve_attempts_payload_and_allowlisted_context(reader, 
     assert result["actions"] == [{
         "record_id": "twitter:2", "platform": "twitter", "round_num": "0", "agent_id": "0",
         "agent_name": "Saved agent", "timestamp": recorded["timestamp"], "action_type": "CREATE_POST",
-        "success": False, "match_preview": None,
+        "success": False, "referenced_post_id": None, "match_preview": None,
         "details_json": json.dumps(recorded, sort_keys=True, separators=(",", ":")),
     }]
     assert result["context"] == {
