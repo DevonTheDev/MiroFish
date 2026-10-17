@@ -25,7 +25,7 @@ export const catalog = () => ({ candidates: [{ simulation_id: 'sim_A', project_i
 export async function resolve(call, data) { assert.ok(call, 'missing allocated API call'); call.resolve(ok(data)); await flush() }
 export async function reject(call, code = 'posts_unavailable') { assert.ok(call, 'missing allocated API call'); call.reject({ response: { data: { success: false, error_code: code, error: 'Safe refusal.' } } }); await flush() }
 export async function setup(t, initialPath = path + '?platform=twitter', locale = 'en', expected = { list: 1 }) {
-  const names = ['getSavedPosts', 'getSavedPost', 'getComparisonCandidates', 'getSavedActivity', 'getSavedActivityRounds', 'getSavedActivityAgents', 'getSimulationHistory', 'getSavedActionsExport']
+  const names = ['getSavedPosts', 'getSavedPost', 'getSavedPostSearch', 'getComparisonCandidates', 'getSavedActivity', 'getSavedActivityRounds', 'getSavedActivityAgents', 'getSimulationHistory', 'getSavedActionsExport']
   const calls = Object.fromEntries(names.map(name => [name, []]))
   const api = Object.fromEntries(names.map(name => [name, (...args) => new Promise((resolve, reject) => calls[name].push({ args, signal: args.at(-1), resolve, reject }))]))
   const h = await mountSavedActivity({ api, initialPath, locale, viewPaths: ['views/SavedPostsView.vue', 'views/SavedSimulationsView.vue'] })
@@ -35,7 +35,7 @@ export async function setup(t, initialPath = path + '?platform=twitter', locale 
   t.after(() => {
     h.unmount()
     assert.deepEqual(Object.fromEntries(names.map(name => [name, calls[name].length])), {
-      getSavedPosts: expected.list ?? 0, getSavedPost: expected.detail ?? 0,
+      getSavedPosts: expected.list ?? 0, getSavedPost: expected.detail ?? 0, getSavedPostSearch: expected.search ?? 0,
       getComparisonCandidates: expected.catalog ?? 0, getSavedActivity: 0,
       getSavedActivityRounds: 0, getSavedActivityAgents: 0, getSimulationHistory: 0, getSavedActionsExport: 0,
     }, 'source-accounted API allocation changed')

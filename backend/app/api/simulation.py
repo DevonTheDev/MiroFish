@@ -1271,6 +1271,30 @@ def get_saved_simulation_post(simulation_id: str, post_id: str):
     return _saved_posts_response(simulation_id, post_id)
 
 
+@simulation_bp.route('/<simulation_id>/saved-post-search', methods=['GET'])
+def get_saved_simulation_post_search(simulation_id: str):
+    """Search saved post or comment text without starting live services."""
+    try:
+        query = saved_posts.parse_saved_post_search_query(request.args)
+        data = saved_posts.read_saved_post_search(
+            SimulationManager.SIMULATION_DATA_DIR, SimulationRunner.RUN_STATE_DIR,
+            simulation_id, **query,
+        )
+        response = current_app.response_class(saved_posts.encode_response(data), mimetype="application/json")
+    except ComparisonError as error:
+        response = jsonify({"success": False, "error": str(error), "error_code": error.code})
+        response.status_code = error.status_code
+    except StoragePathError:
+        response = jsonify({"success": False, "error": "The saved storage path is not safe to read.", "error_code": "unsafe_path"})
+        response.status_code = 400
+    except Exception:
+        logger.exception("Could not search saved simulation posts")
+        response = jsonify({"success": False, "error": "Saved posts could not be read.", "error_code": "posts_unavailable"})
+        response.status_code = 500
+    response.headers["Cache-Control"] = "no-store"
+    return response
+
+
 @simulation_bp.route('/history', methods=['GET'])
 def get_simulation_history():
     """

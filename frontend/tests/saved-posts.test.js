@@ -92,7 +92,7 @@ for (const locale of ['en', 'zh']) test(`Twitter exact flat comments and partial
   for (const [id, key] of [['posts-twitter', 'twitterNote'], ['posts-partial', 'partial'], ['posts-warning', 'runStateMissing']]) assert.equal(text(h, id), h.i18n.global.t('savedPosts.' + key))
   assert.ok(h.text().includes(h.i18n.global.t('savedPosts.commentScope', { id: '0', platform: 'twitter' })))
   const messages = JSON.parse(readFileSync(new URL('../../locales/' + locale + '.json', import.meta.url), 'utf8')).savedPosts
-  assert.equal(Object.keys(messages.reasons).length, 21)
+  assert.equal(Object.keys(messages.reasons).length, 22)
   assert.ok(Object.values(messages.reasons).every(value => typeof value === 'string' && value.trim()))
 })
 

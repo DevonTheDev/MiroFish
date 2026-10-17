@@ -39,7 +39,7 @@ async function refuse(call, code) { assert.ok(call, 'missing allocated read'); c
 const wrapperSource = readFileSync(new URL('../src/api/simulation.js', import.meta.url), 'utf8')
   .replace(/^import .*$/gm, '').replaceAll('export const ', 'const ')
 const wrapperFor = service => new Function('service', wrapperSource + '\nreturn { getSavedPost };')(service)
-const names = ['getSavedActivity', 'getSavedPost', 'getSavedPosts', 'getSavedActivityRounds', 'getSavedActivityAgents', 'getSimulationHistory', 'getSavedActionsExport', 'getComparisonCandidates']
+const names = ['getSavedActivity', 'getSavedPost', 'getSavedPosts', 'getSavedPostSearch', 'getSavedActivityRounds', 'getSavedActivityAgents', 'getSimulationHistory', 'getSavedActionsExport', 'getComparisonCandidates']
 const registered = []
 
 function mountedGroup(name, allocations, run) {
@@ -62,7 +62,7 @@ function mountedGroup(name, allocations, run) {
         h.unmount()
         assert.deepEqual(Object.fromEntries([...names, 'serviceGet'].map(key => [key, calls[key].length])), {
           getSavedActivity: expected.activity, getSavedPost: expected.post,
-          getSavedPosts: 0, getSavedActivityRounds: 0, getSavedActivityAgents: 0,
+          getSavedPosts: 0, getSavedPostSearch: 0, getSavedActivityRounds: 0, getSavedActivityAgents: 0,
           getSimulationHistory: 0, getSavedActionsExport: 0, getComparisonCandidates: 0,
           serviceGet: expected.post,
         }, `${name}: exact source-accounted API/service.get allocation`)

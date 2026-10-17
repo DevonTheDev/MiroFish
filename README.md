@@ -777,3 +777,21 @@ whole-envelope accounting is incremental and lookahead reads only IDs. Text is
 never silently truncated. These protective bounds are not timing guarantees or
 whole-database validation. No runtime controls, models or action-log scans are
 used by this saved reader.
+
+Saved posts also offers an explicit text search: choose **Posts** or **Comments**,
+enter a phrase and Apply. Posts searches each stored content/quote field;
+Comments searches stored comments across parent posts on the selected platform.
+Matching is literal Unicode casefold by default, with optional **Match case**;
+there is no accent removal, wildcard syntax, profile lookup or inferred thread.
+Each successful search scans the complete selected table before returning its
+25-row page and exact match count. Search refuses the entire result and count
+above 50,000 rows, 16 MiB of canonical projected-row JSON, or the existing value,
+response and SQLite work limits. These limits do not imply complete discussion
+coverage, and Twitter's comment limitation still applies.
+
+Search results open the exact saved post (a comment's recorded parent ID) and
+preserve search context for Return. Every page, Refresh and post open reads a
+new observation. Editing a search retires its results until Apply; Clear search
+or applying an exactly empty phrase returns to ordinary browse. Changing the
+platform clears search. See [Local mode](docs/LOCAL_MODE.md#saved-post-and-comment-text-search)
+for the query, count and refusal contract.

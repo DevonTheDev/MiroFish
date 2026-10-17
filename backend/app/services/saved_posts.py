@@ -12,6 +12,7 @@ from pathlib import Path
 import re
 import sqlite3
 import stat
+import unicodedata
 
 from . import simulation_comparison as saved
 from ..storage import StoragePathError, storage_path, validate_record_id
@@ -29,6 +30,13 @@ BUSY_TIMEOUT_MS = 100
 MAX_ID = 9_223_372_036_854_775_807
 POST_FIELDS = ("post_id", "user_id", "original_post_id", "content", "quote_content", "created_at")
 COMMENT_FIELDS = ("comment_id", "post_id", "user_id", "content", "created_at")
+MAX_SEARCH_ROWS = 50_000
+MAX_SEARCH_BYTES = 16_777_216
+MAX_QUERY_POINTS = 200
+MAX_FOLDED_QUERY = 600
+MAX_FOLDED_FIELD = 6_291_456
+MAX_FOLDED_TOTAL = 50_331_648
+_QUERY_WHITESPACE = frozenset("\u0009\u000a\u000b\u000c\u000d\u001c\u001d\u001e\u001f\u0020\u0085\u00a0\u1680\u2000\u2001\u2002\u2003\u2004\u2005\u2006\u2007\u2008\u2009\u200a\u2028\u2029\u202f\u205f\u3000")
 
 
 class _Refusal(ValueError):
@@ -81,6 +89,38 @@ def parse_saved_posts_query(args):
         else:
             values[key] = int(value)
     _selection(values.get("platform"), values["offset"], values["limit"], None)
+    return values
+
+
+def _search_selection(kind, q, case_sensitive):
+    if kind not in {"posts", "comments"} or type(case_sensitive) is not bool:
+        raise saved.ComparisonError("invalid_filters", "Choose Posts or Comments and an explicit case option.")
+    if (not isinstance(q, str) or not 1 <= len(q) <= MAX_QUERY_POINTS
+            or all(character in _QUERY_WHITESPACE for character in q)
+            or any(unicodedata.category(character) in {"Cc", "Cs", "Zl", "Zp"} for character in q)):
+        raise saved.ComparisonError("invalid_filters", "Enter 1–200 Unicode characters without control characters or line separators.")
+
+
+def parse_saved_post_search_query(args):
+    values = {}
+    for key in args:
+        if key not in {"platform", "kind", "q", "case_sensitive", "offset", "limit"} or len(args.getlist(key)) != 1:
+            raise saved.ComparisonError("invalid_filters", "Each supported query field must appear once.")
+        values[key] = args[key]
+    for key, default in (("offset", 0), ("limit", DEFAULT_LIMIT)):
+        value = values.get(key)
+        if value is None:
+            values[key] = default
+        elif not isinstance(value, str) or re.fullmatch(r"0|[1-9][0-9]{0,5}", value) is None:
+            raise saved.ComparisonError("invalid_pagination", "Use canonical decimal pagination values.")
+        else:
+            values[key] = int(value)
+    case = values.get("case_sensitive", "false")
+    if case not in {"true", "false"}:
+        raise saved.ComparisonError("invalid_filters", "Match case must be true or false.")
+    values["case_sensitive"] = case == "true"
+    _selection(values.get("platform"), values["offset"], values["limit"], None)
+    _search_selection(values.get("kind"), values.get("q"), values["case_sensitive"])
     return values
 
 
@@ -298,6 +338,126 @@ def _read_components(connection, data, offset, limit, post_id):
         budget.replace("comments", _read_page(connection, "comment", COMMENT_FIELDS, offset, limit, budget.allowance("comments"), post_id))
     except (_Refusal, sqlite3.Error, UnicodeError) as error:
         budget.replace("comments", _page(offset, limit, _failure(error)))
+
+
+def _search_page(offset, limit, reason):
+    return {**_page(offset, limit, reason), "matched_count": None}
+
+
+def _read_search(connection, kind, q, case_sensitive, offset, limit, allowance):
+    """Validate the whole selected table, retaining only one matching page."""
+    table, fields = ("post", POST_FIELDS) if kind == "posts" else ("comment", COMMENT_FIELDS)
+    _schema(connection, table, fields)
+    order = "DESC" if kind == "posts" else "ASC"
+    suffix = f' FROM "{table}" ORDER BY "{fields[0]}" {order}'
+    # Admit cardinality without decoding a 50001st row's potentially huge text.
+    if connection.execute(f'SELECT "{fields[0]}"{suffix} LIMIT 1 OFFSET ?', (MAX_SEARCH_ROWS,)).fetchone() is not None:
+        raise _Refusal("search_limit")
+    needle = q if case_sensitive else q.casefold()
+    if not case_sensitive and len(needle) > MAX_FOLDED_QUERY:
+        raise _Refusal("search_limit")
+    page = {"state": "available", "reason": None, "offset": offset, "limit": limit,
+            "count": 0, "matched_count": 0, "has_more": False, "rows": []}
+    row_bytes = folded_points = scanned = matched = 0
+    # A future match can shorten false to true by one byte. Stage against
+    # that lower bound, then check exact counters/flags/state at successful EOF.
+    staged_bytes = len(_json(page)) - 1
+    text_fields = ("content", "quote_content") if kind == "posts" else ("content",)
+    cursor = connection.execute(f'SELECT {",".join(fields)}{suffix} LIMIT ?', (MAX_SEARCH_ROWS,))
+    for values in cursor:
+        scanned += 1
+        if scanned > MAX_SEARCH_ROWS:
+            raise _Refusal("search_limit")
+        row = _row(values, fields)
+        size = len(_json(row))
+        row_bytes += size
+        if row_bytes > MAX_SEARCH_BYTES:
+            raise _Refusal("search_limit")
+        matches = False
+        for field in text_fields:
+            text = row[field]
+            if text is None:
+                continue
+            if case_sensitive:
+                matches |= needle in text
+            else:
+                folded = text.casefold()
+                points = len(folded)
+                folded_points += points
+                if points > MAX_FOLDED_FIELD or folded_points > MAX_FOLDED_TOTAL:
+                    raise _Refusal("search_limit")
+                matches |= needle in folded
+                del folded
+        if not matches:
+            continue
+        matched += 1
+        if offset < matched <= offset + limit:
+            count = len(page["rows"]) + 1
+            staged_bytes += size + (count > 1) + len(str(count)) - len(str(count - 1))
+            if staged_bytes > allowance:
+                raise _Refusal("response_too_large")
+            page["rows"].append(row)
+            page["count"] = count
+    # Nothing is accepted until EOF, including count width and final state.
+    page["matched_count"] = matched
+    page["has_more"] = offset + page["count"] < matched
+    if not page["rows"]:
+        page["state"] = "out_of_range" if offset else "empty"
+    if len(_json(page)) > allowance:
+        raise _Refusal("response_too_large")
+    return page
+
+
+def read_saved_post_search(simulation_root, run_root, simulation_id, *, platform, kind, q,
+                           case_sensitive=False, offset=0, limit=DEFAULT_LIMIT):
+    """Search one saved table in a fresh, bounded, read-only observation."""
+    try:
+        validate_record_id(simulation_id)
+    except StoragePathError:
+        raise saved.ComparisonError("invalid_selection", "Choose a valid saved simulation ID.") from None
+    _selection(platform, offset, limit, None)
+    _search_selection(kind, q, case_sensitive)
+    paths = _paths(simulation_root, run_root, simulation_id, platform)
+    before = saved._snapshot(paths)
+    metadata = _metadata(paths, before, simulation_id)
+    data = {"simulation_id": simulation_id, "platform": platform,
+            "observed_at": datetime.now(timezone.utc).isoformat(), "metadata": metadata,
+            "database": {"state": "unavailable", "reason": "metadata_unavailable"},
+            "search": {"kind": kind, "q": q, "case_sensitive": case_sensitive},
+            "results": _search_page(offset, limit, "metadata_unavailable")}
+    connection = None
+    if metadata["state"] == "available":
+        try:
+            _admit_database(paths, before)
+            if before != saved._snapshot(paths):
+                raise saved.ComparisonError("sources_changed", "Saved sources changed. Refresh to read again.", 409)
+            connection = sqlite3.connect(Path(paths["database"]).as_uri() + "?mode=ro", uri=True, timeout=BUSY_TIMEOUT_MS / 1000)
+            connection.setlimit(sqlite3.SQLITE_LIMIT_LENGTH, MAX_SQLITE_LENGTH)
+            steps = 0
+            def progress():
+                nonlocal steps
+                steps += PROGRESS_STEPS
+                return int(steps >= MAX_VM_STEPS)
+            connection.set_progress_handler(progress, PROGRESS_STEPS)
+            connection.execute("PRAGMA query_only = ON")
+            connection.execute("BEGIN")
+            data["database"] = {"state": "available", "reason": None}
+            budget = _EnvelopeBudget(data)
+            try:
+                budget.replace("results", _read_search(connection, kind, q, case_sensitive, offset, limit, budget.allowance("results")))
+            except (_Refusal, sqlite3.Error, UnicodeError) as error:
+                budget.replace("results", _search_page(offset, limit, _failure(error)))
+        except (_Refusal, sqlite3.Error, OSError) as error:
+            reason = _failure(error)
+            data["database"] = {"state": "unavailable", "reason": reason}
+            data["results"] = _search_page(offset, limit, reason)
+        finally:
+            if connection is not None:
+                connection.close()
+    if before != saved._snapshot(paths):
+        raise saved.ComparisonError("sources_changed", "Saved sources changed. Refresh to read again.", 409)
+    encode_response(data)
+    return data
 
 
 def read_saved_posts(simulation_root, run_root, simulation_id, *, platform, offset=0, limit=DEFAULT_LIMIT, post_id=None):

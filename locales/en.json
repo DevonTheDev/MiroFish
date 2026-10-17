@@ -2800,7 +2800,8 @@
       "response_too_large": "This stored component exceeds the complete response limit; no text was truncated.",
       "post_missing": "This exact post ID was not found.",
       "post_unavailable": "Comments are unavailable because the exact post could not be read.",
-      "metadata_unavailable": "Saved metadata did not admit this database read."
+      "metadata_unavailable": "Saved metadata did not admit this database read.",
+      "search_limit": "The selected table exceeds a search row, byte or folded-text limit; the whole page and count were discarded."
     },
     "errors": {
       "invalid_selection": "The saved posts URL is invalid. Choose a platform or return to Saved simulations.",
@@ -2810,8 +2811,37 @@
       "sources_changed": "Saved files changed during this read. Refresh to make a new observation.",
       "response_too_large": "The complete response exceeds the limit.",
       "posts_unavailable": "Saved posts could not be read. Try Refresh.",
-      "generic": "The saved posts response or navigation could not be accepted. Try Refresh."
+      "generic": "The saved posts response or navigation could not be accepted. Try Refresh.",
+      "invalid_search": "Use a nonblank phrase of at most 200 Unicode characters, without control characters, and choose Posts or Comments."
     },
-    "quoteField": "Saved quote_content field"
+    "quoteField": "Saved quote_content field",
+    "search": {
+      "phrase": "Saved text phrase",
+      "kind": "Search in",
+      "posts": "Posts",
+      "comments": "Comments",
+      "matchCase": "Match case",
+      "apply": "Apply",
+      "clear": "Clear search",
+      "hint": "Search one complete stored field at a time. Use 1–200 Unicode characters; spaces are preserved. Blank input returns to browsing. Wildcards and markup are literal. Default matching uses Unicode case folding without normalization.",
+      "dirty": "Search controls changed. Apply to read this selection, or Refresh to restore the committed selection.",
+      "results": "Saved text search results",
+      "scope": "{kind} in {platform} · phrase: {phrase} · {casing}",
+      "caseExact": "case-sensitive",
+      "caseFold": "Unicode case-insensitive",
+      "counts": "Matches in this table: {matched} · rows on this page: {count} · offset: {offset}",
+      "coverage": "Counts cover only this platform, record kind, phrase and fresh read. They do not establish all attempts or a complete conversation. Refused searches have unknown counts.",
+      "postOrder": "Matching posts descend by their exact saved post ID.",
+      "openReferenced": "Open referenced saved post",
+      "parentNote": "Open reads the referenced post now. The parent may be absent or unavailable; the matched comment may be on another ordinary comment page. No reply tree or cross-request snapshot is implied.",
+      "pages": "Saved search result pages",
+      "invalidRow": "A scanned row has an unsupported field or identity. The whole search page and count were discarded.",
+      "states": {
+        "available": "Search complete",
+        "unavailable": "Search unavailable; match count unknown",
+        "empty": "No matching rows in the observed supported table",
+        "out_of_range": "No matching rows at this offset"
+      }
+    }
   }
 }

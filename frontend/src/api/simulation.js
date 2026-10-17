@@ -251,3 +251,4 @@ export const getSavedActivityAgents = (simulationId, params = {}, signal) => {
 // Fresh, saved-only reads; callers own cancellation and explicit platform choice.
 export const getSavedPosts = (simulationId, params = {}, signal) => service.get(`/api/simulation/${encodeURIComponent(simulationId)}/saved-posts`, { params, signal })
 export const getSavedPost = (simulationId, postId, params = {}, signal) => service.get(`/api/simulation/${encodeURIComponent(simulationId)}/saved-posts/${encodeURIComponent(postId)}`, { params, signal })
+export const getSavedPostSearch = (simulationId, params = {}, signal) => service.get(`/api/simulation/${encodeURIComponent(simulationId)}/saved-post-search`, { params, signal })

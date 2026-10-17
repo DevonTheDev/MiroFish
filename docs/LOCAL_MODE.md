@@ -3512,3 +3512,90 @@ including unselected files. Ordinary detected changes return `sources_changed`;
 explicit Refresh obtains a new observation, while platform Apply keeps the
 accepted revision. This is not an atomic snapshot or an immutable archive.
 No export, comparison, persistence or automatic interpretation is added.
+
+
+## Saved post and comment text search
+
+On **Saved posts**, explicitly choose Twitter or Reddit, select **Posts** or
+**Comments**, enter a phrase and Apply. Posts matches a literal substring in
+`content` or `quote_content`, separately; one row counts once. Comments matches
+`content` in every stored comment on that platform, including an absent parent's
+comments. Neither kind joins profiles, searches IDs/times, follows original-post
+references, combines fields, nor infers a reply tree. Returned text and exact
+decimal IDs are unchanged and rendered literally.
+
+Default matching uses Python Unicode `casefold` on each complete field and the
+phrase: `STRASSE` matches `Straße`, and `s` can match `ß`. **Match case** compares
+original text. No Unicode normalization, accent removal, regex or SQL wildcard
+syntax is applied. Spaces at both ends of an accepted phrase remain literal.
+The phrase is 1–200 Unicode code points; lone surrogates, controls (Cc), line and
+paragraph separators (Zl/Zp) and whitespace-only phrases are rejected. The
+fixed whitespace set is U+0009–000D, U+001C–0020, U+0085, U+00A0, U+1680,
+U+2000–200A, U+2028–2029, U+202F, U+205F, U+3000. U+FEFF is literal text.
+
+`GET /api/simulation/<simulation_id>/saved-post-search` accepts only `platform`
+(`twitter` or `reddit`), `kind` (`posts` or `comments`), required nonempty `q`,
+optional `case_sensitive` (`true` or `false`, default false), `offset` (0–500000)
+and `limit` (1–100, default 25). Duplicate/unknown fields and noncanonical decimal
+pagination are rejected before storage. The existing saved-post list/detail
+endpoints and their schemas retain their original behavior.
+
+Successful `data` contains exactly `simulation_id`, `platform`, `observed_at`,
+`metadata`, `database`, `search`, `results`. `search` echoes exactly `kind`, `q`,
+`case_sensitive`. `results` has `state`, `reason`, `offset`, `limit`, `count`,
+`matched_count`, `has_more`, `rows`. IDs are descending for posts, ascending for
+comments. Whole-table matching and validation finish before pagination is
+accepted. `matched_count` is the exact count for this phrase/table/observation;
+`count = min(limit, max(0, matched_count - offset))` and
+`has_more = offset + count < matched_count`. Zero at offset 0 is `empty`; a page
+with no returned rows at positive offset is `out_of_range`. Only the requested
+page, bounded counters and one current row are retained, not a matched corpus.
+
+Admission preserves the saved reader's terminal metadata, safe paths, rollback
+SQLite header, sidecar refusal, read-only connection, query-only transaction,
+length limit and explicit close. Only the selected table is validated. Its
+ordinary rowid-table schema must include all rendered columns and the sole
+INTEGER PRIMARY KEY. Every scanned row, even a nonmatch or row after the page,
+must satisfy the exact ID/text/time schema. This whole-table validation is
+specific to search; ordinary browse remains page scoped with ID-only lookahead.
+
+Inclusive limits are 50,000 selected rows and 16,777,216 bytes across all
+canonical ASCII JSON projected rows, counted before searching each row. An
+ID-only preflight can refuse the 50,001st row before decoding its text. Existing
+limits remain: database 134,217,728 bytes; each metadata file 1,048,576 bytes;
+SQLite row/value 2,097,152 bytes; complete ASCII JSON success envelope 2,097,152
+bytes; 5,000,000 cumulative SQLite VM instructions checked every 1,000 and a
+100 ms busy timeout. Casefold additionally permits at most 600 phrase code
+points, 6,291,456 points for one temporary folded field and 50,331,648 folded
+field points cumulatively. These are protective limits, not timing guarantees.
+
+Any scan, byte, fold, row/value, output or VM refusal discards the entire page
+and count. `results.state` is `unavailable`, `rows` is empty and `count`,
+`matched_count`, `has_more` are null; `search_limit` identifies row/scan/fold
+exhaustion. Other fixed reasons include `query_budget`, `response_too_large`,
+`invalid_row` and the existing source/schema reasons. No partial count, text
+excerpt, truncated phrase or false no-match success is returned. Available
+metadata/database may coexist with unavailable results. Responses are no-store;
+ordinary source changes discard the complete observation with HTTP 409
+`sources_changed`. No stored index, schema write, checkpoint or cleanup occurs.
+
+Editing phrase, kind or Match case immediately retires rows and their handlers
+and aborts the old request; Apply commits the draft and resets offsets. An
+exactly empty applied phrase, or Clear search, returns to browse; whitespace-only
+input is invalid. Platform changes clear search. Refresh restores committed
+route values and resets offsets; it never silently applies a dirty draft.
+Back/Forward restore committed search context and make fresh reads. Pagination
+is unavailable while dirty, and late requests or guarded navigation cannot
+replace newer results or edits.
+
+A post result opens its exact ID. A comment's **Open referenced saved post**
+opens its recorded `post_id`; the detail reader can report that the parent is
+missing. Search parameters remain only as return context: detail comments are
+unfiltered, and the matched comment is not located or highlighted automatically.
+Return rereads that matching page. Every search, page, refresh and post open is
+a separate current observation, not a stable snapshot or historical identity.
+Counts do not cover action attempts, other platforms/kinds, previous runs or a
+complete conversation. Stopped/failed data retains its partial-run label.
+Twitter's configured actions do not generate comments, although valid comment
+rows actually stored there remain searchable; zero matches does not establish
+complete Twitter discussion coverage.
