@@ -247,3 +247,7 @@ export const getSavedActivityAgents = (simulationId, params = {}, signal) => {
   const query = Object.fromEntries(allowed.filter(key => Object.hasOwn(params, key)).map(key => [key, params[key]]))
   return service.get(`/api/simulation/${encodeURIComponent(simulationId)}/saved-action-agents`, { params: query, signal })
 }
+
+// Fresh, saved-only reads; callers own cancellation and explicit platform choice.
+export const getSavedPosts = (simulationId, params = {}, signal) => service.get(`/api/simulation/${encodeURIComponent(simulationId)}/saved-posts`, { params, signal })
+export const getSavedPost = (simulationId, postId, params = {}, signal) => service.get(`/api/simulation/${encodeURIComponent(simulationId)}/saved-posts/${encodeURIComponent(postId)}`, { params, signal })

@@ -67,7 +67,7 @@ function renderer() {
   return { host, root, body }
 }
 
-export async function mountSavedActivity({ api, initialPath = '/simulation/sim_A/activity', locale = 'en', downloadHooks = {} } = {}) {
+export async function mountSavedActivity({ api, initialPath = '/simulation/sim_A/activity', locale = 'en', downloadHooks = {}, viewPaths = [] } = {}) {
   const requests = api ? null : deferredApi()
   api ??= requests.api
   const warnings = [], downloads = [], revokedUrls = [], anchors = []
@@ -128,6 +128,7 @@ export async function mountSavedActivity({ api, initialPath = '/simulation/sim_A
   components['../views/SavedActivityAgentsView.vue'] = component('views/SavedActivityAgentsView.vue')
   const history = component('components/HistoryDatabase.vue')
   components['../views/Home.vue'] = { render: () => Vue.h(history) }
+  for (const path of viewPaths) components['../' + path] = component(path)
   const router = evaluate(readFileSync(new URL('../../src/router/index.js', import.meta.url), 'utf8'))
   const messages = Object.fromEntries(['en', 'zh'].map(key => [key,
     JSON.parse(readFileSync(new URL('../../../locales/' + key + '.json', import.meta.url), 'utf8'))]))

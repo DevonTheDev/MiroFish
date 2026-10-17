@@ -731,3 +731,43 @@ An active preparation keeps its own progress and cancellation controls. Start an
 An existing selected project or Home history detail can **Download input recipe**. On Home, **Open input recipe** previews the local JSON; **Use these inputs** stages one `reused-project-source.txt` and its editable scenario. Existing draft inputs require Replace/Keep. Start Engine is a separate action that creates a fresh project through the ordinary processing workflow.
 
 Recipes contain the saved normalized aggregate, not original document bytes, ontology, graph or simulation state. History lists simulations, so it is not a catalog of every project; a known project's read-only `/api/graph/project/<project_id>/input-recipe` endpoint can export complete inputs even when ontology generation failed. See [input recipe limits and behavior](docs/LOCAL_MODE.md#saved-project-input-recipes).
+
+### Saved posts and flat comments
+
+Open **Saved simulations → Saved posts**, explicitly choose Twitter or Reddit,
+then open a stored post. Posts use descending saved post IDs; comments use
+ascending saved comment IDs and match that exact post ID in the selected
+platform. Text, quote text, original-post references, null fields and decimal
+IDs are preserved. Original text is labeled separately from the saved user's
+quote. Related posts are not expanded or merged, and there is no nested reply
+schema. Twitter's configured action set does not generate comments; any comment
+rows actually stored in its database are still displayed.
+
+These fresh, read-only observations describe returned database rows, not every
+attempted action or a complete conversation. Only completed, stopped or failed
+saved metadata is admitted; stopped/failed data is labeled partial. Valid
+matching run-state metadata takes precedence. Missing run-state permits a
+visible fallback to saved simulation status, while present invalid run-state
+refuses admission. A missing/unreadable/unsupported source has unknown coverage,
+not zero rows. Ordinary changes to metadata, database or sidecars during a read
+require explicit Refresh. Separate pages are not stable snapshots, and identical
+IDs after restarts do not imply historical identity.
+
+The new `/api/simulation/<simulation_id>/saved-posts` and
+`/api/simulation/<simulation_id>/saved-posts/<post_id>` GETs leave the legacy
+posts/comments endpoints unchanged. Both require `platform=twitter|reddit` and
+accept `offset=0..500000`, `limit=1..100` (default 25). Detail offset pages the
+exact post's comments. The UI uses 25 rows and carries platform, list offset,
+optional exact post ID and comment offset in its route. Responses are no-store.
+
+The reader admits only ordinary, clean rollback-format SQLite files. Any
+`-wal`, `-shm`, or `-journal` entry, even empty, or a WAL-format header makes the
+source visibly unavailable before SQLite is opened. It never repairs, copies,
+checkpoints or removes source files. Limits are 128 MiB per DB, 1 MiB per
+metadata file, 2 MiB for the complete ASCII JSON envelope, 5,000,000 cumulative
+SQLite VM instructions checked every 1,000, and a 100 ms busy timeout. Python
+3.11's SQLite length limit bounds individual decoded rows/values to 2 MiB;
+whole-envelope accounting is incremental and lookahead reads only IDs. Text is
+never silently truncated. These protective bounds are not timing guarantees or
+whole-database validation. No runtime controls, models or action-log scans are
+used by this saved reader.

@@ -36,7 +36,7 @@ from ..services.simulation_comparison import (
     compare_saved_simulations,
     list_comparison_candidates,
 )
-from ..services import saved_activity, saved_activity_rounds, saved_activity_agents
+from ..services import saved_activity, saved_activity_rounds, saved_activity_agents, saved_posts
 from ..services.saved_activity import read_saved_activity, parse_saved_activity_query
 from ..services.saved_activity_rounds import read_saved_activity_rounds, parse_saved_activity_rounds_query
 from ..services.saved_activity_agents import read_saved_activity_agents, parse_saved_activity_agents_query
@@ -1236,6 +1236,39 @@ def get_saved_simulation_action_agents(simulation_id: str):
             "success": False, "error": "The saved activity could not be read.",
             "error_code": "activity_unavailable",
         }), 500
+
+
+def _saved_posts_response(simulation_id, post_id=None):
+    """Serialize the bounded saved-only adapter without invoking live managers."""
+    try:
+        query = saved_posts.parse_saved_posts_query(request.args)
+        data = saved_posts.read_saved_posts(
+            SimulationManager.SIMULATION_DATA_DIR, SimulationRunner.RUN_STATE_DIR,
+            simulation_id, post_id=post_id, **query,
+        )
+        response = current_app.response_class(saved_posts.encode_response(data), mimetype="application/json")
+    except ComparisonError as error:
+        response = jsonify({"success": False, "error": str(error), "error_code": error.code})
+        response.status_code = error.status_code
+    except StoragePathError:
+        response = jsonify({"success": False, "error": "The saved storage path is not safe to read.", "error_code": "unsafe_path"})
+        response.status_code = 400
+    except Exception:
+        logger.exception("Could not read saved simulation posts")
+        response = jsonify({"success": False, "error": "Saved posts could not be read.", "error_code": "posts_unavailable"})
+        response.status_code = 500
+    response.headers["Cache-Control"] = "no-store"
+    return response
+
+
+@simulation_bp.route('/<simulation_id>/saved-posts', methods=['GET'])
+def get_saved_simulation_posts(simulation_id: str):
+    return _saved_posts_response(simulation_id)
+
+
+@simulation_bp.route('/<simulation_id>/saved-posts/<post_id>', methods=['GET'])
+def get_saved_simulation_post(simulation_id: str, post_id: str):
+    return _saved_posts_response(simulation_id, post_id)
 
 
 @simulation_bp.route('/history', methods=['GET'])

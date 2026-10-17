@@ -9,6 +9,7 @@ import InteractionView from '../views/InteractionView.vue'
 import SavedInterviewsView from '../views/SavedInterviewsView.vue'
 import SavedInterviewComparisonView from '../views/SavedInterviewComparisonView.vue'
 import SavedActivityView from '../views/SavedActivityView.vue'
+import SavedPostsView from '../views/SavedPostsView.vue'
 import SavedActivityFilesView from '../views/SavedActivityFilesView.vue'
 import SavedActivityRoundsView from '../views/SavedActivityRoundsView.vue'
 import SavedActivityAgentsView from '../views/SavedActivityAgentsView.vue'
@@ -26,6 +27,7 @@ import RunCaptureFilesView from '../views/RunCaptureFilesView.vue'
 import NotFoundView from '../views/NotFoundView.vue'
 
 const routes = [
+  { path: '/simulation/:simulationId/posts', name: 'SavedPosts', component: SavedPostsView },
   { path: '/simulations', name: 'SavedSimulations', component: SavedSimulationsView },
   { path: '/interview-files/compare', name: 'SavedInterviewComparison', component: SavedInterviewComparisonView },
   {
