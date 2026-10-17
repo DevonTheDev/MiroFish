@@ -39,6 +39,7 @@ from ..services.simulation_comparison import (
 from ..services import saved_activity, saved_activity_rounds
 from ..services.saved_activity import read_saved_activity, parse_saved_activity_query
 from ..services.saved_activity_rounds import read_saved_activity_rounds, parse_saved_activity_rounds_query
+from ..services.saved_actions_export import read_saved_actions_export, parse_saved_actions_export_query
 from ..services.simulation_runner import (
     SimulationRunner,
     RunnerStatus,
@@ -1134,6 +1135,38 @@ def get_saved_simulation_actions(simulation_id: str):
             "success": False, "error": "The saved activity could not be read.",
             "error_code": "activity_unavailable",
         }), 500
+
+
+@simulation_bp.route('/<simulation_id>/saved-actions/export', methods=['GET'])
+def export_saved_simulation_actions(simulation_id: str):
+    """Download exact, complete saved-observation bytes without a live runner."""
+    try:
+        query = parse_saved_actions_export_query(request.args)
+        payload = read_saved_actions_export(
+            SimulationManager.SIMULATION_DATA_DIR, SimulationRunner.RUN_STATE_DIR,
+            simulation_id, **query,
+        )
+        response = current_app.response_class(payload, mimetype="application/json")
+        response.headers["Content-Disposition"] = (
+            f'attachment; filename="{simulation_id}-saved-actions-{query["revision"][:12]}.json"'
+        )
+    except ComparisonError as error:
+        body = {"success": False, "error": str(error), "error_code": error.code}
+        if hasattr(error, "reason"):
+            body["reason_code"] = error.reason
+        response = jsonify(body)
+        response.status_code = error.status_code
+    except StoragePathError:
+        response = jsonify({"success": False, "error": "The saved storage path is not safe to read.",
+                            "error_code": "unsafe_path"})
+        response.status_code = 400
+    except Exception:
+        logger.exception("Could not export saved simulation actions")
+        response = jsonify({"success": False, "error": "The saved actions could not be downloaded.",
+                            "error_code": "export_unavailable"})
+        response.status_code = 500
+    response.headers["Cache-Control"] = "no-store"
+    return response
 
 
 @simulation_bp.route('/<simulation_id>/saved-action-rounds', methods=['GET'])

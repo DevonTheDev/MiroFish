@@ -1001,7 +1001,7 @@
     "observedAt": "Observed at {time}",
     "matchedCount": "Matching recorded attempts: {count}",
     "pagePosition": "Page offset {offset} · {count} displayed",
-    "partialNote": "Partial counts cover only readable, valid observations. An em dash means unavailable, not zero. Downloads contain only this displayed page.",
+    "partialNote": "Partial counts cover only readable, valid observations. An em dash means unavailable, not zero. Download this page contains only the displayed page.",
     "tableCaption": "Saved action attempts in source/file order",
     "details": "View saved JSON",
     "unavailable": "Saved observations are unavailable for this selection. Refresh when saved files are available.",
@@ -2578,5 +2578,36 @@
     "next": "Next",
     "page": "Page {page} of {pages}",
     "limits": "Paging is client-side: the existing service reads the full metadata catalog in one response, without an aggregate response cap. Unsafe, unreadable or changing records may be skipped. A listed record does not guarantee saved activity, interviews or capture-ready data; each destination checks availability."
+  },
+  "savedActivityExport": {
+    "download": "Download all saved actions JSON",
+    "cancel": "Cancel download",
+    "scope": "Includes all saved actions in the observed source set. Filters and this page do not narrow the file. Requires a saved Completed, Stopped or Failed status; missing, unreadable, invalid or oversized sources stop the export.",
+    "formatNote": "For ordinary JSON analysis tools. Open activity file accepts page downloads and cannot reopen this all-actions format. The file records platform coverage and preserves saved action payloads.",
+    "cancelNote": "Cancel stops this browser request. The server read may still finish. It does not stop or reset a simulation, and cannot retract a download already started.",
+    "loading": "Reading and checking all saved actions…",
+    "started": "Browser download started. This does not confirm that the file was saved.",
+    "cancelled": "Download cancelled. You can start a new download from this accepted page.",
+    "coverageTitle": "Downloaded source coverage",
+    "covered": "Complete saved-source coverage · {count} recorded actions",
+    "notSelected": "Not selected · platform explicitly disabled",
+    "errors": {
+      "generic": "Could not prepare the download. Try Download all saved actions again.",
+      "invalid_selection": "This saved selection is invalid. Return to history and choose a simulation.",
+      "invalid_revision": "This saved revision is invalid. Refresh before trying again.",
+      "revision_required": "This download needs an accepted saved revision. Refresh before trying again.",
+      "unsafe_path": "The saved source cannot be safely read. Return to history and choose another simulation.",
+      "simulation_not_found": "This saved simulation no longer exists. Return to history and choose another simulation.",
+      "simulation_unreadable": "The saved simulation metadata could not be read. Refresh to try again.",
+      "simulation_active": "The saved run is active. Wait for a terminal saved status, then Refresh.",
+      "run_not_terminal": "The saved run is not Completed, Stopped or Failed. Refresh after a terminal status is saved.",
+      "sources_changed": "The saved files changed. Refresh and explicitly start a new download.",
+      "export_too_large": "The all-actions file exceeds 8 MiB, 50,000 actions, or a saved-source read limit. Use Download this page for smaller explicit page files.",
+      "export_incomplete": "All saved actions could not be established because a required source or record is missing, unreadable or invalid. Use the page view to inspect available records.",
+      "invalid_response": "The server response was not a valid all-actions file. No download was started. Refresh before trying again.",
+      "unsupported_reader": "This browser cannot read the response with a safe byte limit. Use a browser with streaming Fetch support.",
+      "timeout": "The download request timed out. The server read may still finish. Try again explicitly.",
+      "invalid_filters": "The all-actions request contains unsupported options. Refresh and try Download all saved actions again."
+    }
   }
 }

@@ -1722,6 +1722,65 @@ templates and routing; native browser layout/download dialogs and Windows storag
 behavior remain separate platform checks. No model weights or paid services are
 used.
 
+### Download all saved actions
+
+From a current accepted terminal observation, choose **Download all saved actions
+JSON**. This separate download ignores the page and filters and includes every
+admitted saved action in the observed source set. It retains Twitter then Reddit
+physical-line order, or legacy combined-file order, including repeated attempts.
+Recognized valid lifecycle events and blank lines are omitted. Missing rounds
+normalize to zero without inventing a seed label. The saved success flag is not
+independent execution verification.
+
+The read-only endpoint is `GET /api/simulation/<id>/saved-actions/export`, with
+exactly one required `revision` and no other query fields. It resolves saved
+metadata once, scans each selected log at most once, and rechecks all six possible
+source fingerprints even after a failed read. Modern logs take precedence over
+legacy data. Completed, stopped and failed saved states are eligible; stopped
+and failed retain the partial-run warning. Active or other nonterminal states
+are refused. Saved status does not establish current process exit.
+
+Every selected source must be wholly readable and valid. A missing modern
+platform is optional only when its saved enable flag is literally false. A
+legacy source covers enabled platforms and platforms evidenced by valid saved
+records; an unknown platform with no evidence refuses the export. Present logs
+for disabled platforms are included with a warning. Empty readable sources may
+produce a zero-action file when platform coverage is established; absent logs
+cannot. The file exposes each platform's enablement, selected source, coverage
+and count, plus admitted metadata and partial-run warnings. Existing page and
+round views continue to show their original partial observations.
+
+The versioned file has `format: "mirofish-saved-actions"`, `version: 1`,
+`scope: "all_saved_actions"`, `order: "source_record"` and `truncated: false`.
+Identifiers are decimal strings and `details_json` is opaque canonical text of
+each parsed source object. Unknown payload fields and unusual Unicode are
+preserved. Original byte spelling, duplicate JSON keys and decimal-float spelling
+are not preserved. No configuration contents, credentials or absolute paths are
+added, though saved action payloads retain anything they already contained.
+
+The entire ASCII JSON file, including escaped details, envelope and final newline,
+is limited to 8,388,608 bytes and independently to 50,000 actions. Inherited
+metadata, line, log, record and distinct-action-type limits still apply. This
+does not promise an 8 MiB process-memory bound or measured performance: parsing,
+one candidate record, response assembly and browser storage add overhead, and
+event-heavy observations can still inspect up to two 64 MiB logs. No partial
+file, silent truncation, chunk archive or automatic retry is produced. Changed
+sources return `sources_changed` (409), incomplete records/coverage return
+`export_incomplete` (422), and exceeded budgets return `export_too_large` (413).
+Use an explicit Refresh after changes, or download individual pages instead.
+
+The browser consumes bounded response bytes, validates identity and complete
+coverage, then downloads those exact bytes. Cancel, edits, Refresh, navigation
+or unmount retire the attempt and suppress a later download. Cancel leaves the
+accepted page available for an explicit retry. It cannot retract an already
+started browser download or preempt a synchronous server read. “Download started”
+does not confirm an operating-system save. The revision is an ordinary metadata
+fingerprint, not a content hash, atomic snapshot, durable run archive or protection
+against hostile writers; a later write does not invalidate accepted bytes.
+
+Use ordinary JSON analysis tools for this distinct file. **Open activity file**
+accepts the existing page format only and intentionally rejects all-actions files.
+
 ## Open activity page files
 
 Choose **Open activity file** from Home or Saved activity, or visit

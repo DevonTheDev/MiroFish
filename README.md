@@ -406,6 +406,15 @@ It distinguishes missing or partial logs from a complete zero-match result and
 requires Refresh if files change between pages. See the
 [saved activity guide](docs/LOCAL_MODE.md#explore-latest-saved-activity).
 
+Choose **Download all saved actions JSON** from an accepted terminal observation
+to save all admitted actions in its observed source set, regardless of the page
+or filters. It reads each selected log once and refuses the entire download if
+required sources are incomplete, invalid, changed or over the 8 MiB/50,000-action
+limits. Source order, repeated attempts and original parsed JSON details are
+preserved. This distinct file is for ordinary JSON tools; **Open activity file**
+continues to accept page files only. See the
+[all-actions download contract](docs/LOCAL_MODE.md#download-all-saved-actions).
+
 Choose **Open activity file** from Home or Saved activity to reopen a downloaded
 page in the browser. Preview its recorded context, then open the captured rows
 even when the original logs are unavailable. The view keeps the page's filters,

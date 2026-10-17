@@ -20,9 +20,9 @@ export async function waitFor(predicate, { timeout = 5000 } = {}) {
   }
 }
 export function deferredApi() {
-  const calls = { getSavedActivity: [], getSavedActivityRounds: [], getSimulationHistory: [] }
+  const calls = { getSavedActivity: [], getSavedActivityRounds: [], getSimulationHistory: [], getSavedActionsExport: [] }
   const api = Object.fromEntries(Object.keys(calls).map(name => [name, (...args) => new Promise((resolve, reject) => {
-    calls[name].push({ args, signal: args.at(-1), resolve, reject })
+    calls[name].push({ args, signal: name === 'getSavedActionsExport' ? args[2] : args.at(-1), resolve, reject })
   })]))
   return { api, calls }
 }
@@ -67,22 +67,25 @@ function renderer() {
   return { host, root, body }
 }
 
-export async function mountSavedActivity({ api, initialPath = '/simulation/sim_A/activity', locale = 'en' } = {}) {
+export async function mountSavedActivity({ api, initialPath = '/simulation/sim_A/activity', locale = 'en', downloadHooks = {} } = {}) {
   const requests = api ? null : deferredApi()
   api ??= requests.api
-  const warnings = [], downloads = [], revokedUrls = []
+  const warnings = [], downloads = [], revokedUrls = [], anchors = []
+  class DownloadBlob extends Blob { constructor(parts, options) { downloadHooks.blob?.(); super(parts, options) } }
   const blobs = new Map()
   let urlIndex = 0
   const urlApi = {
-    createObjectURL(blob) { const url = `blob:saved-activity-${++urlIndex}`; blobs.set(url, blob); return url },
+    createObjectURL(blob) { downloadHooks.url?.(); const url = `blob:saved-activity-${++urlIndex}`; blobs.set(url, blob); return url },
     revokeObjectURL(url) { revokedUrls.push(url); blobs.delete(url) },
   }
   const document = {
     createElement(type) {
       assert.equal(type, 'a')
-      return { click() { downloads.push({ blob: blobs.get(this.href), filename: this.download, url: this.href }) }, remove() {} }
+      downloadHooks.anchor?.()
+      const anchor = { attached: false, click() { downloadHooks.click?.(); downloads.push({ blob: blobs.get(this.href), filename: this.download, url: this.href }) }, remove() { this.attached = false } }
+      anchors.push(anchor); return anchor
     },
-    body: { appendChild() {} },
+    body: { appendChild(anchor) { anchor.attached = true; downloadHooks.append?.() } },
   }
   const { host, root, body } = renderer()
   const stub = { render: () => Vue.h('fixture-boundary') }
@@ -95,7 +98,7 @@ export async function mountSavedActivity({ api, initialPath = '/simulation/sim_A
   const components = { '../components/LanguageSwitcher.vue': stub }
   function evaluate(source, returnName = 'component') {
     const ast = parseJavaScript(source, { sourceType: 'module' })
-    const globals = { AbortController, Date, Intl, console, Blob, URL: urlApi, document,
+    const globals = { AbortController, Date, Intl, console, Blob: DownloadBlob, URL: urlApi, document,
       setTimeout: () => 0, clearTimeout() {},
       IntersectionObserver: class { observe() {} disconnect() {} } }
     for (const statement of ast.program.body.filter(item => item.type === 'ImportDeclaration').reverse()) {
@@ -140,7 +143,7 @@ export async function mountSavedActivity({ api, initialPath = '/simulation/sim_A
   const find = predicate => all(predicate)[0]
   const byId = id => find(node => node.props['data-testid'] === id)
   const text = (target = root) => (target.type === '#comment' ? '' : target.text ?? '') + (target.children ?? []).map(text).join(' ')
-  return { root, body, router, i18n, warnings, requests, flush, waitFor, all, find, byId, text, downloads, revokedUrls,
+  return { root, body, router, i18n, warnings, requests, flush, waitFor, all, find, byId, text, downloads, revokedUrls, anchors, blobs,
     async click(id) {
       const target = byId(id); assert.ok(target, `missing clickable control ${id}`)
       assert.ok(!target.props.disabled, `disabled control ${id}`)

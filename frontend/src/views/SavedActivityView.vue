@@ -42,7 +42,16 @@
           <button type="submit" data-testid="apply" class="primary" @click.prevent="applyFilters">{{ t('savedActivity.apply') }}</button>
           <button type="button" data-testid="refresh" @click="refresh">{{ t('savedActivity.refresh') }}</button>
           <button type="button" data-testid="download" :disabled="!result || dirty || loading" @click="downloadPage">{{ t('savedActivity.download') }}</button>
+          <button type="button" data-testid="download-all" :disabled="!canDownloadAll || exportBusy" @click="downloadAll">{{ t('savedActivityExport.download') }}</button>
+          <button v-if="exportBusy" type="button" data-testid="cancel-download-all" @click="cancelExport">{{ t('savedActivityExport.cancel') }}</button>
         </div>
+        <p class="note">{{ t('savedActivityExport.scope') }}</p>
+        <p class="note">{{ t('savedActivityExport.formatNote') }}</p>
+        <p class="note">{{ t('savedActivityExport.cancelNote') }}</p>
+        <p v-if="exportBusy" data-testid="export-progress" role="status" aria-live="polite">{{ t('savedActivityExport.loading') }}</p>
+        <p v-if="exportStatus" data-testid="export-status" role="status" aria-live="polite">{{ t(`savedActivityExport.${exportStatus}`) }}</p>
+        <p v-if="exportError" data-testid="export-error" class="notice error" role="alert">{{ t(`savedActivityExport.errors.${exportError}`) }}</p>
+        <ul v-if="exportCoverage" data-testid="export-coverage" class="platforms" :aria-label="t('savedActivityExport.coverageTitle')"><li v-for="platform in platforms" :key="platform">{{ t(`comparison.platforms.${platform}`) }}: {{ exportCoverage[platform].availability === 'complete' ? t('savedActivityExport.covered', { count: exportCoverage[platform].recorded_actions }) : t('savedActivityExport.notSelected') }}</li></ul>
       </form>
       <p class="note">{{ t('savedActivity.orderNote') }} {{ t('savedActivity.attemptNote') }} {{ t('savedActivity.outcomeNote') }}</p>
       <p v-if="dirty" class="notice" role="status">{{ t('savedActivity.draftNote') }}</p>
@@ -93,6 +102,7 @@ import { useRoute, useRouter, RouterLink } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import LanguageSwitcher from '../components/LanguageSwitcher.vue'
 import { getSavedActivity } from '../api/simulation'
+import { getSavedActionsExport } from '../api/savedActionsExport'
 
 const { t } = useI18n()
 const route = useRoute(), router = useRouter()
@@ -107,9 +117,12 @@ const statuses = ['idle', 'created', 'preparing', 'ready', 'starting', 'running'
 const warningCodes = ['config_unavailable', 'run_state_unavailable', 'run_not_terminal', 'partial_run', 'platform_log_missing', 'platform_not_configured', 'invalid_records', 'source_unreadable', 'source_too_large', 'no_action_logs']
 const errorCodes = ['invalid_selection', 'invalid_filters', 'invalid_pagination', 'invalid_revision', 'revision_required', 'unsafe_path', 'simulation_not_found', 'simulation_unreadable', 'simulation_active', 'sources_changed', 'response_too_large']
 const revisionPattern = /^[a-f0-9]{64}$/
+const exportBusy = ref(false), exportError = ref(''), exportStatus = ref(''), exportCoverage = ref(null)
+const exportErrorCodes = ['invalid_selection', 'invalid_filters', 'invalid_revision', 'revision_required', 'unsafe_path', 'simulation_not_found', 'simulation_unreadable', 'simulation_active', 'run_not_terminal', 'sources_changed', 'export_too_large', 'export_incomplete', 'invalid_response', 'unsupported_reader', 'timeout']
 const result = ref(null), loading = ref(false), error = ref(''), dirty = ref(false)
 const draft = ref({ platform: '', agent_id: '', round_num: '', action_type: '', q: '', case_sensitive: false, outcome: '', limit: '50' })
 const simulationId = computed(() => typeof route.params.simulationId === 'string' ? route.params.simulationId : '')
+let activeExport = null, exportSequence = 0, routeLifetime = 0, exportUrl = null
 let disposed = false, activeRequest = null, acknowledgement = null, pendingNavigation = null, observedRevision = null, downloadUrl = null
 
 function fail(code) { throw { selectionCode: code } }
@@ -161,6 +174,8 @@ function revokeDownload() {
   downloadUrl = null
 }
 function retire() {
+  routeLifetime++
+  retireExport()
   if (pendingNavigation) pendingNavigation.retired = true
   activeRequest?.controller.abort()
   activeRequest = null
@@ -273,6 +288,7 @@ function refresh() {
   return navigateSelected({ ...selected, offset: 0, revision: null })
 }
 const acceptedCurrent = computed(() => !!result.value && !dirty.value && !loading.value && !!activeRequest && owns(activeRequest))
+const canDownloadAll = computed(() => acceptedCurrent.value && !pendingNavigation && ['completed', 'stopped', 'failed'].includes(result.value.context.status))
 const roundsLocation = computed(() => ({ name: 'SavedActivityRounds', params: { simulationId: result.value?.simulation_id }, query: { ...(result.value?.filters.platform ? { platform: result.value.filters.platform } : {}), revision: result.value?.source_revision } }))
 const canPrevious = computed(() => !!result.value && !dirty.value && !loading.value && result.value.offset > 0)
 const canNext = computed(() => !!result.value && !dirty.value && !loading.value && result.value.has_more && result.value.offset + result.value.limit <= 500000)
@@ -288,6 +304,56 @@ function downloadPage() {
   const link = document.createElement('a')
   link.href = downloadUrl; link.download = `${saved.simulation_id}-saved-activity-page-${saved.offset}.json`
   document.body.appendChild(link); link.click(); link.remove()
+}
+function revokeExportUrl(url = exportUrl) {
+  if (url) { try { URL.revokeObjectURL(url) } catch { /* best effort on teardown */ } }
+  if (url === exportUrl) exportUrl = null
+}
+function retireExport() {
+  exportSequence++
+  const owner = activeExport
+  activeExport = null
+  owner?.controller.abort()
+  revokeExportUrl()
+  exportBusy.value = false; exportError.value = ''; exportStatus.value = ''; exportCoverage.value = null
+}
+function cancelExport() {
+  if (!activeExport) return
+  retireExport()
+  exportStatus.value = 'cancelled'
+}
+function ownsExport(owner) {
+  return activeExport === owner && owner.token === exportSequence && owner.lifetime === routeLifetime && !owner.controller.signal.aborted && owner.accepted === result.value && owner.pageRequest === activeRequest && owns(owner.pageRequest) && owner.path === route.fullPath && owner.simulationId === simulationId.value && owner.revision === result.value?.source_revision
+}
+async function downloadAll() {
+  if (exportBusy.value || !canDownloadAll.value) return
+  retireExport()
+  const owner = { token: exportSequence, lifetime: routeLifetime, accepted: result.value, pageRequest: activeRequest, path: route.fullPath, simulationId: result.value.simulation_id, revision: result.value.source_revision, controller: new AbortController() }
+  activeExport = owner; exportBusy.value = true
+  let link = null, localUrl = null, started = false
+  try {
+    const response = await getSavedActionsExport(owner.simulationId, owner.revision, owner.controller.signal, () => ownsExport(owner))
+    if (!ownsExport(owner)) return
+    const blob = new Blob([response.bytes], { type: 'application/json' })
+    if (!ownsExport(owner)) return
+    localUrl = URL.createObjectURL(blob)
+    if (!ownsExport(owner)) return
+    link = document.createElement('a')
+    link.href = localUrl; link.download = `${owner.simulationId}-saved-actions-${owner.revision.slice(0, 12)}.json`
+    if (!ownsExport(owner)) return
+    document.body.appendChild(link)
+    if (!ownsExport(owner)) return
+    link.click()
+    if (!ownsExport(owner)) return
+    started = true; exportUrl = localUrl
+    exportStatus.value = 'started'; exportCoverage.value = response.data.platform_coverage
+  } catch (cause) {
+    if (ownsExport(owner)) exportError.value = exportErrorCodes.includes(cause?.exportCode) ? cause.exportCode : 'generic'
+  } finally {
+    try { link?.remove() } catch { /* an attachment/click failure still revokes its URL */ }
+    if (localUrl && !started) revokeExportUrl(localUrl)
+    if (ownsExport(owner)) { activeExport = null; exportBusy.value = false }
+  }
 }
 function availabilityLabel(value) { return t(`comparison.availability.${value}`) }
 function statusLabel(value) { return t(`comparison.statuses.${statuses.includes(value) ? value : 'unknown'}`) }
