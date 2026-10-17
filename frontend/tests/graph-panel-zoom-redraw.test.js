@@ -17,7 +17,7 @@ const transform = svg => {
 
 async function completedWheel(svg, group, expectedScale) {
   assert.equal(svg.__zooming, undefined, 'the wheel starts an independent gesture')
-  const event = { type: 'wheel', currentTarget: svg, pageX: 400, pageY: 300,
+  const event = { type: 'wheel', currentTarget: svg, pageX: 400, pageY: 300, clientX: 400, clientY: 300,
     deltaY: -500, deltaMode: 0, ctrlKey: false, button: 0,
     preventDefault() { this.defaultPrevented = true },
     stopImmediatePropagation() { this.stopped = true } }

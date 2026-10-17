@@ -6,6 +6,7 @@ import { parse, compileScript } from '@vue/compiler-sfc'
 import * as Vue from 'vue'
 import * as d3 from 'd3'
 import * as graphViewSvg from '../../src/utils/graphViewSvg.js'
+import * as nodeRelationships from '../../src/utils/nodeRelationships.js'
 
 // Real Vue SFC, renderer and D3. Only the DOM host is synthetic; this does not
 // verify native browser layout, pointer geometry or visual appearance.
@@ -27,8 +28,9 @@ function hostDocument(observations, hooks) {
     // identities equally stable when component refs hold them and D3 appends.
     return Vue.markRaw({
       type, namespaceURI: namespace, ownerDocument: document,
-      props: {}, children: [], parentNode: null, text: '', clientWidth: 800, clientHeight: 600,
-      style,
+      props: {}, children: [], parentNode: null, text: '', clientWidth: 800, clientHeight: 600, clientLeft: 0, clientTop: 0,
+      style, scrollTop: 0,
+      focus(options) { observations.focus.push({ target: this, options }); document.activeElement = this },
       get nodeType() { return this.type === '#text' ? 3 : this.type === '#comment' ? 8 : 1 },
       get localName() { return this.type },
       get data() { return this.text },
@@ -86,7 +88,7 @@ function hostDocument(observations, hooks) {
         if (!event.stopped) this.parentNode?.dispatchEvent(event)
       },
       getBBox() { observations.bbox++; hooks.bbox?.(this); return { width: this.textContent.length * 6, height: 12 } },
-      getBoundingClientRect() { observations.viewport++; hooks.viewport?.(this); return { width: this.clientWidth, height: this.clientHeight } },
+      getBoundingClientRect() { observations.viewport++; hooks.viewport?.(this); return { x: 0, y: 0, left: 0, top: 0, right: this.clientWidth, bottom: this.clientHeight, width: this.clientWidth, height: this.clientHeight } },
     })
   }
   return { document, element }
@@ -114,7 +116,7 @@ export function mountGraphPanel(t, { messages = {}, deferGraphRedraw = false, in
   let code = compileScript(descriptor, { id: filename, inlineTemplate: true,
     templateOptions: { compilerOptions: { hoistStatic: false } } }).content
   const windowListeners = new Set(), emitted = [], warnings = [], captures = [], retired = [], simulations = []
-  const observations = { viewport: 0, bbox: 0, ticks: 0, stops: 0, restarts: 0 }, hooks = {}
+  const observations = { viewport: 0, bbox: 0, ticks: 0, stops: 0, restarts: 0, focus: [] }, hooks = {}
   const globals = { window: {
     addEventListener: (_type, fn) => windowListeners.add(fn),
     removeEventListener: (_type, fn) => windowListeners.delete(fn),
@@ -131,7 +133,7 @@ export function mountGraphPanel(t, { messages = {}, deferGraphRedraw = false, in
       simulation[method] = function(...args) { observations[counter]++; return original.apply(this, args) }
     }
     return simulation
-  } } : d3, '../utils/graphViewSvg.js': graphViewSvg }
+  } } : d3, '../utils/graphViewSvg.js': graphViewSvg, '../utils/nodeRelationships.js': nodeRelationships }
   for (const statement of parseJavaScript(code, { sourceType: 'module' }).program.body
     .filter(node => node.type === 'ImportDeclaration').reverse()) {
     const dependency = modules[statement.source.value]

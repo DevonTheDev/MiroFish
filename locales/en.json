@@ -492,7 +492,31 @@
     "showNodeLabels": "Show node labels",
     "viewControls": "Graph view controls",
     "toggleMaximize": "Maximize/Restore",
-    "closeHint": "Close hint"
+    "closeHint": "Close hint",
+    "nodeRelationships": {
+      "title": "Loaded relationships",
+      "explanation": "Relationships recorded for this exact ID in the loaded graph.",
+      "loading": "Graph loading. Select this node again after loading to see loaded relationships.",
+      "changed": "Graph changed. Select this node again to see loaded relationships.",
+      "invalid": "This node has no usable stored ID. Its loaded relationships cannot be matched.",
+      "unavailable": "Loaded relationship data is unavailable",
+      "duplicate": "This ID appears on {count} loaded node records. These relationships are recorded for the ID and cannot be assigned to one of those records.",
+      "counts": "{total} total · Outgoing {outgoing} · Incoming {incoming} · Self {self}",
+      "range": "{start}–{end} of {total} loaded relationships",
+      "empty": "No loaded relationship records match this ID.",
+      "outgoing": "Outgoing",
+      "incoming": "Incoming",
+      "self": "Self",
+      "source": "Source",
+      "target": "Target",
+      "unknownEndpoint": "Unknown endpoint",
+      "idUnavailable": "Endpoint ID unavailable",
+      "notLoaded": "Endpoint not loaded",
+      "multiple": "Multiple loaded nodes ({count})",
+      "position": "Relationship source position {position}",
+      "back": "Back to node relationships",
+      "context": "Node source position {node} · Relationship source position {relationship}"
+    }
   },
   "history": {
     "title": "Simulation History",

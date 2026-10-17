@@ -14,7 +14,7 @@
           :disabled="!graphViewDownload.enabled">
           {{ $t('graph.viewDownload.label') }}
         </button>
-        <button class="tool-btn" @click="$emit('refresh')" :disabled="loading" :title="$t('graph.refreshGraph')">
+        <button class="tool-btn" @click="refreshGraph" :disabled="loading" :title="$t('graph.refreshGraph')">
           <span class="icon-refresh" :class="{ 'spinning': loading }">↻</span>
           <span class="btn-text">Refresh</span>
         </button>
@@ -182,6 +182,44 @@
               <span class="detail-label">UUID:</span>
               <span class="detail-value uuid-text">{{ selectedItem.data.uuid }}</span>
             </div>
+            <section class="node-relationships" :aria-label="$t('graph.nodeRelationships.title')">
+              <h3 class="node-relationships-title" tabindex="-1">{{ $t('graph.nodeRelationships.title') }}</h3>
+              <p>{{ $t('graph.nodeRelationships.explanation') }}</p>
+              <p v-if="!relationshipView" class="node-relationships-state" role="status" aria-live="polite">
+                {{ $t(loading ? 'graph.nodeRelationships.loading' : 'graph.nodeRelationships.changed') }}
+              </p>
+              <p v-else-if="relationshipView.state !== 'ready'" class="node-relationships-state" role="status" aria-live="polite">
+                {{ $t(`graph.nodeRelationships.${relationshipView.state}`) }}
+              </p>
+              <template v-else>
+                <p v-if="relationshipView.duplicateCount > 1" class="node-relationships-warning">{{ $t('graph.nodeRelationships.duplicate', { count: relationshipView.duplicateCount }) }}</p>
+                <p class="node-relationships-counts">{{ $t('graph.nodeRelationships.counts', relationshipView.counts) }}</p>
+                <p class="node-relationships-range" role="status" aria-live="polite">{{ $t('graph.nodeRelationships.range', relationshipView) }}</p>
+                <p v-if="!relationshipView.total" class="node-relationships-empty">{{ $t('graph.nodeRelationships.empty') }}</p>
+                <ul class="node-relationships-list">
+                  <li v-for="row in relationshipView.rows" :key="row.index">
+                    <button type="button" class="node-relationship-row" :data-source-index="row.index"
+                      :disabled="!relationshipView.enabled" :onClick="row.action">
+                      <span class="node-relationship-direction">{{ $t(`graph.nodeRelationships.${row.direction}`) }}</span>
+                      <span class="node-relationship-endpoints">{{ row.source.text || $t('graph.nodeRelationships.unknownEndpoint') }} → {{ row.target.text || $t('graph.nodeRelationships.unknownEndpoint') }}</span>
+                      <span v-for="side in ['source', 'target']" :key="side" class="node-relationship-endpoint-meta">
+                        {{ $t(`graph.nodeRelationships.${side}`) }}: {{ row[side].id || $t('graph.nodeRelationships.idUnavailable') }}
+                        <span v-if="row[side].status"> · {{ $t(`graph.nodeRelationships.${row[side].status}`, { count: row[side].count }) }}</span>
+                      </span>
+                      <span class="node-relationship-label">{{ row.label }}</span>
+                      <span class="node-relationship-type">{{ row.recordedType }}</span>
+                      <span v-if="row.fact" class="node-relationship-fact">{{ row.fact }}</span>
+                      <span v-if="row.uuid" class="node-relationship-uuid">{{ row.uuid }}</span>
+                      <span class="node-relationship-position">{{ $t('graph.nodeRelationships.position', { position: row.index + 1 }) }}</span>
+                    </button>
+                  </li>
+                </ul>
+                <div class="node-relationships-pagination">
+                  <button type="button" class="node-relationships-previous" :disabled="!relationshipView.enabled || relationshipView.page === 1" :onClick="relationshipView.previous">{{ $t('graph.searchPrevious') }}</button>
+                  <button type="button" class="node-relationships-next" :disabled="!relationshipView.enabled || relationshipView.page >= relationshipView.pages" :onClick="relationshipView.next">{{ $t('graph.searchNext') }}</button>
+                </div>
+              </template>
+            </section>
             <div class="detail-row" v-if="selectedItem.data.created_at">
               <span class="detail-label">Created:</span>
               <span class="detail-value">{{ formatDateTime(selectedItem.data.created_at) }}</span>
@@ -217,6 +255,17 @@
           
           <!-- 边详情 -->
           <div v-else class="detail-content">
+            <div v-if="relationshipView?.mode === 'detail'" class="node-relationship-context">
+              <button type="button" class="node-relationships-back" :disabled="!relationshipView.enabled" :onClick="relationshipView.back">{{ $t('graph.nodeRelationships.back') }}</button>
+              <p>{{ $t('graph.nodeRelationships.context', { node: relationshipView.nodePosition, relationship: relationshipView.opened.index + 1 }) }} · {{ $t(`graph.nodeRelationships.${relationshipView.opened.direction}`) }}</p>
+              <p v-if="relationshipView.duplicateCount > 1" class="node-relationships-warning">{{ $t('graph.nodeRelationships.duplicate', { count: relationshipView.duplicateCount }) }}</p>
+              <p v-for="side in ['source', 'target']" :key="side" class="node-relationship-exact-id">
+                {{ $t(`graph.nodeRelationships.${side}`) }}: {{ relationshipView.opened[side].text || $t('graph.nodeRelationships.unknownEndpoint') }}
+                <span v-if="relationshipView.opened[side].status"> · {{ $t(`graph.nodeRelationships.${relationshipView.opened[side].status}`, { count: relationshipView.opened[side].count }) }}</span>
+                <span class="node-relationship-literal-id">{{ relationshipView.exactIds[side] ?? $t('graph.nodeRelationships.idUnavailable') }}</span>
+              </p>
+            </div>
+
             <button type="button" class="tool-btn graph-fit-relationship"
               :disabled="!canFitRelationshipEndpoints" @click="fitRelationshipEndpoints">
               {{ $t('graph.fitRelationshipEndpoints') }}
@@ -361,9 +410,10 @@
 </template>
 
 <script setup>
-import { ref, onMounted, onUnmounted, watch, nextTick, computed } from 'vue'
+import { ref, shallowRef, onMounted, onUnmounted, watch, nextTick, computed } from 'vue'
 import * as d3 from 'd3'
 import { createGraphViewSvg } from '../utils/graphViewSvg.js'
+import { deriveNodeRelationships, formatNodeRelationship, relationshipDirection, relationshipPageSize } from '../utils/nodeRelationships.js'
 
 const props = defineProps({
   graphData: Object,
@@ -414,6 +464,120 @@ let activateRenderedRelationship = null
 let detailOpenedBySearch = false
 let renderTicket = 0
 let disposed = false
+
+// A logical occurrence session never retains a D3 object or render closure.
+const relationshipView = shallowRef(null)
+let relationshipSession = null
+let relationshipSessionSerial = 0
+let relationshipGeneration = 0
+const ownsRelationshipSession = session => !!session && relationshipSession === session
+  && !disposed && session.graph === props.graphData && session.revision === graphRevision.value
+  && props.graphData?.nodes?.[session.index] === session.raw && session.raw.uuid === session.id
+const ownsRelationshipAction = owner => ownsRelationshipSession(owner.session)
+  && owner.generation === relationshipGeneration && owner.mode === owner.session.mode
+  && owner.page === owner.session.page && !props.loading && searchReady.value
+  && !!activateRenderedNode && !!activateRenderedRelationship
+  && (owner.mode === 'list' ? selectedItem.value?.type === 'node'
+    : selectedItem.value?.type === 'edge' && owner.opened === owner.session.opened)
+
+const retireNodeRelationships = (closeAnchored = false) => {
+  if (closeAnchored && relationshipSession?.mode === 'detail') {
+    selectedItem.value = null
+    selectedRelationship.value = null
+    detailOpenedBySearch = false
+  }
+  relationshipSession = null
+  relationshipGeneration++
+  relationshipView.value = null
+}
+
+const queueRelationshipFocus = (owner, index = null) => nextTick(() => {
+  if (!ownsRelationshipAction(owner)) return
+  const content = graphContainer.value?.querySelector('.detail-content')
+  const target = owner.mode === 'detail' ? content?.querySelector('.node-relationships-back')
+    : [...(content?.querySelectorAll('.node-relationship-row') || [])].find(row => Number(row.getAttribute('data-source-index')) === index)
+      || content?.querySelector('.node-relationships-title')
+  if (!target || !content || !ownsRelationshipAction(owner)) return
+  target.focus?.({ preventScroll: true })
+  // Scroll only this panel's existing scroller, never the document or graph.
+  const rect = target.getBoundingClientRect(), bounds = content.getBoundingClientRect()
+  if (rect.top < bounds.top) content.scrollTop -= bounds.top - rect.top
+  else if (rect.bottom > bounds.bottom) content.scrollTop += rect.bottom - bounds.bottom
+})
+
+const publishRelationshipView = () => {
+  const session = relationshipSession
+  if (!ownsRelationshipSession(session)) { relationshipView.value = null; return }
+  const owner = Object.freeze({ session, generation: ++relationshipGeneration,
+    mode: session.mode, page: session.page, opened: session.opened })
+  const derived = session.derived
+  const enabled = !props.loading && searchReady.value && !!activateRenderedNode && !!activateRenderedRelationship
+  const total = derived.occurrences?.length || 0, offset = (session.page - 1) * relationshipPageSize
+  const rows = session.mode === 'list' && derived.state === 'ready'
+    ? derived.occurrences.slice(offset, offset + relationshipPageSize).map(occurrence => ({
+      ...formatNodeRelationship(derived, occurrence), action: () => openNodeRelationship(owner, occurrence)
+    })) : []
+  relationshipView.value = { owner, mode: session.mode, state: derived.state, enabled,
+    rows, page: session.page, pages: Math.max(1, Math.ceil(total / relationshipPageSize)), total,
+    start: total ? offset + 1 : 0, end: Math.min(offset + relationshipPageSize, total),
+    counts: { ...derived.counts, total }, duplicateCount: derived.duplicateCount,
+    nodePosition: session.index + 1, opened: session.opened,
+    exactIds: session.opened ? Object.fromEntries(['source', 'target'].map(side => {
+      const id = session.opened.raw[`${side}_node_uuid`]
+      return [side, typeof id === 'string' && id ? id : null]
+    })) : null,
+    previous: () => changeNodeRelationshipPage(owner, -1), next: () => changeNodeRelationshipPage(owner, 1),
+    back: () => backToNodeRelationships(owner) }
+}
+
+const startNodeRelationships = (index, raw, fromSearch) => {
+  retireNodeRelationships()
+  if (props.loading || disposed) return
+  relationshipSession = { serial: ++relationshipSessionSerial, graph: props.graphData,
+    revision: graphRevision.value, index, raw, id: raw.uuid, fromSearch,
+    page: 1, mode: 'list', opened: null, derived: deriveNodeRelationships(props.graphData, raw) }
+  publishRelationshipView()
+}
+const changeNodeRelationshipPage = (owner, delta) => {
+  if (!ownsRelationshipAction(owner) || owner.mode !== 'list') return
+  const session = owner.session, page = session.page + delta
+  const pages = Math.max(1, Math.ceil((session.derived.occurrences?.length || 0) / relationshipPageSize))
+  if (page < 1 || page > pages) return
+  session.page = page
+  publishRelationshipView()
+}
+const openNodeRelationship = (owner, occurrence) => {
+  if (!ownsRelationshipAction(owner) || owner.mode !== 'list') return
+  const session = owner.session, offset = (session.page - 1) * relationshipPageSize
+  if (!session.derived.occurrences.slice(offset, offset + relationshipPageSize).includes(occurrence)
+    || props.graphData?.edges?.[occurrence.index] !== occurrence.raw
+    || relationshipDirection(occurrence.raw, session.id) !== occurrence.direction) return
+  session.mode = 'detail'
+  session.opened = formatNodeRelationship(session.derived, occurrence)
+  relationshipGeneration++
+  activateRenderedRelationship({ ...occurrence, revision: session.revision }, session.opened)
+  publishRelationshipView()
+  queueRelationshipFocus(relationshipView.value.owner)
+}
+const backToNodeRelationships = owner => {
+  if (!ownsRelationshipAction(owner) || owner.mode !== 'detail') return
+  const session = owner.session, index = session.opened.index
+  if (props.graphData?.edges?.[index] !== session.opened.raw
+    || relationshipDirection(session.opened.raw, session.id) !== session.opened.direction) return
+  session.mode = 'list'
+  session.opened = null
+  relationshipGeneration++
+  activateRenderedNode({ index: session.index, raw: session.raw, revision: session.revision }, session)
+  publishRelationshipView()
+  queueRelationshipFocus(relationshipView.value.owner, index)
+}
+const refreshGraph = () => {
+  retireNodeRelationships(true)
+  emit('refresh')
+}
+watch(() => props.loading, loading => {
+  if (loading) retireNodeRelationships(true)
+}, { flush: 'sync' })
 
 const graphIdentity = data => typeof data?.graph_id === 'string' && data.graph_id.trim()
   ? data.graph_id : null
@@ -540,7 +704,7 @@ const activateSearchResult = result => {
     || result.mode !== searchMode.value || result.modeRevision !== searchModeRevision
     || records?.[result.index] !== result.raw) return
   if (result.mode === 'nodes') activateRenderedNode?.(result)
-  else activateRenderedRelationship?.(result)
+  else { retireNodeRelationships(); activateRenderedRelationship?.(result) }
 }
 
 // 关闭模拟结束提示
@@ -604,6 +768,7 @@ const formatDateTime = (dateStr) => {
 }
 
 const closeDetailPanel = () => {
+  retireNodeRelationships()
   detailOpenedBySearch = false
   selectedItem.value = null
   selectedRelationship.value = null
@@ -628,6 +793,7 @@ const retireRenderedGraph = () => {
   activateRenderedNode = null
   activateRenderedRelationship = null
   searchReady.value = false
+  publishRelationshipView()
   currentSimulation?.stop()
   currentSimulation = null
   linkLabelsRef = null
@@ -666,13 +832,13 @@ const renderGraph = (revision, ticket) => {
       sourceRecords: edge.sourceRecords.map(({ index, raw }) => ({ index, raw }))
     } : null
   }
-  activateRenderedRelationship = result => {
+  activateRenderedRelationship = (result, anchored = null) => {
     if (!isCurrentRender() || result.revision !== revision || edgesData[result.index] !== result.raw) return
     const match = renderedRelationships.get(result.index)
     if (match && match.raw !== result.raw) return
     clearHighlights()
     if (match) highlightRelationship(match.edge)
-    const endpoints = relationshipEndpoints(result.raw)
+    const endpoints = anchored ? { sourceName: anchored.source.text, targetName: anchored.target.text } : relationshipEndpoints(result.raw)
     detailOpenedBySearch = true
     rememberRelationship(match?.edge, result)
     selectedItem.value = {
@@ -686,6 +852,7 @@ const renderGraph = (revision, ticket) => {
   // SVG listeners survive child removal. Replace dismissal even on empty draws.
   svg.on('click', () => {
     if (!isCurrentRender()) return
+    retireNodeRelationships()
     detailOpenedBySearch = false
     selectedItem.value = null
     selectedRelationship.value = null
@@ -961,6 +1128,7 @@ const renderGraph = (revision, ticket) => {
     .on('click', (event, d) => {
       event.stopPropagation()
       if (!isCurrentEdge(d)) return
+      retireNodeRelationships()
       // 重置之前选中边的样式
       linkGroup.selectAll('path').attr('stroke', '#C0C0C0').attr('stroke-width', 1.5)
       linkLabelBg.attr('fill', 'rgba(255,255,255,0.95)')
@@ -989,6 +1157,7 @@ const renderGraph = (revision, ticket) => {
     .on('click', (event, d) => {
       event.stopPropagation()
       if (!isCurrentEdge(d)) return
+      retireNodeRelationships()
       linkGroup.selectAll('path').attr('stroke', '#C0C0C0').attr('stroke-width', 1.5)
       linkLabelBg.attr('fill', 'rgba(255,255,255,0.95)')
       linkLabels.attr('fill', '#666')
@@ -1020,6 +1189,7 @@ const renderGraph = (revision, ticket) => {
     .on('click', (event, d) => {
       event.stopPropagation()
       if (!isCurrentEdge(d)) return
+      retireNodeRelationships()
       linkGroup.selectAll('path').attr('stroke', '#C0C0C0').attr('stroke-width', 1.5)
       linkLabelBg.attr('fill', 'rgba(255,255,255,0.95)')
       linkLabels.attr('fill', '#666')
@@ -1114,7 +1284,7 @@ const renderGraph = (revision, ticket) => {
 
   // Both entry points use the original circle selection behavior. Resolve search
   // by source position and raw record, since UUIDs need not identify one circle.
-  const selectRenderedNode = (d, target, fromSearch = false) => {
+  const selectRenderedNode = (d, target, fromSearch = false, returnSession = null) => {
     if (!isCurrentRender() || props.graphData?.nodes?.[d.sourceIndex] !== d.rawData) return
     node.attr('stroke', '#fff').attr('stroke-width', 2.5)
     linkGroup.selectAll('path').attr('stroke', '#C0C0C0').attr('stroke-width', 1.5)
@@ -1128,15 +1298,17 @@ const renderGraph = (revision, ticket) => {
       type: 'node', data: d.rawData, entityType: d.type, color: getColor(d.type),
       sourceIndex: d.sourceIndex, graphRevision: revision
     }
+    if (returnSession !== relationshipSession || !returnSession) startNodeRelationships(d.sourceIndex, d.rawData, fromSearch)
   }
-  activateRenderedNode = result => {
+  activateRenderedNode = (result, returnSession = null) => {
     if (result.revision !== revision || ticket !== renderTicket) return
     const rendered = nodes[result.index]
     if (!rendered || rendered.rawData !== result.raw) return
     const circle = node.filter(d => d === rendered).node()
-    if (circle) selectRenderedNode(rendered, circle, true)
+    if (circle) selectRenderedNode(rendered, circle, returnSession ? returnSession.fromSearch : true, returnSession)
   }
   searchReady.value = true
+  publishRelationshipView()
 
   // Node Labels
   const nodeLabels = nodeGroup.selectAll('text')
@@ -1298,6 +1470,7 @@ const requestGraphRender = () => {
 
 watch(() => props.graphData, data => {
   // Invalidate before a queued render can run, including in-place data changes.
+  retireNodeRelationships(true)
   graphRevision.value++
   selectedRelationship.value = null
   const identity = graphIdentity(data)
@@ -1679,6 +1852,8 @@ input:checked + .slider:before {
   top: 60px;
   right: 20px;
   width: 320px;
+  max-width: calc(100% - 40px);
+  box-sizing: border-box;
   max-height: calc(100% - 100px);
   background: #FFF;
   border: 1px solid #EAEAEA;
@@ -1741,6 +1916,21 @@ input:checked + .slider:before {
 .graph-center-selected, .graph-fit-relationship { margin-bottom: 12px; }
 .graph-center-selected:focus-visible, .graph-fit-relationship:focus-visible { outline: 2px solid #004E89; outline-offset: 2px; }
 .graph-center-selected:disabled, .graph-fit-relationship:disabled { opacity: 0.45; cursor: default; }
+
+.node-relationships, .node-relationship-context { min-width: 0; overflow-wrap: anywhere; margin: 12px 0; }
+.node-relationships-title { font-size: 13px; margin: 0; }
+.node-relationships p, .node-relationship-context p { margin: 8px 0; }
+.node-relationships-warning { color: #7a4800; }
+.node-relationships-list { list-style: none; padding: 0; margin: 8px 0; }
+.node-relationship-row { width: 100%; display: flex; flex-direction: column; gap: 4px; padding: 8px; margin-bottom: 6px; text-align: left; border: 1px solid #ccc; border-radius: 4px; background: #fff; color: #333; font: inherit; overflow-wrap: anywhere; cursor: pointer; }
+.node-relationship-row span { max-width: 100%; }
+.node-relationship-direction, .node-relationship-label { font-weight: 600; }
+.node-relationship-endpoint-meta, .node-relationship-position { font-size: 11px; color: #555; }
+.node-relationship-literal-id { display: block; white-space: pre-wrap; }
+.node-relationships-pagination { display: flex; gap: 8px; }
+.node-relationships-pagination button, .node-relationships-back { border: 1px solid #aaa; border-radius: 4px; background: #fff; color: #333; padding: 6px 8px; font: inherit; cursor: pointer; white-space: normal; }
+.node-relationship-row:focus-visible, .node-relationships-title:focus, .node-relationships-pagination button:focus-visible, .node-relationships-back:focus-visible { outline: 2px solid #004E89; outline-offset: 2px; }
+.node-relationship-row:disabled, .node-relationships-pagination button:disabled, .node-relationships-back:disabled { opacity: 0.45; cursor: default; }
 
 .detail-row {
   margin-bottom: 12px;

@@ -35,7 +35,7 @@ const runRedraw = h => {
 }
 const select = async (h, index = 0) => { await h.click(circles(h)[index]); return button(h) }
 function wheel(svg, deltaY = -500) {
-  const event = { type: 'wheel', currentTarget: svg, pageX: 200, pageY: 150,
+  const event = { type: 'wheel', currentTarget: svg, pageX: 200, pageY: 150, clientX: 200, clientY: 150,
     deltaY, deltaMode: 0, ctrlKey: false, button: 0,
     preventDefault() { this.defaultPrevented = true },
     stopImmediatePropagation() { this.stopped = true } }

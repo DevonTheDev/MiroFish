@@ -15,7 +15,7 @@ const transform = svg => {
 }
 
 function wheel(svg, expectedScale, deltaY = -500) {
-  const event = { type: 'wheel', currentTarget: svg, pageX: 400, pageY: 300,
+  const event = { type: 'wheel', currentTarget: svg, pageX: 400, pageY: 300, clientX: 400, clientY: 300,
     deltaY, deltaMode: 0, ctrlKey: false, button: 0,
     preventDefault() { this.defaultPrevented = true },
     stopImmediatePropagation() { this.stopped = true } }

@@ -38,6 +38,32 @@ Opening a preset does not prepare or start a simulation.
 
 ## Find a node or relationship in the graph
 
+Selecting a node also opens **Loaded relationships** inside its details. This list
+matches the node's exact nonblank stored ID against loaded relationship endpoint
+IDs, preserving case, whitespace and source order. It shows incoming, outgoing
+and self occurrence counts and pages of 20; self records appear once. Duplicate
+or missing relationship UUIDs and repeated references remain separate source
+positions. The list includes relationships whose opposite endpoint is not drawn.
+An unusable node ID or unavailable arrays have a distinct explanation, rather
+than a zero count. Shared node IDs carry an ID-level ambiguity warning.
+
+Each row opens the exact individual relationship. **Back to node relationships**
+returns to the same selected node occurrence and page, with a guarded focus
+request for the originating row. Endpoint names never navigate or choose among
+same-ID nodes. Rows bound names/labels/types to 80 UTF-16 units, IDs to 96 and fact
+previews to 160, plus an ellipsis without splitting surrogate pairs; full facts
+and literal endpoint IDs remain in individual details. English and Chinese copy
+is included. Paging, opening and Back preserve the graph viewport and global
+search; Center and Fit remain explicit controls.
+
+Refresh, loading and any graph-data change retire this relationship session;
+failed refreshes do not revive it. Pointer-opened node details may remain with a
+reselection notice. Resize preserves the logical anchor and page but waits for
+fresh drawing adapters before enabling actions. These are records in the loaded
+graph, not verified facts, graph-theoretic degree, complete history or an atomic
+server snapshot. No extra network request or export change is involved.
+
+
 The graph search starts in **Nodes** mode and searches full node names. Switch
 to **Relationships** to search each loaded relationship's label (`name`), full
 fact, type (`fact_type`), source display text or target display text. These five

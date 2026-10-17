@@ -41,7 +41,7 @@ const redraw = h => {
 const search = async h => { await h.click(h.find('.search-mode-relationships')); await h.input('match') }
 const rows = h => h.host.querySelectorAll('.relationship-search-result')
 function wheel(svg, deltaY = -500) {
-  const event = { type: 'wheel', currentTarget: svg, pageX: 200, pageY: 150,
+  const event = { type: 'wheel', currentTarget: svg, pageX: 200, pageY: 150, clientX: 200, clientY: 150,
     deltaY, deltaMode: 0, ctrlKey: false, button: 0,
     preventDefault() { this.defaultPrevented = true }, stopImmediatePropagation() {} }
   svg.dispatchEvent(event)

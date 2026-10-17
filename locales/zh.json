@@ -492,7 +492,31 @@
     "showNodeLabels": "显示节点标签",
     "viewControls": "图谱视图控制",
     "toggleMaximize": "最大化/还原",
-    "closeHint": "关闭提示"
+    "closeHint": "关闭提示",
+    "nodeRelationships": {
+      "title": "已加载的关系",
+      "explanation": "已加载图谱中为此确切 ID 记录的关系。",
+      "loading": "图谱正在加载。加载完成后，请重新选择此节点以查看已加载的关系。",
+      "changed": "图谱已更改。请重新选择此节点以查看已加载的关系。",
+      "invalid": "此节点没有可用的存储 ID，无法匹配其已加载的关系。",
+      "unavailable": "已加载的关系数据不可用",
+      "duplicate": "此 ID 出现在 {count} 条已加载节点记录中。这些关系是为该 ID 记录的，无法归属于其中某一条节点记录。",
+      "counts": "共 {total} 条 · 出向 {outgoing} · 入向 {incoming} · 自关系 {self}",
+      "range": "第 {start}–{end} 条，共 {total} 条已加载关系",
+      "empty": "没有与此 ID 匹配的已加载关系记录。",
+      "outgoing": "出向",
+      "incoming": "入向",
+      "self": "自关系",
+      "source": "来源",
+      "target": "目标",
+      "unknownEndpoint": "未知端点",
+      "idUnavailable": "端点 ID 不可用",
+      "notLoaded": "端点未加载",
+      "multiple": "多个已加载节点（{count}）",
+      "position": "关系来源位置 {position}",
+      "back": "返回节点关系",
+      "context": "节点来源位置 {node} · 关系来源位置 {relationship}"
+    }
   },
   "history": {
     "openDetails": "打开模拟详情：{title}（{id}）",

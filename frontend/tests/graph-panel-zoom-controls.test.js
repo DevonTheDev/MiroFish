@@ -28,7 +28,7 @@ const runRedraw = h => {
   redraws[0]()
 }
 function wheel(svg, deltaY = -500, pageX = 200, pageY = 150) {
-  const event = { type: 'wheel', currentTarget: svg, pageX, pageY,
+  const event = { type: 'wheel', currentTarget: svg, pageX, pageY, clientX: pageX, clientY: pageY,
     deltaY, deltaMode: 0, ctrlKey: false, button: 0,
     preventDefault() { this.defaultPrevented = true },
     stopImmediatePropagation() { this.stopped = true } }
