@@ -17,6 +17,14 @@ from ..storage import StoragePathError, storage_path, validate_record_id
 from ..services.zep_entity_reader import ZepEntityReader
 from ..services.oasis_profile_generator import OasisProfileGenerator
 from ..services.simulation_manager import SimulationManager, SimulationStatus
+from ..services.graph_build_control import project_build_lock
+from ..services.graph_readiness import (
+    GraphReadinessError,
+    assert_graph_ready_locked,
+    graph_readiness_locks,
+    marker_preflight,
+    marker_read_lease,
+)
 from ..services.platform_selection import (
     resolve_platform,
     validate_platform_flags,
@@ -48,7 +56,7 @@ logger = get_logger('mirofish.api.simulation')
 def _planning_response(data=None, error=None):
     from ..services.preparation_plan import PlanningError
     if error is not None:
-        if not isinstance(error, PlanningError):
+        if not isinstance(error, (PlanningError, GraphReadinessError)):
             error = PlanningError("preparation_unavailable")
         response = jsonify({"success": False, "error_code": error.code, "error": str(error)})
         response.status_code = error.status_code
@@ -288,33 +296,39 @@ def create_simulation():
                 "error": t('api.requireProjectId')
             }), 400
         
-        project = ProjectManager.get_project(project_id)
-        if not project:
-            return jsonify({
-                "success": False,
-                "error": t('api.projectNotFound', id=project_id)
-            }), 404
-        
-        graph_id = data.get('graph_id') or project.graph_id
-        if not graph_id:
-            return jsonify({
-                "success": False,
-                "error": t('api.graphNotBuilt')
-            }), 400
-        
-        manager = SimulationManager()
-        state = manager.create_simulation(
-            project_id=project_id,
-            graph_id=graph_id,
-            enable_twitter=enable_twitter,
-            enable_reddit=enable_reddit,
-        )
+        # Serialize selected-project association and effective-graph readiness
+        # with Stop, keeping both claims until the new simulation is saved.
+        with project_build_lock(project_id):
+            project = ProjectManager.get_project(project_id)
+            if not project:
+                return jsonify({
+                    "success": False,
+                    "error": t('api.projectNotFound', id=project_id)
+                }), 404
+            graph_id = data.get('graph_id') or project.graph_id
+            with graph_readiness_locks(project, graph_id):
+                project = ProjectManager.get_project(project_id)
+                assert_graph_ready_locked(project_id, graph_id, project=project)
+                if not graph_id:
+                    return jsonify({
+                        "success": False,
+                        "error": t('api.graphNotBuilt')
+                    }), 400
+                manager = SimulationManager()
+                state = manager.create_simulation(
+                    project_id=project_id,
+                    graph_id=graph_id,
+                    enable_twitter=enable_twitter,
+                    enable_reddit=enable_reddit,
+                )
         
         return jsonify({
             "success": True,
             "data": state.to_dict()
         })
         
+    except GraphReadinessError as error:
+        return _planning_response(error=error)
     except ValueError as e:
         return jsonify({"success": False, "error": str(e)}), 400
     except Exception as e:
@@ -531,8 +545,6 @@ def prepare_simulation():
                             return _planning_response({"simulation_id": simulation_id, "status": "ready",
                                 "message": t('api.alreadyPrepared'), "already_prepared": True,
                                 "prepare_info": prepare_info})
-                    local_claimed_task = TaskManager().create_task("simulation_prepare", metadata={
-                        "simulation_id": simulation_id, "project_id": state.project_id})
             except Exception as error:
                 return _planning_response(error=error)
         
@@ -555,6 +567,33 @@ def prepare_simulation():
                 })
             else:
                 logger.info(f"模拟 {simulation_id} 未准备完成，将启动准备任务")
+
+        # Saved artifacts may be reused after graph Stop. Fresh work, including
+        # a tagged local graph reached after a cloud-mode switch, must preflight
+        # before allocating a task or changing any preparation state.
+        if marker_preflight(state.project_id, state.graph_id) is None:
+            return jsonify({
+                "success": False,
+                "error": t('api.projectNotFound', id=state.project_id)
+            }), 404
+        if Config.LOCAL_MODE:
+            with preparation_plan.admission_lock(simulation_id):
+                preparation_plan.assert_idle_locked(simulation_id)
+                previous_association = (state.project_id, state.graph_id)
+                manager._simulations.pop(simulation_id, None)
+                state = manager.get_simulation(simulation_id)
+                if not state:
+                    raise preparation_plan.PlanningError("simulation_not_found")
+                if not force_regenerate:
+                    is_prepared, prepare_info = _check_simulation_prepared(simulation_id, _lock_held=True)
+                    if is_prepared:
+                        return _planning_response({"simulation_id": simulation_id, "status": "ready",
+                            "message": t('api.alreadyPrepared'), "already_prepared": True,
+                            "prepare_info": prepare_info})
+                if (state.project_id, state.graph_id) != previous_association:
+                    raise preparation_plan.PlanningError("graph_changed")
+                local_claimed_task = TaskManager().create_task("simulation_prepare", metadata={
+                    "simulation_id": simulation_id, "project_id": state.project_id})
         
         # 从项目获取必要信息
         project = ProjectManager.get_project(state.project_id)
@@ -581,22 +620,27 @@ def prepare_simulation():
         
         # ========== 同步获取实体数量（在后台任务启动前） ==========
         # 这样前端在调用prepare后立即就能获取到预期Agent总数
-        try:
-            logger.info(f"同步获取实体数量: graph_id={state.graph_id}")
-            reader = ZepEntityReader()
-            # 快速读取实体（不需要边信息，只统计数量）
-            filtered_preview = reader.filter_defined_entities(
-                graph_id=state.graph_id,
-                defined_entity_types=entity_types_list,
-                enrich_with_edges=False  # 不获取边信息，加快速度
-            )
-            # 保存实体数量到状态（供前端立即获取）
-            state.entities_count = filtered_preview.filtered_count
-            state.entity_types = list(filtered_preview.entity_types)
-            logger.info(f"预期实体数量: {filtered_preview.filtered_count}, 类型: {filtered_preview.entity_types}")
-        except Exception as e:
-            logger.warning(f"同步获取实体数量失败（将在后台任务中重试）: {e}")
-            # 失败不影响后续流程，后台任务会重新获取
+        from uuid import uuid4
+        with marker_read_lease(state.project_id, state.graph_id,
+                               f"legacy-preview:{simulation_id}:{uuid4().hex}"):
+            # Lease admission is outside the historical best-effort catch:
+            # a Stop rejection must not be swallowed as a preview failure.
+            try:
+                logger.info(f"同步获取实体数量: graph_id={state.graph_id}")
+                reader = ZepEntityReader()
+                # 快速读取实体（不需要边信息，只统计数量）
+                filtered_preview = reader.filter_defined_entities(
+                    graph_id=state.graph_id,
+                    defined_entity_types=entity_types_list,
+                    enrich_with_edges=False  # 不获取边信息，加快速度
+                )
+                # 保存实体数量到状态（供前端立即获取）
+                state.entities_count = filtered_preview.filtered_count
+                state.entity_types = list(filtered_preview.entity_types)
+                logger.info(f"预期实体数量: {filtered_preview.filtered_count}, 类型: {filtered_preview.entity_types}")
+            except Exception as e:
+                logger.warning(f"同步获取实体数量失败（将在后台任务中重试）: {e}")
+                # 失败不影响后续流程，后台任务会重新获取
         
         # 创建异步任务
         task_manager = TaskManager()
@@ -692,15 +736,23 @@ def prepare_simulation():
                         progress_detail=progress_detail_data
                     )
                 
-                result_state = manager.prepare_simulation(
-                    simulation_id=simulation_id,
-                    simulation_requirement=simulation_requirement,
-                    document_text=document_text,
-                    defined_entity_types=entity_types_list,
-                    use_llm_for_profiles=use_llm_for_profiles,
-                    progress_callback=progress_callback,
-                    parallel_profile_count=parallel_profile_count
-                )
+                # The HTTP preview is a distinct admission. Re-read and enter
+                # a fresh marker-only lease before the direct manager can
+                # clear saved flags, read entities, or invoke a model.
+                worker_state = manager._load_simulation_state(simulation_id)
+                if not worker_state:
+                    raise preparation_plan.PlanningError("simulation_not_found")
+                with marker_read_lease(worker_state.project_id, worker_state.graph_id,
+                                       f"legacy-prepare:{simulation_id}:{task_id}"):
+                    result_state = manager.prepare_simulation(
+                        simulation_id=simulation_id,
+                        simulation_requirement=simulation_requirement,
+                        document_text=document_text,
+                        defined_entity_types=entity_types_list,
+                        use_llm_for_profiles=use_llm_for_profiles,
+                        progress_callback=progress_callback,
+                        parallel_profile_count=parallel_profile_count
+                    )
 
                 if result_state.status == SimulationStatus.FAILED:
                     task_manager.fail_task(
@@ -725,7 +777,12 @@ def prepare_simulation():
                         manager._save_simulation_state(state)
                 finally:
                     # Terminal status releases local preparation ownership.
-                    task_manager.fail_task(task_id, str(e))
+                    if isinstance(e, GraphReadinessError):
+                        task_manager.update_task(task_id, status=TaskStatus.FAILED,
+                            message=str(e), error=str(e), result={"simulation_id": simulation_id,
+                            "preparation_outcome": "failed", "error_code": e.code})
+                    else:
+                        task_manager.fail_task(task_id, str(e))
         
         # 启动后台线程
         thread = threading.Thread(target=run_prepare, daemon=True)
@@ -745,6 +802,8 @@ def prepare_simulation():
             }
         })
         
+    except (GraphReadinessError, preparation_plan.PlanningError) as error:
+        return _planning_response(error=error)
     except ValueError as e:
         return jsonify({
             "success": False,

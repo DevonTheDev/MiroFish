@@ -23,7 +23,14 @@ from ..storage import StoragePathError, storage_path, validate_record_id
 from ..utils.persistence import write_json_atomic
 from ..utils.logger import get_logger
 from ..utils.locale import get_locale, set_locale
-from ..utils.zep_lifecycle import graph_lifecycle_lock, register_graph_reader, unregister_graph_reader
+from ..utils.zep_lifecycle import register_graph_reader, unregister_graph_reader
+from .graph_build_control import project_build_lock
+from .graph_readiness import (
+    GraphReadinessError,
+    assert_graph_ready_locked,
+    graph_readiness_locks,
+    marker_preflight,
+)
 from . import simulation_comparison as saved
 from . import preparation_cancellation as cancellation
 from ..utils.preparation_cancellation import PreparationCancelled
@@ -45,6 +52,9 @@ _ID = re.compile(r"[A-Za-z0-9_-]{1,128}\Z")
 logger = get_logger("mirofish.preparation_plan")
 
 _ERRORS = {
+    "graph_build_stopping": (409, "This local graph build is stopping; new preparation is blocked."),
+    "graph_build_stopped": (409, "This local graph build was stopped; the graph is not ready for new preparation."),
+    "graph_build_stop_unresolved": (409, "The local graph build Stop could not be confirmed; new preparation is blocked."),
     "preparation_task_mismatch": (409, "The task does not own this planned preparation."),
     "preparation_cancelled": (409, "This preparation was cancelled or interrupted. Create another simulation to try again."),
     "cancellation_unavailable": (409, "Preparation cancellation or cleanup could not be verified. Create another simulation to try again."),
@@ -427,6 +437,21 @@ def planned_prepare(data):
         _validate_platforms(state)
         if _previously_prepared(state):
             raise PlanningError("existing_preparation")
+    # Graph lifecycle locks never nest inside the simulation admission lock.
+    # Saved reuse returned above; this gate applies only to fresh graph work.
+    try:
+        marker_preflight(state.get("project_id"), state.get("graph_id"))
+    except GraphReadinessError as error:
+        raise PlanningError(error.code) from None
+    with admission_lock(simulation_id):
+        assert_idle_locked(simulation_id)
+        refreshed = read_state(simulation_id)
+        _validate_platforms(refreshed)
+        if _previously_prepared(refreshed):
+            raise PlanningError("existing_preparation")
+        if any(refreshed.get(key) != state.get(key) for key in ("project_id", "graph_id")):
+            raise PlanningError("graph_changed")
+        state = refreshed
         task_manager = TaskManager()
         task_id = task_manager.create_task("simulation_prepare", metadata={
             "simulation_id": simulation_id, "project_id": state.get("project_id"), "local_planned": True})
@@ -603,16 +628,19 @@ def _graph_lease(state, reader_id):
     graph_id = state.get("graph_id")
     if not isinstance(graph_id, str) or _ID.fullmatch(graph_id) is None:
         raise PlanningError("graph_changed")
-    lock = graph_lifecycle_lock(graph_id)
-    if not lock.acquire(blocking=False):
-        raise PlanningError("graph_busy")
     try:
-        project = _project_for_graph(state)
-        if any(updater.graph_id == graph_id for updater in _peek_updaters().values()):
-            raise PlanningError("graph_busy")
-        register_graph_reader(graph_id, reader_id)
-    finally:
-        lock.release()
+        with project_build_lock(state.get("project_id")):
+            selected = ProjectManager.get_project(state.get("project_id"))
+            with graph_readiness_locks(selected, graph_id, blocking=False):
+                # Marker/fence reasons take precedence over historical planned
+                # restrictions, including graph_building and changed graphs.
+                assert_graph_ready_locked(state.get("project_id"), graph_id, project=selected)
+                project = _project_for_graph(state)
+                if any(updater.graph_id == graph_id for updater in _peek_updaters().values()):
+                    raise PlanningError("graph_busy")
+                register_graph_reader(graph_id, reader_id)
+    except GraphReadinessError as error:
+        raise PlanningError(error.code) from None
     try:
         yield project
     finally:
@@ -623,6 +651,8 @@ def _graph_lease(state, reader_id):
 def _safe_failure(error):
     if isinstance(error, PlanningError):
         return error
+    if isinstance(error, GraphReadinessError):
+        return PlanningError(error.code)
     message = str(error)
     if message in {"Graph nodes exceed configured limit", "Graph edges exceed configured limit"}:
         return PlanningError("graph_too_large")

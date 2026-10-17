@@ -33,6 +33,16 @@ export function buildGraph(data, signal) {
   })
 }
 
+/** Explicit control of one exact local build; abort only retires the observer. */
+export function stopGraphBuild(projectId, taskId, signal) {
+  return service({
+    url: `/api/graph/project/${encodeURIComponent(projectId)}/build/stop`,
+    method: 'post',
+    data: { task_id: taskId },
+    signal
+  })
+}
+
 /**
  * 查询任务状态
  * @param {String} taskId - 任务ID

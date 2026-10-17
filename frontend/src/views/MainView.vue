@@ -62,6 +62,7 @@
           :ontologyProgress="ontologyProgress"
           :buildProgress="buildProgress"
           :graphResult="graphResult"
+          :graphStop="graphStop"
           :graphData="graphData"
           :systemLogs="systemLogs"
           :simulationHandoff="simulationHandoff"
@@ -90,7 +91,7 @@ import { useI18n } from 'vue-i18n'
 import GraphPanel from '../components/GraphPanel.vue'
 import Step1GraphBuild from '../components/Step1GraphBuild.vue'
 import Step2EnvSetup from '../components/Step2EnvSetup.vue'
-import { generateOntology, getProject, buildGraph, getTaskStatus, getGraphData } from '../api/graph'
+import { generateOntology, getProject, buildGraph, stopGraphBuild, getTaskStatus, getGraphData } from '../api/graph'
 import { getPendingUpload, consumePendingUpload } from '../store/pendingUpload'
 import LanguageSwitcher from '../components/LanguageSwitcher.vue'
 import { hasLoadedGraphShape, createLoadedGraphFile } from '../utils/loadedGraphFile.js'
@@ -118,6 +119,7 @@ const currentPhase = ref(-1) // -1: Upload, 0: Ontology, 1: Build, 2: Complete
 const ontologyProgress = ref(null)
 const buildProgress = ref(null)
 const graphResult = ref(null)
+const graphStop = shallowRef({ state: null })
 const systemLogs = ref([])
 
 // The accepted receipt outlives graph observation, but never its selection.
@@ -223,6 +225,154 @@ let viewContext = null
 let projectAdoption = null
 const ownsView = context => !!context && context.active && context === viewContext
   && route.name === 'Process' && context.id === currentProjectId.value
+
+// A marker is a durable exclusion, not an alternate graph owner. Invalid or
+// inconsistent new fields remain visible and fail closed, including on reload.
+const inspectGraphStop = project => {
+  const marker = project?.graph_build_stop
+  const control = project?.graph_build_control
+  const exactControl = control && validSimulationId(project?.graph_build_task_id)
+    && control.task_id === project.graph_build_task_id
+    && (control.project_id == null || control.project_id === project.project_id)
+  const safeError = value => typeof value === 'string' ? value : ''
+  if (marker != null || project?.status === 'graph_stopped') {
+    const valid = marker && typeof marker === 'object' && !Array.isArray(marker)
+      && marker.version === 1 && marker.backend === 'local'
+      && validSimulationId(project.graph_build_task_id) && marker.task_id === project.graph_build_task_id
+      && (marker.project_id == null || marker.project_id === project.project_id)
+      && marker.graph_id === (project.graph_id ?? null)
+      && typeof marker.requested_at === 'string' && marker.requested_at.length > 0
+      && ['expected_chunks', 'succeeded_chunks', 'unstarted_chunks'].every(key => marker[key] == null
+        || (Number.isSafeInteger(marker[key]) && marker[key] >= 0))
+      && ['requested', 'stopped', 'unresolved'].includes(marker.state)
+      && (marker.state === 'stopped' ? project.status === 'graph_stopped' : project.status === 'graph_building')
+    return { state: valid && !(exactControl && control.state === 'unresolved') ? marker.state : 'unresolved', persisted: marker != null,
+      invalidMarker: !valid, marker: valid ? marker : null, error: safeError(marker?.error) || safeError(control?.error) }
+  }
+  if (exactControl && ['requested', 'unresolved', 'stopped'].includes(control.state)) {
+    // A live first-write fence is not a persisted stopped receipt.
+    return { state: 'unresolved', persisted: control.persisted === true,
+      unsavedFence: control.state === 'unresolved' && control.persisted === false,
+      marker: null, error: safeError(control.error) }
+  }
+  return { state: null, persisted: false, marker: null, error: exactControl ? safeError(control.error) : '' }
+}
+
+const publishGraphStop = context => {
+  if (!ownsView(context)) return
+  const project = projectData.value, snapshot = inspectGraphStop(project)
+  const taskId = project?.graph_build_task_id
+  const observation = context.stopObservation?.taskId === taskId ? context.stopObservation : null
+  const state = observation?.state === 'unresolved' ? 'unresolved' : snapshot.state || observation?.state || null
+  const persisted = snapshot.state ? snapshot.persisted : observation?.persisted === true
+  const control = project?.graph_build_control
+  const exact = project?.project_id === context.id && validSimulationId(taskId)
+    && context.task?.id === taskId && control?.task_id === taskId && project.status === 'graph_building'
+    && (control.project_id == null || control.project_id === context.id)
+  const pending = !!context.stopAttempt
+  const showAction = !!(exact && (control.can_stop === true || pending))
+  const enabled = showAction && control.can_stop === true && !pending && !graphDownloadDeparture
+    && !['requested', 'stopped', 'sending'].includes(state)
+  const owner = { context, taskId }
+  context.stopAction = owner
+  const count = value => Number.isSafeInteger(value) && value >= 0 ? value : t('step1.graphStopCountUnknown')
+  const marker = snapshot.marker
+  graphStop.value = {
+    state, persisted, visible: showAction || !!state, showAction, enabled,
+    error: snapshot.error || observation?.error || (context.task?.id === taskId ? context.task?.error : '') || '',
+    counts: marker ? { expected: count(marker.expected_chunks), succeeded: count(marker.succeeded_chunks),
+      unstarted: count(marker.unstarted_chunks) } : null,
+    messageKey: !state ? '' : snapshot.invalidMarker ? 'step1.graphStopInvalid'
+      : state === 'unresolved' && !persisted && (snapshot.unsavedFence || observation?.unsavedFence) ? 'step1.graphStopNotSaved'
+      : `step1.graphStop${state[0].toUpperCase() + state.slice(1)}`,
+    action: () => requestGraphStop(owner),
+  }
+}
+
+const ownsStopAttempt = (context, attempt) => ownsView(context) && context.stopAttempt === attempt
+  && context.task?.id === attempt.taskId && projectData.value?.project_id === context.id
+  && projectData.value?.graph_build_task_id === attempt.taskId
+
+const suspendGraphStop = () => {
+  const context = viewContext
+  if (!context) return
+  context.stopRevision++
+  context.stopAction = null
+  // Navigation never signals backend Stop. A submitted request may still win;
+  // fresh project observation recovers its persisted result after navigation.
+  context.stopAttempt?.controller.abort()
+  if (context.stopAttempt) context.stopObservation = { taskId: context.stopAttempt.taskId, state: 'unknown' }
+  context.stopAttempt = null
+  publishGraphStop(context)
+}
+
+const requestGraphStop = async owner => {
+  const context = owner.context
+  if (!ownsView(context) || context.stopAction !== owner || !graphStop.value.enabled
+    || graphDownloadDeparture || context.stopAttempt || context.task?.id !== owner.taskId
+    || projectData.value?.graph_build_task_id !== owner.taskId) return
+  const attempt = { taskId: owner.taskId, controller: new AbortController() }
+  const task = context.task
+  context.stopAttempt = attempt
+  context.stopRevision++
+  context.stopObservation = { taskId: owner.taskId, state: 'sending', persisted: false }
+  publishGraphStop(context)
+  let completed = false
+  const accept = envelope => {
+    const data = envelope?.data
+    if (!data || data.project_id !== context.id || data.task_id !== attempt.taskId
+      || !['requested', 'stopped', 'unresolved', 'completed'].includes(data.state)) return false
+    if (data.state === 'completed' && envelope.success !== false && data.graph_build_stop == null
+      && !inspectGraphStop(projectData.value).state) {
+      completed = true
+      context.stopObservation = null
+      return true
+    }
+    if (data.persisted === true && data.graph_build_stop != null) {
+      const marker = data.graph_build_stop
+      projectData.value = { ...projectData.value,
+        graph_id: marker?.task_id === attempt.taskId && !validSimulationId(projectData.value.graph_id)
+          && (marker.graph_id === null || validSimulationId(marker.graph_id))
+          ? marker.graph_id : projectData.value.graph_id,
+        graph_build_stop: marker,
+        status: data.state === 'stopped' && data.persisted === true ? 'graph_stopped' : projectData.value.status }
+    }
+    const snapshot = inspectGraphStop(projectData.value)
+    context.stopObservation = { taskId: attempt.taskId,
+      state: data.state === 'requested' && data.accepted === true && snapshot.state === 'requested' ? 'requested'
+        : data.state === 'stopped' && data.persisted === true && snapshot.state === 'stopped' ? 'stopped' : 'unresolved',
+      persisted: data.persisted === true,
+      unsavedFence: data.state === 'unresolved' && data.persisted === false,
+      error: typeof data.error === 'string' ? data.error : typeof envelope.error === 'string' ? envelope.error : '' }
+    return true
+  }
+  try {
+    const res = await stopGraphBuild(context.id, attempt.taskId, attempt.controller.signal)
+    if (!ownsStopAttempt(context, attempt)) return
+    if (!accept(res)) throw new Error(res?.error || t('step1.graphStopUnknown'))
+  } catch (cause) {
+    if (!ownsStopAttempt(context, attempt)) return
+    // Axios retains the structured 503 snapshot for a failed first marker save.
+    if (!accept(cause?.response?.data)) {
+      context.stopObservation = { taskId: attempt.taskId, state: 'unknown', persisted: false,
+        error: typeof cause?.message === 'string' ? cause.message : '' }
+    }
+  } finally {
+    if (ownsStopAttempt(context, attempt)) {
+      context.stopAttempt = null
+      context.stopRevision++
+      publishGraphStop(context)
+      if (completed) {
+        task.terminal = true
+        stopPolling(context)
+        graphResult.value = { loading: true, retry: () => loadCompletedGraphResult(task, context) }
+        void loadCompletedGraphResult(task, context)
+      } else {
+        void reconcileBuildProject(task, context, true)
+      }
+    }
+  }
+}
 
 // A receipt binds a loaded source, not immutable response bytes. Every allowed
 // period gets fresh callbacks; the detached JSON is made only on explicit click.
@@ -423,6 +573,7 @@ const publishGraphDownload = () => {
 const suspendGraphDownload = to => {
   graphDownloadDeparture = { to: to.redirectedFrom || to }
   retireGraphDownload()
+  suspendGraphStop()
 }
 const recoverGraphDownload = (to, committed) => {
   const departure = graphDownloadDeparture
@@ -430,6 +581,7 @@ const recoverGraphDownload = (to, committed) => {
     && !(committed && router.currentRoute.value === to))) return
   graphDownloadDeparture = null
   publishGraphDownload()
+  publishGraphStop(viewContext)
 }
 // Only outer/source and binding changes retire ownership. Valid nested edits
 // remain current values for the next click; there is no deep mutation watcher.
@@ -448,6 +600,7 @@ const resetProjectState = () => {
   ontologyProgress.value = null
   buildProgress.value = null
   graphResult.value = null
+  graphStop.value = { state: null }
   systemLogs.value = []
 }
 
@@ -456,6 +609,9 @@ const retireView = (context = viewContext) => {
   context.active = false
   // Abort HTTP observers only; already accepted server work may continue.
   context.controller.abort()
+  context.stopAttempt?.controller.abort()
+  context.stopAttempt = null
+  context.stopAction = null
   context.graphRequest?.controller.abort()
   stopPolling(context)
   if (context === viewContext) resetProjectState()
@@ -476,12 +632,15 @@ const rightPanelStyle = computed(() => {
 
 // --- Status Computed ---
 const statusClass = computed(() => {
+  if (graphStop.value.state) return graphStop.value.state === 'stopped' ? 'stopped' : 'processing'
   if (error.value) return 'error'
   if (currentPhase.value >= 2) return 'completed'
   return 'processing'
 })
 
 const statusText = computed(() => {
+  if (graphStop.value.state) return t(graphStop.value.state === 'stopped' ? 'step1.graphStoppedTitle'
+    : graphStop.value.state === 'unresolved' || graphStop.value.state === 'unknown' ? 'step1.graphStopUnresolvedTitle' : 'step1.graphStoppingTitle')
   if (graphResult.value) return t(graphResult.value.loading ? 'step1.loadingGraphResult' : 'step1.graphResultNeedsRetry')
   if (error.value) return 'Error'
   if (currentPhase.value >= 2) return 'Ready'
@@ -593,11 +752,14 @@ const loadProject = async (context) => {
     const res = await getProject(context.id, context.controller.signal)
     if (!ownsView(context)) return
     if (res.success) {
+      if (res.data?.project_id !== context.id) throw new Error('Project response does not match the selected project.')
       projectData.value = res.data
       updatePhaseByStatus(res.data.status)
       addLog(`Project loaded. Status: ${res.data.status}`, context)
 
-      if (res.data.status === 'ontology_generated' && !res.data.graph_id) {
+      if (inspectGraphStop(res.data).state) {
+        observeStoppedProject(context)
+      } else if (res.data.status === 'ontology_generated' && !res.data.graph_id) {
         await startBuildGraph(context)
       } else if (res.data.status === 'graph_building' && res.data.graph_build_task_id) {
         currentPhase.value = 1
@@ -624,6 +786,7 @@ const updatePhaseByStatus = (status) => {
     case 'created':
     case 'ontology_generated': currentPhase.value = 0; break;
     case 'graph_building': currentPhase.value = 1; break;
+    case 'graph_stopped': currentPhase.value = 1; break;
     case 'graph_completed': currentPhase.value = 2; break;
     case 'failed': error.value = 'Project failed'; break;
   }
@@ -631,6 +794,8 @@ const updatePhaseByStatus = (status) => {
 
 const startBuildGraph = async (context) => {
   if (!ownsView(context)) return
+  if (inspectGraphStop(projectData.value).state) { observeStoppedProject(context); return }
+  if (context.stopObservation) return
   try {
     currentPhase.value = 1
     buildProgress.value = { progress: 0, message: 'Starting build...' }
@@ -646,8 +811,11 @@ const startBuildGraph = async (context) => {
         if (!ownsView(context)) return
         if (!projectRes.success) throw new Error(projectRes.error || 'Failed to load project')
         const project = projectRes.data
+        if (project?.project_id !== context.id) throw new Error('Project response does not match the selected project.')
         projectData.value = project
-        if (project?.status === 'graph_completed' && project.graph_id) {
+        if (inspectGraphStop(project).state) {
+          observeStoppedProject(context)
+        } else if (project?.status === 'graph_completed' && project.graph_id) {
           currentPhase.value = 2
           buildProgress.value = null
           await loadGraph(project.graph_id, context)
@@ -662,6 +830,8 @@ const startBuildGraph = async (context) => {
       }
 
       addLog(`Graph build task started. Task ID: ${res.data.task_id}`, context)
+      projectData.value = { ...projectData.value, status: 'graph_building', graph_build_task_id: res.data.task_id,
+        graph_build_control: res.data.graph_build_control ?? null }
       startPollingTask(res.data.task_id, context)
     } else {
       error.value = res.error
@@ -682,17 +852,107 @@ const stopPolling = (context) => {
 }
 
 const startPollingTask = (taskId, context) => {
-  if (!ownsView(context)) return
+  if (!ownsView(context) || !validSimulationId(taskId)) return
   stopPolling(context)
   const task = { id: taskId, inFlight: false, terminal: false }
   context.task = task
+  publishGraphStop(context)
   context.pollTimer = setInterval(() => pollTaskStatus(task, context), 2000)
   pollTaskStatus(task, context)
+}
+
+const observeStoppedProject = context => {
+  if (!ownsView(context)) return
+  const snapshot = inspectGraphStop(projectData.value)
+  currentPhase.value = 1
+  graphResult.value = null
+  error.value = ''
+  if (snapshot.state === 'stopped') {
+    if (context.task) context.task.terminal = true
+    stopPolling(context)
+  } else if (validSimulationId(projectData.value?.graph_build_task_id)) {
+    if (!context.task || context.task.id !== projectData.value.graph_build_task_id) {
+      startPollingTask(projectData.value.graph_build_task_id, context)
+    } else {
+      context.task.terminal = false
+      if (context.pollTimer == null) context.pollTimer = setInterval(() => pollTaskStatus(context.task, context), 2000)
+    }
+  }
+  publishGraphStop(context)
+}
+
+// Read-only recovery runs for live local capabilities and observed Stop, never
+// from a navigation cleanup or by resubmitting a mutation. Each request has its
+// own epoch so an earlier GET cannot overwrite a later Stop acknowledgement.
+const reconcileBuildProject = async (task, context, force = false) => {
+  const ownsTask = () => ownsView(context) && context.task === task
+  if (!ownsTask() || (!force && task.projectRequest?.pending)) return
+  const request = { pending: true, revision: context.stopRevision }
+  task.projectRequest = request
+  const ownsRequest = () => ownsTask() && task.projectRequest === request && request.revision === context.stopRevision
+  try {
+    const res = await getProject(context.id, context.controller.signal)
+    if (!ownsRequest()) return
+    const project = res?.data
+    if (!res?.success || project?.project_id !== context.id) throw new Error(res?.error || 'Project observation unavailable.')
+    // Once this exact claim has a saved marker, an inconsistent later snapshot
+    // cannot silently turn it back into an ordinary completed/legacy record.
+    const previous = projectData.value
+    if (previous?.graph_build_stop != null && project.graph_build_stop == null
+      && project.graph_build_task_id === previous.graph_build_task_id) {
+      projectData.value = { ...project, graph_build_stop: previous.graph_build_stop }
+    } else projectData.value = project
+    if (project.graph_build_task_id !== task.id) {
+      context.stopAttempt?.controller.abort()
+      context.stopAttempt = null
+      context.stopObservation = null
+      stopPolling(context)
+      context.task = null
+      if (inspectGraphStop(projectData.value).state) observeStoppedProject(context)
+      else if (project.status === 'graph_building' && project.graph_build_task_id) startPollingTask(project.graph_build_task_id, context)
+      else if (project.status === 'graph_completed' && validSimulationId(project.graph_id)) {
+        currentPhase.value = 2
+        graphResult.value = null
+        publishGraphStop(context)
+        await loadGraph(project.graph_id, context)
+      }
+      else publishGraphStop(context)
+      return
+    }
+    const snapshot = inspectGraphStop(projectData.value)
+    if (snapshot.state) {
+      context.stopObservation = null
+      observeStoppedProject(context)
+    } else if (project.status === 'graph_completed' && validSimulationId(project.graph_id) && !context.stopAttempt) {
+      context.stopObservation = null
+      task.terminal = true
+      stopPolling(context)
+      graphResult.value = null
+      currentPhase.value = 2
+      publishGraphStop(context)
+      await loadGraph(project.graph_id, context)
+    } else {
+      if (task.terminal && project.status === 'graph_building') {
+        task.terminal = false
+        task.projectOnly = true
+        if (context.pollTimer == null) context.pollTimer = setInterval(() => pollTaskStatus(task, context), 2000)
+      }
+      publishGraphStop(context)
+    }
+  } catch (cause) {
+    if (ownsRequest() && context.stopObservation) {
+      context.stopObservation.error = cause?.message || t('step1.graphStopUnknown')
+      publishGraphStop(context)
+    }
+  } finally {
+    request.pending = false
+  }
 }
 
 const pollTaskStatus = async (task, context) => {
   const ownsTask = () => ownsView(context) && context.task === task
   if (!ownsTask() || task.terminal || task.inFlight) return
+  if (task.projectOnly) { await reconcileBuildProject(task, context); return }
   task.inFlight = true
   try {
     const res = await getTaskStatus(task.id, context.controller.signal)
@@ -703,6 +963,10 @@ const pollTaskStatus = async (task, context) => {
         addLog(result.message, context)
       }
       buildProgress.value = { progress: result.progress || 0, message: result.message }
+      if (typeof result.error === 'string' && result.error) {
+        task.error = result.error
+        publishGraphStop(context)
+      }
 
       if (result.status === 'completed') {
         // Claim the terminal transition before starting any final reads.
@@ -713,15 +977,30 @@ const pollTaskStatus = async (task, context) => {
         // Keep setup gated even if the building project already had a graph ID.
         graphResult.value = { loading: true, retry: () => loadCompletedGraphResult(task, context) }
         await loadCompletedGraphResult(task, context)
-      } else if (result.status === 'failed') {
+      } else if (result.status === 'cancelled') {
+        // Cancelled task memory alone is not a saved settlement receipt.
+        task.projectOnly = true
+        context.stopObservation = { taskId: task.id, state: 'unknown', persisted: false }
+        publishGraphStop(context)
+        await reconcileBuildProject(task, context, true)
+      } else if (result.status === 'failed' && !inspectGraphStop(projectData.value).state && !context.stopObservation) {
         task.terminal = true
         stopPolling(context)
         error.value = result.error
         addLog(`Graph build task failed: ${result.error}`, context)
+      } else if (projectData.value?.graph_build_control || inspectGraphStop(projectData.value).state || context.stopObservation) {
+        await reconcileBuildProject(task, context)
       }
+    } else {
+      await reconcileBuildProject(task, context)
     }
   } catch (err) {
-    if (ownsTask()) console.error(err)
+    if (ownsTask()) {
+      if (err?.response?.status === 404 || inspectGraphStop(projectData.value).state || context.stopObservation) {
+        if (err?.response?.status === 404) task.projectOnly = true
+        await reconcileBuildProject(task, context)
+      } else console.error(err)
+    }
   } finally {
     if (ownsTask()) task.inFlight = false
   }
@@ -731,30 +1010,45 @@ const loadCompletedGraphResult = async (task, context) => {
   const ownsResult = () => ownsView(context) && context.task === task && task.terminal
   if (!ownsResult() || task.resultInFlight || task.resultAccepted) return
   task.resultInFlight = true
+  const revision = context.stopRevision
   graphResult.value.loading = true
   error.value = ''
   try {
     // Recovery is a read of this saved project, never another build request.
     const res = await getProject(context.id, context.controller.signal)
-    if (!ownsResult()) return
-    const project = res?.data
+    if (!ownsResult() || revision !== context.stopRevision) return
+    let project = res?.data
+    if (project?.project_id === context.id && projectData.value?.graph_build_stop != null
+      && project.graph_build_stop == null && project.graph_build_task_id === projectData.value.graph_build_task_id) {
+      project = { ...project, graph_build_stop: projectData.value.graph_build_stop }
+    }
+    if (res?.success && project?.project_id === context.id && inspectGraphStop(project).state) {
+      projectData.value = project
+      context.stopObservation = null
+      task.projectOnly = true
+      observeStoppedProject(context)
+      return
+    }
     if (!res?.success || project?.project_id !== context.id || project.status !== 'graph_completed'
+      || (project.graph_build_task_id && project.graph_build_task_id !== task.id)
       || typeof project.graph_id !== 'string' || !project.graph_id.trim()) {
       throw new Error(res?.error || 'Completed graph result is unavailable for this project.')
     }
     task.resultAccepted = true
     projectData.value = project
     graphResult.value = null
+    if (!context.stopAttempt) context.stopObservation = null
+    publishGraphStop(context)
     currentPhase.value = 2
     // A valid saved result permits setup while the preview loads independently.
     await loadGraph(project.graph_id, context)
   } catch (err) {
-    if (!ownsResult()) return
+    if (!ownsResult() || revision !== context.stopRevision) return
     graphResult.value.loading = false
     error.value = t('step1.graphResultUnavailable')
     addLog(`Unable to load completed graph result: ${err.message}`, context)
   } finally {
-    if (ownsResult()) task.resultInFlight = false
+    task.resultInFlight = false
   }
 }
 
@@ -817,7 +1111,8 @@ const selectProject = (id, recovering = false) => {
   resetProjectState()
   selectSimulationOwner(id, retained?.graphId, retained?.receipt)
   if (!id || route.name !== 'Process') return
-  const context = { id, active: true, controller: new AbortController(), graphRequest: null, task: null, pollTimer: null }
+  const context = { id, active: true, controller: new AbortController(), graphRequest: null, task: null, pollTimer: null,
+    stopRevision: 0, stopAction: null, stopAttempt: null, stopObservation: null }
   viewContext = context
   if (recovering && id === 'new') {
     // Aborted upload observation may already have created a server project.

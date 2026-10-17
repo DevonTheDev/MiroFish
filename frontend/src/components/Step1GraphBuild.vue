@@ -116,7 +116,8 @@
             <span class="step-title">{{ $t('step1.graphRagBuild') }}</span>
           </div>
           <div class="step-status">
-            <span v-if="currentPhase > 1" class="badge success">{{ $t('step1.ontologyCompleted') }}</span>
+            <span v-if="graphStop?.state" class="badge pending">{{ $t(graphStop.state === 'stopped' ? 'step1.graphStoppedTitle' : graphStop.state === 'unresolved' || graphStop.state === 'unknown' ? 'step1.graphStopUnresolvedTitle' : 'step1.graphStoppingTitle') }}</span>
+            <span v-else-if="currentPhase > 1" class="badge success">{{ $t('step1.ontologyCompleted') }}</span>
             <span v-else-if="currentPhase === 1" class="badge processing">{{ buildProgress?.progress || 0 }}%</span>
             <span v-else class="badge pending">{{ $t('step1.ontologyPending') }}</span>
           </div>
@@ -128,7 +129,21 @@
             {{ $t('step1.graphRagDesc') }}
           </p>
 
-          <div v-if="graphResult" class="graph-result-recovery">
+          <div v-if="graphStop?.visible" class="graph-stop-control">
+            <button v-if="graphStop.showAction" type="button" data-testid="stop-graph-build"
+              class="action-btn" :disabled="!graphStop.enabled" :onClick="graphStop.action">
+              {{ $t('step1.stopGraphBuild') }}
+            </button>
+            <p v-if="graphStop.messageKey" data-testid="graph-stop-status" class="description"
+              role="status" aria-live="polite" aria-atomic="true">{{ $t(graphStop.messageKey) }}</p>
+            <p v-if="graphStop.counts" data-testid="graph-stop-counts" class="description">
+              {{ $t('step1.graphStopCounts', graphStop.counts) }}
+            </p>
+            <p v-if="graphStop.error" data-testid="graph-stop-error" class="description"
+              role="alert">{{ graphStop.error }}</p>
+          </div>
+
+          <div v-if="graphResult && !graphStop?.state" class="graph-result-recovery">
             <p
               data-testid="graph-result-status"
               class="description"
@@ -245,6 +260,7 @@ const props = defineProps({
   ontologyProgress: Object,
   buildProgress: Object,
   graphResult: Object,
+  graphStop: Object,
   graphData: Object,
   simulationHandoff: Object,
   systemLogs: { type: Array, default: () => [] }
@@ -265,6 +281,7 @@ let mounted = true
 
 const validId = id => typeof id === 'string' && id.trim().length > 0
 const canCreateSimulation = computed(() => props.currentPhase >= 2 &&
+  !props.graphStop?.state && props.projectData?.graph_build_stop == null && props.projectData?.status !== 'graph_stopped' &&
   validId(props.projectData?.project_id) && validId(props.projectData?.graph_id))
 const ownsCreation = target => mounted && target === creationTarget &&
   props.simulationHandoff?.owner === target.owner && target.owner?.active !== false && !props.simulationHandoff?.disabled &&
@@ -362,6 +379,14 @@ watch(() => props.systemLogs.length, () => {
 </script>
 
 <style scoped>
+.graph-stop-control {
+  margin: 16px 0;
+  padding: 12px;
+  border: 1px solid #E6C8A9;
+  border-radius: 6px;
+  background: #FFF8F0;
+}
+.graph-stop-control .description { margin: 10px 0 0; }
 .platform-choice {
   display: flex;
   flex-direction: column;

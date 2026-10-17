@@ -3328,3 +3328,36 @@ read unchanged. Older app versions may reject the new cancelled status.
 Finer checks inside shared graph paging/retry helpers, JSON negotiation, gateway
 queue/provider transport and simulation interview handling are deferred. Their
 existing local budgets, concurrency, drain policy and lifecycle remain unchanged.
+
+## Stop a local graph build
+
+After ontology generation finishes and a local graph-build task starts, **Stop
+graph build** requests a stop for that exact project and task. Ontology
+generation and cloud graph construction do not expose this control.
+
+The current graph operation, including an already admitted document chunk, may
+finish its remaining model requests and writes. Requests already queued in the
+shared gateway can still run. Stop does not close that gateway or client, stop
+the model server, guarantee idle GPU use, or promise a fixed completion time.
+Navigation away only stops observation; it does not cancel construction.
+
+Source files, extracted text, ontology, graph and batch identities, and existing
+partial graph data are kept. There is no rollback or automatic restart. A
+stopped build may contain every chunk but still lack final verification. New
+simulation setup and preparation reject tagged stopping, stopped, or unresolved
+partial graphs, including explicit graph-ID overrides. Previously saved
+simulation artifacts keep their existing reuse behavior.
+
+The project stays `graph_building` while its worker, admitted local operations,
+and detached batch settle. Only a saved terminal receipt changes it to
+`graph_stopped`. A requested or unresolved receipt remains blocked after an
+ordinary app restart; a missing in-memory task does not establish completion.
+A failed first Stop save is explicitly unconfirmed: the running process keeps
+an exclusion fence, but that protection can be lost if the process exits.
+Per-file replacement is not a multi-file transaction or a power-loss guarantee.
+
+The API is `POST /api/graph/project/<project_id>/build/stop` with JSON
+`{"task_id":"<exact current graph_build_task_id>"}`. Repeating the same request
+is idempotent. A stale task cannot stop a replacement, and completed publication
+and Stop have one winner. Ordinary consumer-aware reset/delete is available
+only after confirmed settlement; unresolved ownership is not silently cleared.

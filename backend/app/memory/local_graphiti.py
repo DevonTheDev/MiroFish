@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import asyncio
 import base64
-from concurrent.futures import TimeoutError as FutureTimeout
+from concurrent.futures import Future, InvalidStateError, TimeoutError as FutureTimeout
 from dataclasses import dataclass
 import json
 import math
@@ -17,6 +17,8 @@ from types import SimpleNamespace
 from urllib.parse import urlsplit
 
 from pydantic import Field, create_model
+
+from ..services.graph_build_control import current_control, GraphBuildUnresolved
 
 
 @dataclass(frozen=True)
@@ -181,16 +183,81 @@ class _LoopRunner:
         self._state_lock = threading.RLock()
 
     def call(self, coroutine, timeout):
-        with self._state_lock:
-            if self.closed:
-                coroutine.close()
-                raise RuntimeError("Local memory client is closed")
-            if threading.current_thread() is self.thread:
-                coroutine.close()
-                raise RuntimeError(
-                    "Synchronous local memory calls cannot run on their worker loop"
+        # The concurrent future is only the caller's response channel. Its
+        # cancellation is deliberately NOT the owned loop-side settlement.
+        control = current_control()
+        receipt = control.own_receipt("bridge") if control else None
+        future = Future()
+        task_holder = []
+
+        def settled(task):
+            error = None
+            result = None
+            try:
+                result = task.result()
+            except BaseException as caught:
+                error = caught
+            if control:
+                control.settle_receipt(
+                    receipt, error, unresolved=isinstance(error, GraphBuildUnresolved)
                 )
-            future = asyncio.run_coroutine_threadsafe(coroutine, self.loop)
+            try:
+                if not future.done():
+                    if isinstance(error, asyncio.CancelledError):
+                        future.cancel()
+                    elif error is not None:
+                        future.set_exception(error)
+                    else:
+                        future.set_result(result)
+            except InvalidStateError:
+                pass  # Caller withdrew the response; the loop receipt is settled.
+
+        def start():
+            if future.cancelled():
+                coroutine.close()
+                if control:
+                    control.settle_receipt(receipt)
+                return
+            try:
+                task = self.loop.create_task(coroutine)
+            except BaseException as error:
+                coroutine.close()
+                if control:
+                    control.settle_receipt(receipt, error, unresolved=True)
+                if not future.done():
+                    future.set_exception(error)
+                return
+            task_holder.append(task)
+            task.add_done_callback(settled)
+            if future.cancelled():
+                task.cancel()
+
+        def cancel_loop_task(done):
+            if done.cancelled():
+                def cancel():
+                    if task_holder:
+                        task_holder[0].cancel()
+                try:
+                    self.loop.call_soon_threadsafe(cancel)
+                except RuntimeError:
+                    if control:
+                        control.record_error("Local memory loop settlement is unavailable", unresolved=True)
+
+        try:
+            with self._state_lock:
+                if self.closed:
+                    raise RuntimeError("Local memory client is closed")
+                if threading.current_thread() is self.thread:
+                    raise RuntimeError(
+                        "Synchronous local memory calls cannot run on their worker loop"
+                    )
+                future.add_done_callback(cancel_loop_task)
+                self.loop.call_soon_threadsafe(start)
+        except BaseException as error:
+            coroutine.close()
+            if control:
+                control.settle_receipt(receipt, error, unresolved=True)
+            raise
         try:
             return future.result(timeout=timeout)
         except FutureTimeout as exc:

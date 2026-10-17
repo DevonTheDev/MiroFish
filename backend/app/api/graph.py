@@ -13,9 +13,14 @@ from zep_cloud import NotFoundError
 
 from . import graph_bp
 from ..config import Config
-from ..storage import StoragePathError
+from ..storage import StoragePathError, validate_record_id
 from ..services.ontology_generator import OntologyGenerator, LocalOntologyInputBudgetError
 from ..services.graph_builder import BatchSubmission, GraphBuilderService
+from ..services.graph_build_control import (
+    GraphBuildControl, get_control, register_control, release_control,
+    project_build_lock, stop_reason, valid_stop_marker,
+)
+from ..services.local_graph_build import launch_local_build, persist_stop, finalize_stop
 from ..services.text_processor import TextProcessor
 from ..utils.file_parser import FileParser
 from ..utils.logger import get_logger
@@ -30,8 +35,6 @@ from ..utils.llm_client import LLMResponseError
 
 # 获取日志器
 logger = get_logger('mirofish.api')
-_build_locks: dict[str, threading.Lock] = {}
-_build_locks_guard = threading.Lock()
 
 
 @graph_bp.before_request
@@ -112,14 +115,18 @@ def _clear_project_graph_reference(project) -> None:
     project.zep_batch_id = None
     project.zep_batch_operation_id = None
     project.error = None
+    project.graph_build_stop = None
 
 
-def _project_build_lock(project_id: str) -> threading.Lock:
-    with _build_locks_guard:
-        return _build_locks.setdefault(project_id, threading.Lock())
+def _project_build_lock(project_id: str):
+    return project_build_lock(project_id)
 
 
 def _project_has_active_build(project) -> bool:
+    if get_control(project.project_id) is not None:
+        return True
+    if stop_reason(project) in {"graph_build_stopping", "graph_build_stop_unresolved"}:
+        return True
     if project.status != ProjectStatus.GRAPH_BUILDING:
         return False
     if not project.graph_build_task_id:
@@ -154,10 +161,75 @@ def get_project(project_id: str):
             "error": t('api.projectNotFound', id=project_id)
         }), 404
 
-    return jsonify({
-        "success": True,
-        "data": project.to_dict()
-    })
+    data = project.to_dict()
+    data["graph_build_control"] = _graph_build_observation(project)
+    return jsonify({"success": True, "data": data})
+
+
+def _graph_build_observation(project):
+    control = get_control(project.project_id, project.graph_build_task_id)
+    if control:
+        return control.snapshot()
+    reason = stop_reason(project)
+    if reason:
+        marker = project.graph_build_stop
+        return {"task_id": project.graph_build_task_id, "can_stop": False,
+                "state": "stopped" if reason == "graph_build_stopped" else "unresolved",
+                "persisted": marker is not None,
+                "error": marker.get("error") if isinstance(marker, dict) else None}
+    return None
+
+
+@graph_bp.route('/project/<project_id>/build/stop', methods=['POST'])
+def stop_project_build(project_id):
+    data = request.get_json(silent=True)
+    if not isinstance(data, dict):
+        return jsonify({"success": False, "error": "A JSON object with an exact task_id is required"}), 400
+    task_id = data.get("task_id")
+    try:
+        validate_record_id(task_id)
+    except (StoragePathError, TypeError, ValueError):
+        return jsonify({"success": False, "error": "An exact task_id is required"}), 400
+    with _project_build_lock(project_id):
+        project = ProjectManager.get_project(project_id)
+        if project is None:
+            return jsonify({"success": False, "error": "Project not found"}), 404
+        exact_control = get_control(project_id, task_id)
+        graph_id = (exact_control.graph_id if exact_control else None) or project.graph_id
+        with graph_lifecycle_lock(graph_id) if graph_id else nullcontext():
+            if project.graph_build_task_id != task_id:
+                return jsonify({"success": False, "error": "stale_graph_build_task"}), 409
+            control = get_control(project_id, task_id)
+            task = TaskManager().get_task(task_id)
+            if valid_stop_marker(project) and project.graph_build_stop["state"] == "stopped":
+                state, persisted = "stopped", True
+            elif project.status == ProjectStatus.GRAPH_COMPLETED and (
+                (control and control.completed) or
+                (task and task.metadata.get("local_graph_build") is True)
+            ):
+                state, persisted = "completed", True
+            else:
+                if control is None:
+                    reason = stop_reason(project) or "graph_build_stop_unavailable"
+                    return jsonify({"success": False, "error": reason,
+                                    "data": _graph_build_observation(project)}), 409
+                control.request_stop()
+                try:
+                    project = persist_stop(control)
+                    if control.worker_done and control.settlement_done and not control.has_pending_receipts():
+                        project = finalize_stop(control)
+                except Exception:
+                    result = control.snapshot()
+                    result.update(accepted=False, graph_build_stop=project.graph_build_stop)
+                    return jsonify({"success": False, "error": "graph_build_stop_unconfirmed",
+                                    "data": result}), 503
+                state = "stopped" if project.status == ProjectStatus.GRAPH_STOPPED else control.snapshot()["state"]
+                persisted = True
+            result = {"project_id": project_id, "task_id": task_id, "state": state,
+                      "accepted": state != "completed", "persisted": persisted,
+                      "graph_build_stop": project.graph_build_stop,
+                      "graph_build_control": _graph_build_observation(project)}
+            return jsonify({"success": True, "data": result}), 200 if state in {"stopped", "completed"} else 202
 
 
 @graph_bp.route('/project/list', methods=['GET'])
@@ -537,6 +609,25 @@ def _build_graph_impl():
                 "error": t('api.projectNotFound', id=project_id)
             }), 404
 
+        # New partial-build receipts cannot be bypassed by force or task loss.
+        reason = stop_reason(project)
+        if reason:
+            return jsonify({"success": False, "error": reason,
+                            "data": _graph_build_observation(project)}), 409
+
+        # A retained local owner excludes replacement even if an older error
+        # wrote a historical status while loop/batch work was still settling.
+        live_control = get_control(project_id)
+        if live_control is not None:
+            if live_control.task_id != project.graph_build_task_id:
+                return jsonify({"success": False, "error": "graph_build_stop_unresolved"}), 409
+            return jsonify({"success": True, "data": {
+                "project_id": project_id, "task_id": live_control.task_id,
+                "graph_id": project.graph_id, "reused": True,
+                "graph_build_control": live_control.snapshot(),
+                "message": t('api.graphBuilding'),
+            }})
+
         # 检查项目状态
         force = data.get('force', False)  # 强制重新构建
         if not isinstance(force, bool):
@@ -561,6 +652,7 @@ def _build_graph_impl():
                         "task_id": project.graph_build_task_id,
                         "graph_id": project.graph_id,
                         "reused": True,
+                        "graph_build_control": _graph_build_observation(project),
                         "message": t('api.graphBuilding')
                     }
                 })
@@ -662,7 +754,11 @@ def _build_graph_impl():
         
         # 创建异步任务
         task_manager = TaskManager()
-        task_id = task_manager.create_task(f"构建图谱: {graph_name}")
+        local_controlled_build = Config.LOCAL_MODE and not resume_existing_batch
+        task_id = (
+            task_manager.create_task(f"构建图谱: {graph_name}", metadata={"local_graph_build": True})
+            if local_controlled_build else task_manager.create_task(f"构建图谱: {graph_name}")
+        )
         logger.info(f"创建图谱构建任务: task_id={task_id}, project_id={project_id}")
         
         # 更新项目状态
@@ -672,7 +768,25 @@ def _build_graph_impl():
         
         # Capture locale before spawning background thread
         current_locale = get_locale()
+        if local_controlled_build:
+            control = GraphBuildControl(project_id, task_id)
+            register_control(control)
+            try:
+                launch_local_build(
+                    control, graph_name=graph_name, text=text, ontology=ontology,
+                    chunk_size=chunk_size, chunk_overlap=chunk_overlap, locale=current_locale,
+                )
+            except Exception:
+                if getattr(getattr(control, "worker", None), "ident", None) is None:
+                    release_control(control)
+                raise
+            return jsonify({"success": True, "data": {
+                "project_id": project_id, "task_id": task_id, "resumed": False,
+                "graph_build_control": control.snapshot(),
+                "message": t('api.graphBuildStarted', taskId=task_id),
+            }})
 
+        # Existing cloud and unmarked resumed-batch behavior has no Stop owner.
         # 启动后台任务
         def build_task():
             set_locale(current_locale)

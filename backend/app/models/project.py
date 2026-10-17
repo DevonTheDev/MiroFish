@@ -25,6 +25,7 @@ class ProjectStatus(str, Enum):
     CREATED = "created"              # 刚创建，文件已上传
     ONTOLOGY_GENERATED = "ontology_generated"  # 本体已生成
     GRAPH_BUILDING = "graph_building"    # 图谱构建中
+    GRAPH_STOPPED = "graph_stopped"  # Settled local partial graph receipt
     GRAPH_COMPLETED = "graph_completed"  # 图谱构建完成
     FAILED = "failed"                # 失败
 
@@ -51,6 +52,7 @@ class Project:
     graph_build_task_id: Optional[str] = None
     zep_batch_id: Optional[str] = None
     zep_batch_operation_id: Optional[str] = None
+    graph_build_stop: Optional[Dict[str, Any]] = None
     
     # 配置
     simulation_requirement: Optional[str] = None
@@ -76,6 +78,7 @@ class Project:
             "graph_build_task_id": self.graph_build_task_id,
             "zep_batch_id": self.zep_batch_id,
             "zep_batch_operation_id": self.zep_batch_operation_id,
+            "graph_build_stop": self.graph_build_stop,
             "simulation_requirement": self.simulation_requirement,
             "chunk_size": self.chunk_size,
             "chunk_overlap": self.chunk_overlap,
@@ -103,6 +106,8 @@ class Project:
             graph_build_task_id=data.get('graph_build_task_id'),
             zep_batch_id=data.get('zep_batch_id'),
             zep_batch_operation_id=data.get('zep_batch_operation_id'),
+            # Preserve even malformed present data for fail-closed classification.
+            graph_build_stop=data.get('graph_build_stop'),
             simulation_requirement=data.get('simulation_requirement'),
             chunk_size=data.get('chunk_size', 500),
             chunk_overlap=data.get('chunk_overlap', 50),

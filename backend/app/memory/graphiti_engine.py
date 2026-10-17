@@ -15,6 +15,8 @@ import uuid
 from zep_cloud import NotFoundError
 from zep_cloud.types.api_error import ApiError
 
+from ..services.graph_build_control import current_control, GraphBuildUnresolved
+
 from .local_graphiti import (
     LocalEmbeddingReranker,
     decode_cursor,
@@ -370,7 +372,7 @@ class GraphitiMemoryEngine:
         if timestamp.tzinfo is None:
             timestamp = timestamp.replace(tzinfo=timezone.utc)
         body_hash = hashlib.sha256(data.encode()).hexdigest()
-        rows = await self._query(
+        rows = await self._journal(
             """MATCH (g:MiroMemoryGraph {graph_id:$graph})
             MERGE (j:MiroMemoryJob {uuid:$id}) ON CREATE SET j.group_id=$graph, j.data=$data,
             j.body_hash=$hash, j.reference_time=$reference, j.source_description=$source,
@@ -401,19 +403,31 @@ class GraphitiMemoryEngine:
             )
         return job
 
-    def _schedule(self, key, graph_id, coroutine, kind="episode"):
+    def _schedule(self, key, graph_id, coroutine, kind="episode", control=None):
         current = self.tasks.get(key)
         if current and not current[0].done():
             coroutine.close()
+            if control:
+                raise GraphBuildUnresolved("Local batch already has a detached owner")
             return
-        task = asyncio.create_task(coroutine)
+        receipt = control.own_receipt("detached:" + kind) if control else None
+        try:
+            task = asyncio.create_task(coroutine)
+        except BaseException as error:
+            coroutine.close()
+            if control:
+                control.settle_receipt(receipt, error, unresolved=True)
+            raise
         self.tasks[key] = (task, graph_id, kind)
 
         def finished(done):
             self.tasks.pop(key, None)
-            # All job failures are journaled below; retrieve any final exception.
-            if not done.cancelled():
-                done.exception()
+            error = asyncio.CancelledError() if done.cancelled() else done.exception()
+            # Retained by the exact controller even after this task-map removal.
+            if control:
+                control.settle_receipt(
+                    receipt, error, unresolved=isinstance(error, GraphBuildUnresolved)
+                )
 
         task.add_done_callback(finished)
 
@@ -440,7 +454,7 @@ class GraphitiMemoryEngine:
             uuid_=identifier, uuid=identifier, processed=job["status"] == "succeeded"
         )
 
-    async def _ingest(self, identifier):
+    async def _ingest(self, identifier, control=None):
         try:
             job = await self._job(identifier)
             graph_id = job["group_id"]
@@ -453,16 +467,24 @@ class GraphitiMemoryEngine:
             ):
                 job = await self._job(identifier)
                 if job["status"] != "queued":
+                    if control and job["status"] == "succeeded":
+                        control.episode_succeeded(identifier)
                     return
-                claim = await self._query(
+                # Coordination waits do not admit an episode. Stop gets its
+                # final atomic opportunity immediately before the job claim.
+                if control and not control.admit_episode(identifier):
+                    return
+                claim = await self._journal(
                     "MERGE (c:MiroMemoryClaim {identity:$id}) ON CREATE SET c.owner=$owner, c.group_id=$graph RETURN c.owner AS owner",
                     id="job:" + identifier,
                     owner=self.owner,
                     graph=graph_id,
                 )
                 if claim[0]["owner"] != self.owner:
+                    if control:
+                        raise GraphBuildUnresolved("Episode belongs to another local owner")
                     return
-                await self._query(
+                await self._journal(
                     "MATCH (j:MiroMemoryJob {uuid:$id}) SET j.status='processing',j.owner=$owner",
                     id=identifier,
                     owner=self.owner,
@@ -497,16 +519,20 @@ class GraphitiMemoryEngine:
                     edge_types=edges or None,
                     edge_type_map=mapping or None,
                 )
-                await self._query(
+                await self._journal(
                     "MATCH (j:MiroMemoryJob {uuid:$id}) SET j.status='succeeded', j.completed_at=$now",
                     id=identifier,
                     now=_now(),
                 )
+                if control:
+                    control.episode_succeeded(identifier)
         except asyncio.CancelledError:
             await self._cancel_episode(identifier)
             raise
         except Exception as exc:
-            await self._query(
+            if control:
+                control.record_error(exc, unresolved=isinstance(exc, GraphBuildUnresolved))
+            await self._journal(
                 "MATCH (j:MiroMemoryJob {uuid:$id}) "
                 "WHERE (j.status='queued' AND j.submitted_owner=$owner) "
                 "OR (j.status='processing' AND j.owner=$owner) "
@@ -515,10 +541,20 @@ class GraphitiMemoryEngine:
                 owner=self.owner,
                 error=str(exc)[:1000],
             )
+            if isinstance(exc, GraphBuildUnresolved):
+                raise
+
+    async def _journal(self, query, **params):
+        try:
+            return await self._query(query, **params)
+        except BaseException as error:
+            if current_control() is None:
+                raise  # Preserve the historical unowned local-client contract.
+            raise GraphBuildUnresolved("Local ingestion journal could not be saved") from error
 
     async def _cancel_episode(self, identifier):
         # Do not overwrite a successful job or another client's active claim.
-        await self._query(
+        await self._journal(
             "MATCH (j:MiroMemoryJob {uuid:$id}) "
             "WHERE (j.status='queued' AND j.submitted_owner=$owner) "
             "OR (j.status='processing' AND j.owner=$owner) "
@@ -553,7 +589,14 @@ class GraphitiMemoryEngine:
         operation = metadata.get("mirofish_operation_id") or str(uuid.uuid4())
         identity = hashlib.sha256(_json([graph_id, operation]).encode()).hexdigest()
         identifier = str(uuid.uuid4())
-        rows = await self._query(
+        control = current_control()
+        if control:
+            if (metadata.get("mirofish_graph_build_task_id") != control.task_id or
+                    metadata.get("mirofish_project_id") != control.project_id):
+                raise GraphBuildUnresolved("Batch metadata does not match the local build")
+            # Preserve known identity even if a later bridge response is lost.
+            control.remember_identity(batch_id=identifier, operation_id=operation)
+        rows = await self._journal(
             "MERGE (b:MiroMemoryBatch {identity:$identity}) ON CREATE SET b.batch_id=$id,b.group_id=$graph,b.metadata=$metadata,b.status='draft',b.created_at=$now RETURN b.batch_id AS id",
             identity=identity,
             id=identifier,
@@ -561,6 +604,8 @@ class GraphitiMemoryEngine:
             metadata=_json(metadata),
             now=_now(),
         )
+        if control and rows[0]["id"] != identifier:
+            raise GraphBuildUnresolved("Batch identity was already claimed; no takeover attempted")
         return await self.get_batch(rows[0]["id"])
 
     async def get_batch(self, identifier):
@@ -685,18 +730,23 @@ class GraphitiMemoryEngine:
 
     async def _start_batch(self, identifier):
         batch = await self.get_batch(identifier)
+        control = current_control()
+        if control:
+            self._assert_build_batch(batch, control)
         if batch.status != "draft":
+            if control:
+                raise GraphBuildUnresolved("A local build cannot take over an existing batch")
             return batch
         if not batch.progress.total_items:
             raise ValueError("Cannot process an empty local batch")
-        claim = await self._query(
+        claim = await self._journal(
             "MERGE (c:MiroMemoryClaim {identity:$identity}) ON CREATE SET c.owner=$owner,c.group_id=$graph RETURN c.owner AS owner",
             identity="batch:" + identifier,
             owner=self.owner,
             graph=batch.group_id,
         )
         if claim[0]["owner"] == self.owner:
-            await self._query(
+            await self._journal(
                 "MATCH (b:MiroMemoryBatch {batch_id:$id}) SET b.status='processing',b.owner=$owner",
                 id=identifier,
                 owner=self.owner,
@@ -704,42 +754,95 @@ class GraphitiMemoryEngine:
             self._schedule(
                 identifier,
                 batch.group_id,
-                self._process_batch(identifier),
+                self._process_batch(identifier, control),
                 kind="batch",
+                control=control,
+            )
+        elif control:
+            raise GraphBuildUnresolved("Batch belongs to another local owner")
+        return await self.get_batch(identifier)
+
+    @staticmethod
+    def _assert_build_batch(batch, control):
+        metadata = batch.metadata
+        if (batch.batch_id != control.batch_id or batch.group_id != control.graph_id or
+                metadata.get("mirofish_graph_build_task_id") != control.task_id or
+                metadata.get("mirofish_project_id") != control.project_id or
+                metadata.get("mirofish_operation_id") != control.operation_id):
+            raise GraphBuildUnresolved("Batch does not belong to this exact graph build")
+
+    async def settle_build_batch(self, identifier, control):
+        """Journal only the exact owned, never-admitted draft/queued jobs.
+
+        Called after worker and all prior bridge/detached receipts settled. This
+        is settlement bookkeeping, never graph ingestion or shared shutdown.
+        """
+        batch = await self.get_batch(identifier)
+        self._assert_build_batch(batch, control)
+        if batch.status != "draft" and getattr(batch, "owner", None) != self.owner:
+            raise GraphBuildUnresolved("Batch settlement belongs to another local owner")
+        await self._journal(
+            "MATCH (j:MiroMemoryJob {batch_id:$id,submitted_owner:$owner,status:'queued'}) "
+            "WHERE NOT j.uuid IN $admitted "
+            "SET j.status='canceled',j.error='Graph build stopped before episode admission'",
+            id=identifier, owner=self.owner, admitted=list(control.admitted_episode_ids()),
+        )
+        observed = await self._query(
+            "MATCH (j:MiroMemoryJob {batch_id:$id}) RETURN properties(j) AS data",
+            id=identifier,
+        )
+        for row in observed:
+            job = row["data"]
+            if (job.get("submitted_owner") != self.owner or
+                    job.get("status") not in {"succeeded", "failed", "canceled"}):
+                raise GraphBuildUnresolved("Batch still contains unconfirmed or foreign episode work")
+        batch = await self.get_batch(identifier)
+        # A completed batch remains succeeded if Stop won before verification.
+        if batch.status != "succeeded":
+            await self._journal(
+                "MATCH (b:MiroMemoryBatch {batch_id:$id}) "
+                "WHERE b.status='draft' OR b.owner=$owner SET b.status='canceled'",
+                id=identifier, owner=self.owner,
             )
         return await self.get_batch(identifier)
 
-    async def _process_batch(self, identifier):
+    async def _process_batch(self, identifier, control=None):
         try:
             rows = await self._query(
                 "MATCH (j:MiroMemoryJob {batch_id:$id}) RETURN j.uuid AS id ORDER BY j.sequence_index",
                 id=identifier,
             )
             for row in rows:
-                await self._ingest(row["id"])
+                if control and control.stop_requested:
+                    break
+                await self._ingest(row["id"], control)
             batch = await self.get_batch(identifier)
             status = (
                 "succeeded"
                 if batch.progress.succeeded_items == batch.progress.total_items
-                else "failed"
+                else "canceled" if control and control.stop_requested else "failed"
             )
-            await self._query(
+            await self._journal(
                 "MATCH (b:MiroMemoryBatch {batch_id:$id}) SET b.status=$status",
                 id=identifier,
                 status=status,
             )
         except asyncio.CancelledError:
-            await self._query(
+            await self._journal(
                 "MATCH (b:MiroMemoryBatch {batch_id:$id}) SET b.status='canceled'",
                 id=identifier,
             )
             raise
         except Exception as exc:
-            await self._query(
+            if control:
+                control.record_error(exc, unresolved=isinstance(exc, GraphBuildUnresolved))
+            await self._journal(
                 "MATCH (b:MiroMemoryBatch {batch_id:$id}) SET b.status='failed',b.error=$error",
                 id=identifier,
                 error=str(exc)[:1000],
             )
+            if isinstance(exc, GraphBuildUnresolved):
+                raise
 
     async def close(self):
         if self.closed:
