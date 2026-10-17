@@ -12,6 +12,7 @@ import * as PendingUpload from '../../src/store/pendingUpload.js'
 import * as LocalCastPreset from '../../src/utils/localCastPreset.js'
 import * as LoadedGraphFile from '../../src/utils/loadedGraphFile.js'
 import * as GraphViewSvg from '../../src/utils/graphViewSvg.js'
+import * as ProjectInputRecipe from '../../src/utils/projectInputRecipe.js'
 
 export const graphView = 'views/MainView.vue'
 export const graphChild = 'components/Step1GraphBuild.vue'
@@ -132,9 +133,11 @@ export function build(options = {}) {
   const components = { '../components/GraphPanel.vue': graph }
   function evaluate(source, returnName = 'component') {
     const ast = parseJavaScript(source, { sourceType: 'module' })
-    const globals = { AbortController, Blob: DownloadBlob, File: options.fileConstructor ?? File, FormData, TextEncoder, alert: message => warnings.push(['alert', message]), URL: fileUrl, document: fileDocument, console: { warn: (...args) => warnings.push(args), error: (...args) => warnings.push(args) },
+    const globals = { AbortController, Blob: DownloadBlob, File: options.fileConstructor ?? File, FormData, TextEncoder, TextDecoder, alert: message => warnings.push(['alert', message]), URL: fileUrl, document: fileDocument, console: { warn: (...args) => warnings.push(args), error: (...args) => warnings.push(args) },
       setInterval: (callback, ms) => { const id = nextTimer++; intervals.set(id, { callback, ms }); return id },
-      clearInterval: id => intervals.delete(id) }
+      clearInterval: id => intervals.delete(id),
+      setTimeout: (callback, ms) => { const id = nextTimer++; historyTimeouts.set(id, { callback, ms }); return id },
+      clearTimeout: id => historyTimeouts.delete(id) }
     if (options.historyRoute) Object.assign(globals, {
       setTimeout: (callback, ms) => { const id = nextTimer++; historyTimeouts.set(id, { callback, ms }); return id },
       clearTimeout: id => historyTimeouts.delete(id),
@@ -147,6 +150,7 @@ export function build(options = {}) {
       if (path === '../utils/localCastPreset') dependency = LocalCastPreset
       if (path === '../utils/loadedGraphFile.js') dependency = LoadedGraphFile
       if (path === '../utils/graphViewSvg.js') dependency = GraphViewSvg
+      if (path === '../utils/projectInputRecipe.js') dependency = ProjectInputRecipe
       if (path === '../utils/localRunPlan') {
         const utility = readFileSync(new URL('../../src/utils/localRunPlan.js', import.meta.url), 'utf8')
         const exports = [...utility.matchAll(/export (?:const|function) (\w+)/g)].map(match => match[1])
@@ -185,6 +189,9 @@ export function build(options = {}) {
     }
     return value
   }
+  const recipeDownload = component('components/ProjectInputRecipeDownload.vue')
+  components['../components/ProjectInputRecipeDownload.vue'] = recipeDownload
+  components['./ProjectInputRecipeDownload.vue'] = recipeDownload
   if (existsSync(new URL('../../src/components/LocalCastPresetPanel.vue', import.meta.url))) {
     components['./LocalCastPresetPanel.vue'] = component('components/LocalCastPresetPanel.vue')
   }
@@ -230,7 +237,7 @@ export function build(options = {}) {
   }
   const host = { type: 'root', children: [], parent: null }
   let mounted = false
-  return { requests, instances, router, i18n, intervals, host, warnings, downloads, revoked, objectUrls, pushes, downloadHooks, anchors,
+  return { requests, instances, router, i18n, intervals, timeouts: historyTimeouts, host, warnings, downloads, revoked, objectUrls, pushes, downloadHooks, anchors,
     state: path => instances[path].at(-1).setupState,
     child: path => instances[path].at(-1),
     graph: () => instances.graph.at(-1),

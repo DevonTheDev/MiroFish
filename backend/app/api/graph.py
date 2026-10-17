@@ -8,11 +8,12 @@ import re
 import traceback
 import threading
 from contextlib import ExitStack, nullcontext
-from flask import request, jsonify
+from flask import request, jsonify, current_app
 from zep_cloud import NotFoundError
 
 from . import graph_bp
 from ..config import Config
+from ..services.project_input_recipe import InputRecipeError, read_project_input_recipe
 from ..storage import StoragePathError, validate_record_id
 from ..services.ontology_generator import OntologyGenerator, LocalOntologyInputBudgetError
 from ..services.graph_builder import BatchSubmission, GraphBuilderService
@@ -40,6 +41,9 @@ logger = get_logger('mirofish.api')
 @graph_bp.before_request
 def validate_storage_route_id():
     """Reject unsafe route IDs before locks, background work or deletion."""
+    # This bounded reader owns its guard and sanitized, no-store errors.
+    if request.endpoint == f"{graph_bp.name}.export_project_input_recipe":
+        return None
     record_id = (request.view_args or {}).get('project_id')
     if record_id is not None:
         try:
@@ -147,6 +151,21 @@ def allowed_file(filename: str) -> bool:
 
 
 # ============== 项目管理接口 ==============
+
+@graph_bp.route('/project/<project_id>/input-recipe', methods=['GET'])
+def export_project_input_recipe(project_id: str):
+    """Observe saved inputs without loading, resuming or changing the project."""
+    try:
+        payload = read_project_input_recipe(ProjectManager.PROJECTS_DIR, project_id)
+        response = current_app.response_class(payload, mimetype="application/json")
+        response.headers["Content-Disposition"] = 'attachment; filename="mirofish-project-input-recipe.json"'
+    except Exception as exc:
+        failure = exc if isinstance(exc, InputRecipeError) else InputRecipeError("unreadable")
+        response = jsonify({"success": False, "error_code": failure.code, "error": failure.public_message})
+        response.status_code = failure.status
+    response.headers["Cache-Control"] = "no-store"
+    return response
+
 
 @graph_bp.route('/project/<project_id>', methods=['GET'])
 def get_project(project_id: str):

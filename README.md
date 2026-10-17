@@ -724,3 +724,10 @@ Opening a saved local simulation’s **Env Setup**, or refreshing its setup stat
 When that plan identifies a running simulation or retained updater, **Stop this simulation to continue setup** requests the existing Stop action once. The page then checks status again. A Stop acknowledgement alone does not unlock setup: active work, unresolved cleanup, uncertain ownership, invalid local limits, or cancellation can keep it blocked. Refresh checks status without retrying Stop. Saved preparation remains available through explicit **Reuse** once admission permits it.
 
 An active preparation keeps its own progress and cancellation controls. Start and Back into graph setup stay gated while ownership or verification blocks admission; Home remains available. Confirmed cloud entry retains its existing cleanup policy.
+
+
+### Reuse saved project inputs
+
+An existing selected project or Home history detail can **Download input recipe**. On Home, **Open input recipe** previews the local JSON; **Use these inputs** stages one `reused-project-source.txt` and its editable scenario. Existing draft inputs require Replace/Keep. Start Engine is a separate action that creates a fresh project through the ordinary processing workflow.
+
+Recipes contain the saved normalized aggregate, not original document bytes, ontology, graph or simulation state. History lists simulations, so it is not a catalog of every project; a known project's read-only `/api/graph/project/<project_id>/input-recipe` endpoint can export complete inputs even when ontology generation failed. See [input recipe limits and behavior](docs/LOCAL_MODE.md#saved-project-input-recipes).

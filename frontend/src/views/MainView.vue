@@ -35,6 +35,9 @@
       </div>
     </header>
 
+    <ProjectInputRecipeDownload v-if="currentProjectId && currentProjectId !== 'new'"
+      :project-id="currentProjectId" :selection="() => projectData" />
+
     <!-- Main Content Area -->
     <main class="content-area">
       <!-- Left Panel: Graph -->
@@ -89,6 +92,7 @@ import { ref, shallowRef, computed, watch, onBeforeUnmount } from 'vue'
 import { useRoute, useRouter, onBeforeRouteLeave, onBeforeRouteUpdate } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import GraphPanel from '../components/GraphPanel.vue'
+import ProjectInputRecipeDownload from '../components/ProjectInputRecipeDownload.vue'
 import Step1GraphBuild from '../components/Step1GraphBuild.vue'
 import Step2EnvSetup from '../components/Step2EnvSetup.vue'
 import { generateOntology, getProject, buildGraph, stopGraphBuild, getTaskStatus, getGraphData } from '../api/graph'

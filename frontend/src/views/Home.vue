@@ -203,6 +203,33 @@
               </div>
             </div>
 
+            <div class="console-section recipe-import" data-testid="input-recipe-import">
+              <label for="input-recipe-file">{{ $t('inputRecipe.open') }}</label>
+              <input id="input-recipe-file" data-testid="input-recipe-file" type="file" accept=".json,application/json"
+                :disabled="loading" @change="selectInputRecipe" aria-describedby="input-recipe-import-note" />
+              <p id="input-recipe-import-note">{{ $t('inputRecipe.importNote') }}</p>
+              <p v-if="recipeReading" role="status">{{ $t('inputRecipe.reading') }}</p>
+              <p v-if="recipeError" data-testid="input-recipe-error" role="alert">{{ $t(recipeError) }}</p>
+              <button v-if="recipeReading || recipePreview || recipeError" type="button" data-testid="close-input-recipe"
+                :onClick="recipeControls.close">{{ $t('common.close') }}</button>
+              <div v-if="recipePreview" data-testid="input-recipe-preview">
+                <p>{{ $t('inputRecipe.projectName') }}: {{ recipePreview.recipe.source_project_name }}</p>
+                <p>{{ $t('inputRecipe.capturedAt') }}: {{ recipePreview.recipe.captured_at }}</p>
+                <p>{{ $t('inputRecipe.sourceCounts', { bytes: recipePreview.sourceBytes, points: recipePreview.sourceCodePoints }) }}</p>
+                <p>{{ $t('inputRecipe.scenario') }}</p>
+                <pre data-testid="input-recipe-scenario">{{ recipePreview.recipe.simulation_requirement }}</pre>
+                <p>{{ $t('inputRecipe.excerpt') }}</p>
+                <pre data-testid="input-recipe-excerpt">{{ recipePreview.excerpt }}</pre>
+                <p v-if="recipePreview.truncated">{{ $t('inputRecipe.excerptTruncated') }}</p>
+                <button type="button" data-testid="use-input-recipe" :disabled="loading" :onClick="recipeControls.use">{{ $t('inputRecipe.use') }}</button>
+                <div v-if="recipeControls.confirm" role="group" aria-labelledby="input-recipe-replace-prompt" data-testid="input-recipe-confirmation">
+                  <p id="input-recipe-replace-prompt">{{ $t('inputRecipe.replacePrompt') }}</p>
+                  <button type="button" data-testid="replace-input-recipe" :onClick="recipeControls.confirm">{{ $t('inputRecipe.replace') }}</button>
+                  <button type="button" data-testid="keep-input-recipe" :onClick="recipeControls.keep">{{ $t('inputRecipe.keep') }}</button>
+                </div>
+              </div>
+            </div>
+
             <!-- 分割线 -->
             <div class="console-divider">
               <span>{{ $t('home.inputParams') }}</span>
@@ -256,6 +283,7 @@ import { ref, shallowRef, computed, watch, onBeforeUnmount } from 'vue'
 import { RouterLink, useRouter } from 'vue-router'
 import HistoryDatabase from '../components/HistoryDatabase.vue'
 import LanguageSwitcher from '../components/LanguageSwitcher.vue'
+import { parseInputRecipeFile, inputRecipePreview, RECIPE_SOURCE_FILENAME } from '../utils/projectInputRecipe.js'
 import { setPendingUpload, getPendingUpload, consumePendingUpload } from '../store/pendingUpload.js'
 
 const router = useRouter()
@@ -363,6 +391,95 @@ watch([() => getPendingUpload().submissionId, loading, () => router.currentRoute
 // Restore changes local form input only. Its authority follows the committed
 // Home selection; an ordinary pending navigation neither cancels nor owns it.
 onBeforeUnmount(retireRestore)
+
+// Recipe selection/adoption owns only this local Home draft. Pending submission
+// storage remains entirely under the established restoration and Start handoff.
+const recipePreview = shallowRef(null)
+const recipeControls = shallowRef({})
+const recipeReading = ref(false)
+const recipeError = ref('')
+let recipeOwner = null
+const retireRecipe = () => {
+  recipeOwner = null
+  recipePreview.value = null
+  recipeControls.value = {}
+  recipeReading.value = false
+  recipeError.value = ''
+}
+const ownsRecipe = owner => active && recipeOwner === owner && !loading.value
+  && router.currentRoute.value === owner.route && owner.route.name === 'Home'
+  && editRevision === owner.revision
+  && getPendingUpload().submissionId === owner.submissionId
+  && getPendingUpload().isPending === owner.pending
+
+const applyRecipe = owner => {
+  if (!ownsRecipe(owner) || recipePreview.value?.recipe !== owner.recipe) return
+  let file
+  try {
+    file = new File([new TextEncoder().encode(owner.recipe.source_text)], RECIPE_SOURCE_FILENAME, { type: 'text/plain' })
+  } catch {
+    if (ownsRecipe(owner)) recipeError.value = 'inputRecipe.adoptFailed'
+    return
+  }
+  if (!ownsRecipe(owner)) return
+  const scenario = owner.recipe.simulation_requirement
+  // Allocation succeeds before the synchronous owner check and complete commit.
+  retireRecipe()
+  files.value = [file]
+  formData.value.simulationRequirement = scenario
+  sourceText.value = ''
+  sourceError.value = ''
+  error.value = ''
+  requirementInput.value?.focus?.()
+}
+const publishRecipe = owner => {
+  recipeControls.value = {
+    close: () => { if (ownsRecipe(owner)) retireRecipe() },
+    use: () => {
+      if (!ownsRecipe(owner)) return
+      if (files.value.length || sourceText.value !== '' || formData.value.simulationRequirement !== '') {
+        const confirmation = {}
+        recipeControls.value = { ...recipeControls.value, confirmation,
+          confirm: () => {
+            if (recipeControls.value.confirmation === confirmation && ownsRecipe(owner)) applyRecipe(owner)
+          },
+          keep: () => {
+            if (recipeControls.value.confirmation === confirmation && ownsRecipe(owner)) publishRecipe(owner)
+          },
+        }
+      } else applyRecipe(owner)
+    },
+  }
+}
+const selectInputRecipe = async event => {
+  const file = event.target.files?.[0]
+  event.target.value = ''
+  if (!canEditSource()) return
+  retireRecipe()
+  if (!file) return
+  const pending = getPendingUpload()
+  const owner = { route: router.currentRoute.value, revision: editRevision,
+    submissionId: pending.submissionId, pending: pending.isPending, recipe: null }
+  recipeOwner = owner
+  recipeControls.value = { close: () => { if (ownsRecipe(owner)) retireRecipe() } }
+  recipeReading.value = true
+  try {
+    const recipe = await parseInputRecipeFile(file)
+    if (!ownsRecipe(owner)) return
+    owner.recipe = recipe
+    recipePreview.value = { recipe, ...inputRecipePreview(recipe) }
+    publishRecipe(owner)
+  } catch (failure) {
+    if (ownsRecipe(owner)) recipeError.value = failure?.code === 'tooLarge' ? 'inputRecipe.tooLarge'
+      : failure?.code === 'readFailed' ? 'inputRecipe.readFailed' : 'inputRecipe.invalid'
+  } finally {
+    if (ownsRecipe(owner)) recipeReading.value = false
+  }
+}
+watch([() => files.value.slice(), sourceText, () => formData.value.simulationRequirement,
+  () => router.currentRoute.value, loading, () => getPendingUpload().submissionId,
+  () => getPendingUpload().isPending], retireRecipe, { flush: 'sync' })
+onBeforeUnmount(retireRecipe)
 
 const updateSourceText = event => {
   if (!canEditSource()) return
@@ -484,6 +601,9 @@ const startSimulation = async () => {
 </script>
 
 <style scoped>
+.recipe-import pre { white-space: pre-wrap; overflow-wrap: anywhere; max-height: 18rem; overflow: auto; font: inherit; }
+.recipe-import p { font-size: 0.85rem; line-height: 1.5; }
+.recipe-import button { margin: 4px 8px 4px 0; padding: 8px 12px; cursor: pointer; }
 .restore-submission { background: #fff7f2; }
 .restore-submission p { font-size: 0.85rem; line-height: 1.5; }
 .restore-submission button { margin: 4px 8px 4px 0; padding: 8px 12px; cursor: pointer; }

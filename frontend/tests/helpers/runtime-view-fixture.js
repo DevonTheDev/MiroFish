@@ -7,6 +7,7 @@ import * as Vue from 'vue'
 import * as Router from 'vue-router'
 import { createI18n, useI18n } from 'vue-i18n'
 import * as PendingUpload from '../../src/store/pendingUpload.js'
+import * as ProjectInputRecipe from '../../src/utils/projectInputRecipe.js'
 
 export const ok = data => ({ success: true, data })
 export async function flush() {
@@ -86,6 +87,7 @@ export async function mountRuntime({ api, initialPath = '/runtime', locale = 'en
     'vue-router': { ...Router, createWebHistory: Router.createMemoryHistory },
     'vue-i18n': { useI18n },
     '../store/pendingUpload.js': PendingUpload,
+    '../utils/projectInputRecipe.js': ProjectInputRecipe,
   }
   const components = { '../components/LanguageSwitcher.vue': stub }
   function evaluate(source, returnName = 'component') {

@@ -7,6 +7,7 @@ import * as Vue from 'vue'
 import * as Router from 'vue-router'
 import { createI18n, useI18n } from 'vue-i18n'
 import * as PendingUpload from '../../src/store/pendingUpload.js'
+import * as ProjectInputRecipe from '../../src/utils/projectInputRecipe.js'
 
 export const ok = data => ({ success: true, data })
 export async function flush() {
@@ -21,7 +22,7 @@ export async function waitFor(predicate, { timeout = 5000 } = {}) {
   }
 }
 export function deferredApi() {
-  const calls = { getComparisonCandidates: [], getSimulationHistory: [] }
+  const calls = { getComparisonCandidates: [], getSimulationHistory: [], getProjectInputRecipe: [] }
   const api = Object.fromEntries(Object.keys(calls).map(name => [name, (...args) => new Promise((resolve, reject) => {
     calls[name].push({ args, signal: args.at(-1), resolve, reject })
   })]))
@@ -155,11 +156,12 @@ export async function mountSavedSimulations({ api, initialPath = '/simulations',
     'vue-router': { ...Router, createWebHistory: Router.createMemoryHistory },
     'vue-i18n': { useI18n },
     '../store/pendingUpload.js': PendingUpload,
+    '../utils/projectInputRecipe.js': ProjectInputRecipe,
   }
   const components = { '../components/LanguageSwitcher.vue': stub }
   function evaluate(source, returnName = 'component') {
     const ast = parseJavaScript(source, { sourceType: 'module' })
-    const globals = { AbortController, Date, Intl, console, ...browser,
+    const globals = { AbortController, Date, Intl, TextEncoder, TextDecoder, console, ...browser,
       setTimeout: () => 0, clearTimeout() {},
       IntersectionObserver: class { observe() {} disconnect() {} } }
     for (const statement of ast.program.body.filter(item => item.type === 'ImportDeclaration').reverse()) {
@@ -184,6 +186,7 @@ export async function mountSavedSimulations({ api, initialPath = '/simulations',
     value.render = evaluate(template.code, 'render')
     return value
   }
+  components['./ProjectInputRecipeDownload.vue'] = component('components/ProjectInputRecipeDownload.vue')
   if (existsSync(new URL('../../src/views/SavedSimulationsView.vue', import.meta.url))) {
     components['../views/SavedSimulationsView.vue'] = component('views/SavedSimulationsView.vue')
   }

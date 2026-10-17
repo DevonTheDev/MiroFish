@@ -2614,5 +2614,29 @@
       "timeout": "The download request timed out. The server read may still finish. Try again explicitly.",
       "invalid_filters": "The all-actions request contains unsupported options. Refresh and try Download all saved actions again."
     }
+  },
+  "inputRecipe": {
+    "download": "Download input recipe",
+    "downloadNote": "Reuse the saved aggregate source and scenario as a new draft. This does not restore a project or its original documents.",
+    "downloadRequested": "Download requested; saving the file is not confirmed.",
+    "downloadFailed": "The saved inputs could not be downloaded.",
+    "captureChanged": "Complete saved inputs could not be verified, or they changed during capture. Try downloading again.",
+    "open": "Open input recipe",
+    "importNote": "Choose a local recipe JSON (up to 2 MiB). Preview it, use the inputs, then separately choose Start Engine to create a new project. Editing the draft closes the preview.",
+    "reading": "Reading the local recipe…",
+    "projectName": "Source project name (descriptive only)",
+    "capturedAt": "Capture time (unverified)",
+    "sourceCounts": "Source: {bytes} UTF-8 bytes · {points} Unicode code points",
+    "scenario": "Scenario",
+    "excerpt": "Saved source excerpt",
+    "excerptTruncated": "Showing the first 2,000 code points. The complete source will be used.",
+    "use": "Use these inputs",
+    "replacePrompt": "Replace the current files, scenario and unadded pasted text with these inputs?",
+    "replace": "Replace draft inputs",
+    "keep": "Keep current draft",
+    "tooLarge": "The input recipe exceeds its size limits (2 MiB recipe, 1 MiB source, 64 KiB scenario, 1 KiB name).",
+    "invalid": "This file is not a supported, complete version 1 input recipe.",
+    "readFailed": "The local recipe could not be read. Your draft is unchanged.",
+    "adoptFailed": "The source file could not be created. Your draft is unchanged."
   }
 }

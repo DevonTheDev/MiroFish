@@ -206,6 +206,7 @@
               <button type="button" class="history-compare-btn" data-testid="history-saved-activity" @click="goToSavedActivity(selectedProject.simulation_id)">{{ $t('savedActivity.historyEntry') }}</button>
               <button type="button" class="history-compare-btn" data-testid="history-compare-selected" @click="goToComparison(selectedProject.simulation_id)">{{ $t('comparison.historySelectedEntry') }}</button>
             </div>
+            <ProjectInputRecipeDownload :project-id="selectedProject.project_id" :selection="() => selectedProject" />
             <!-- 不可回放提示 -->
             <div class="modal-playback-hint">
               <span class="hint-text">{{ $t('history.replayHint') }}</span>
@@ -222,6 +223,7 @@ import { ref, computed, onMounted, onUnmounted, onActivated, onDeactivated, watc
 import { useRouter, useRoute } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { getSimulationHistory } from '../api/simulation'
+import ProjectInputRecipeDownload from './ProjectInputRecipeDownload.vue'
 
 const router = useRouter()
 const route = useRoute()

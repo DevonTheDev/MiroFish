@@ -2614,5 +2614,29 @@
       "timeout": "下载请求超时。服务器读取可能仍会完成。请手动重试。",
       "invalid_filters": "全部动作请求包含不支持的选项。请刷新后重新下载全部已保存动作。"
     }
+  },
+  "inputRecipe": {
+    "download": "下载输入配方",
+    "downloadNote": "将已保存的汇总源文本和模拟需求复用为新草稿。此操作不会恢复项目或原始文档。",
+    "downloadRequested": "已请求下载，但尚未确认文件是否已保存。",
+    "downloadFailed": "无法下载已保存的输入。",
+    "captureChanged": "无法确认已保存输入的完整性，或输入在读取过程中发生变化。请重试下载。",
+    "open": "打开输入配方",
+    "importNote": "选择本地配方 JSON（最大 2 MiB），预览并采用输入后，再单独点击启动引擎创建新项目。编辑草稿会关闭预览。",
+    "reading": "正在读取本地配方…",
+    "projectName": "来源项目名称（仅供参考）",
+    "capturedAt": "捕获时间（未经验证）",
+    "sourceCounts": "源文本：{bytes} 个 UTF-8 字节 · {points} 个 Unicode 码点",
+    "scenario": "模拟需求",
+    "excerpt": "已保存源文本摘录",
+    "excerptTruncated": "仅显示前 2,000 个码点，将使用完整源文本。",
+    "use": "采用这些输入",
+    "replacePrompt": "是否用这些输入替换当前文件、模拟需求及尚未添加的粘贴文本？",
+    "replace": "替换草稿输入",
+    "keep": "保留当前草稿",
+    "tooLarge": "输入配方超出大小限制（配方 2 MiB、源文本 1 MiB、模拟需求 64 KiB、名称 1 KiB）。",
+    "invalid": "此文件不是受支持且完整的第 1 版输入配方。",
+    "readFailed": "无法读取本地配方，草稿未更改。",
+    "adoptFailed": "无法创建源文件，草稿未更改。"
   }
 }
