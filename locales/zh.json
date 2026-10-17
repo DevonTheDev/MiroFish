@@ -2638,5 +2638,53 @@
     "invalid": "此文件不是受支持且完整的第 1 版输入配方。",
     "readFailed": "无法读取本地配方，草稿未更改。",
     "adoptFailed": "无法创建源文件，草稿未更改。"
+  },
+  "savedInputs": {
+    "open": "已保存的输入",
+    "refresh": "刷新",
+    "retry": "重试",
+    "loading": "正在查找已保存项目的候选项…",
+    "failed": "无法列出已保存的输入",
+    "candidateNote": "这些候选项来自已保存的项目元数据。下载时才会检查完整的来源文本和情景要求。",
+    "empty": "未找到已保存项目的候选项",
+    "partialEmpty": "本次有限扫描未找到候选项。部分条目被跳过或尚未检查。",
+    "partial": "本次有限扫描显示 {count} 个候选项。可能还有其他项目。",
+    "found": "找到 {count} 个已保存项目的候选项",
+    "directoryChanged": "扫描期间项目存储发生变化。请刷新后重新检查。",
+    "scanDetails": "扫描限制和跳过的条目",
+    "limitNote": "每次扫描最多检查 {entries} 个目录条目，返回 {rows} 个候选项。单个元数据文件上限为 1 MiB，预留读取预算为 8 MiB。刷新后显示的子集可能变化。",
+    "scanCounts": "已检查条目：{examined}。预留元数据字节：{bytes}。因字节限制而暂缓：{deferred}。",
+    "unnamed": "未命名项目",
+    "updated": "项目更新时间",
+    "created": "项目创建时间",
+    "noTimeZone": "未记录时区",
+    "noDate": "日期不可用",
+    "nameTruncated": "名称已缩短显示",
+    "scenario": "情景要求摘录",
+    "noScenario": "情景要求不可用",
+    "scenarioTruncated": "情景要求摘录已缩短。下载时将检查完整的已保存情景要求。",
+    "stop": {
+      "end": "已到达目录迭代末尾。这只是一次观察，并非原子快照。",
+      "entry_limit": "已达到目录条目上限。可能有条目尚未检查。",
+      "row_limit": "已达到候选项上限。可能有条目尚未检查。",
+      "byte_limit": "已达到元数据读取预算。可能有条目尚未检查。"
+    },
+    "skip": {
+      "unsafe": "跳过的不安全或不支持的条目",
+      "missing": "跳过的缺失元数据",
+      "too_large": "跳过的超限元数据",
+      "invalid": "跳过的无效元数据",
+      "changed": "跳过的已变化条目",
+      "unreadable": "跳过的不可读条目"
+    },
+    "status": {
+      "created": "已创建",
+      "ontology_generated": "本体已生成",
+      "graph_building": "正在构建图谱",
+      "graph_stopped": "图谱构建已停止",
+      "graph_completed": "图谱已完成",
+      "failed": "失败",
+      "unknown": "未知状态"
+    }
   }
 }

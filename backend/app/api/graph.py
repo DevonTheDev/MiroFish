@@ -14,6 +14,7 @@ from zep_cloud import NotFoundError
 from . import graph_bp
 from ..config import Config
 from ..services.project_input_recipe import InputRecipeError, read_project_input_recipe
+from ..services.project_input_candidates import InputCandidatesError, read_project_input_candidates
 from ..storage import StoragePathError, validate_record_id
 from ..services.ontology_generator import OntologyGenerator, LocalOntologyInputBudgetError
 from ..services.graph_builder import BatchSubmission, GraphBuilderService
@@ -151,6 +152,22 @@ def allowed_file(filename: str) -> bool:
 
 
 # ============== 项目管理接口 ==============
+
+@graph_bp.route('/project/input-candidates', methods=['GET'])
+def list_project_input_candidates():
+    """Observe a bounded metadata subset without checking recipe eligibility."""
+    try:
+        if request.query_string:
+            raise InputCandidatesError("invalid_request")
+        payload = read_project_input_candidates(ProjectManager.PROJECTS_DIR)
+        response = current_app.response_class(payload, mimetype="application/json")
+    except Exception as exc:
+        failure = exc if isinstance(exc, InputCandidatesError) else InputCandidatesError("unreadable")
+        response = jsonify({"success": False, "error_code": failure.code, "error": failure.public_message})
+        response.status_code = failure.status
+    response.headers["Cache-Control"] = "no-store"
+    return response
+
 
 @graph_bp.route('/project/<project_id>/input-recipe', methods=['GET'])
 def export_project_input_recipe(project_id: str):

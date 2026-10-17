@@ -2638,5 +2638,53 @@
     "invalid": "This file is not a supported, complete version 1 input recipe.",
     "readFailed": "The local recipe could not be read. Your draft is unchanged.",
     "adoptFailed": "The source file could not be created. Your draft is unchanged."
+  },
+  "savedInputs": {
+    "open": "Saved inputs",
+    "refresh": "Refresh",
+    "retry": "Retry",
+    "loading": "Looking for saved project candidates…",
+    "failed": "Saved inputs could not be listed",
+    "candidateNote": "These are saved project metadata candidates. Complete source and scenario are checked when you download.",
+    "empty": "No saved project candidates found",
+    "partialEmpty": "No candidates found in this bounded scan. Some entries were skipped or not examined.",
+    "partial": "Showing {count} candidates from a bounded scan. More projects may exist.",
+    "found": "Found {count} saved project candidates",
+    "directoryChanged": "Project storage changed during this scan. Refresh to check again.",
+    "scanDetails": "Scan limits and skipped entries",
+    "limitNote": "One scan examines up to {entries} directory entries and returns up to {rows} candidates. Metadata is limited to 1 MiB per file and an 8 MiB reserved read budget. The subset may change when refreshed.",
+    "scanCounts": "Examined entries: {examined}. Reserved metadata bytes: {bytes}. Deferred for byte limit: {deferred}.",
+    "unnamed": "Unnamed project",
+    "updated": "Project updated",
+    "created": "Project created",
+    "noTimeZone": "time zone not recorded",
+    "noDate": "Date unavailable",
+    "nameTruncated": "Name shortened for display",
+    "scenario": "Scenario excerpt",
+    "noScenario": "Scenario unavailable",
+    "scenarioTruncated": "Scenario excerpt shortened. Download checks the full saved scenario.",
+    "stop": {
+      "end": "The directory iterator ended. This is an observation, not an atomic snapshot.",
+      "entry_limit": "Stopped at the directory-entry limit. Some entries may not have been examined.",
+      "row_limit": "Stopped at the candidate limit. Some entries may not have been examined.",
+      "byte_limit": "Stopped at the metadata read budget. Some entries may not have been examined."
+    },
+    "skip": {
+      "unsafe": "Unsafe or unsupported entries skipped",
+      "missing": "Missing metadata skipped",
+      "too_large": "Oversized metadata skipped",
+      "invalid": "Invalid metadata skipped",
+      "changed": "Changed entries skipped",
+      "unreadable": "Unreadable entries skipped"
+    },
+    "status": {
+      "created": "Created",
+      "ontology_generated": "Ontology generated",
+      "graph_building": "Graph building",
+      "graph_stopped": "Graph stopped",
+      "graph_completed": "Graph completed",
+      "failed": "Failed",
+      "unknown": "Unknown status"
+    }
   }
 }

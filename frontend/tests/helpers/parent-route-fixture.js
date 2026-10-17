@@ -192,6 +192,7 @@ export function build(options = {}) {
   const recipeDownload = component('components/ProjectInputRecipeDownload.vue')
   components['../components/ProjectInputRecipeDownload.vue'] = recipeDownload
   components['./ProjectInputRecipeDownload.vue'] = recipeDownload
+  components['../components/SavedInputPicker.vue'] = component('components/SavedInputPicker.vue')
   if (existsSync(new URL('../../src/components/LocalCastPresetPanel.vue', import.meta.url))) {
     components['./LocalCastPresetPanel.vue'] = component('components/LocalCastPresetPanel.vue')
   }

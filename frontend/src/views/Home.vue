@@ -228,6 +228,7 @@
                   <button type="button" data-testid="keep-input-recipe" :onClick="recipeControls.keep">{{ $t('inputRecipe.keep') }}</button>
                 </div>
               </div>
+              <SavedInputPicker v-if="!loading" :home-available="canEditSource" />
             </div>
 
             <!-- 分割线 -->
@@ -282,6 +283,7 @@
 import { ref, shallowRef, computed, watch, onBeforeUnmount } from 'vue'
 import { RouterLink, useRouter } from 'vue-router'
 import HistoryDatabase from '../components/HistoryDatabase.vue'
+import SavedInputPicker from '../components/SavedInputPicker.vue'
 import LanguageSwitcher from '../components/LanguageSwitcher.vue'
 import { parseInputRecipeFile, inputRecipePreview, RECIPE_SOURCE_FILENAME } from '../utils/projectInputRecipe.js'
 import { setPendingUpload, getPendingUpload, consumePendingUpload } from '../store/pendingUpload.js'
