@@ -2686,5 +2686,43 @@
       "failed": "失败",
       "unknown": "未知状态"
     }
+  },
+  "savedActivityAgents": {
+    "title": "按 Agent 查看活动",
+    "entry": "按 Agent 查看活动",
+    "backRecords": "返回已保存记录",
+    "entryNote": "按 Agent 查看活动仅沿用此平台和来源版本。短语、Agent、轮次、操作类型、结果及记录分页筛选不会沿用。",
+    "scope": "此平台及来源观察中全部已接纳的保存尝试，包括重复尝试。每行代表一个精确的平台与 Agent ID 组合。未出现的 ID 不能证明没有活动。",
+    "filtersTitle": "选择已保存平台",
+    "agentId": "记录中的 Agent ID",
+    "filterNote": "应用保留已观察版本。刷新依据 URL 中已应用的平台读取最新文件。打开记录时保留此版本，仍受记录读取器自身的来源和响应限制。",
+    "orderNote": "按已保存失败次数降序，再按全部尝试次数降序，Twitter 在 Reddit 之前，最后按精确的 Agent ID 数值升序。这是保存计数的显示顺序，并非对 Agent 的评估。",
+    "draftNote": "平台已修改。请应用以读取新概览；之前的观察及其控件已停用。",
+    "loading": "正在读取已保存的 Agent 活动…",
+    "resultsTitle": "按平台和 Agent ID 汇总记录尝试",
+    "pairCount": "返回的平台与 Agent 组合：{count}",
+    "total": "全部尝试",
+    "partialNote": "覆盖范围不完整。计数仅包含可用来源中已接纳的记录。",
+    "tableCaption": "记录尝试计数 · 正数计数可打开此来源版本下匹配的已保存记录",
+    "unsupportedId": "此记录中的 Agent ID 超过记录筛选的 64 位数字限制。",
+    "openCount": "打开 {platform} Agent {agent} 的 {count} 条{outcome}已保存尝试",
+    "pagination": "Agent 表本地分页",
+    "pagePosition": "本地第 {page} / {pages} 页 · 每页 25 行",
+    "empty": "此来源观察中没有记录的操作尝试。",
+    "partialEmpty": "可用记录中没有已接纳的尝试。覆盖范围不完整。",
+    "unavailable": "已保存来源不可用。尝试和结果总数未知；请查看上方来源原因。",
+    "errors": {
+      "generic": "无法加载已保存的 Agent 概览。请应用或刷新重试。",
+      "invalid_selection": "URL 中的选择无效。请使用一个模拟 ID，每个平台和版本只能有一个值。",
+      "invalid_filters": "请选择全部平台、Twitter 或 Reddit。其他筛选不适用于此概览。",
+      "invalid_revision": "此 URL 中的保存版本无效。请刷新以读取最新已保存文件。",
+      "unsafe_path": "无法安全读取此已保存记录。请返回历史记录并选择其他模拟。",
+      "simulation_not_found": "此已保存模拟已不存在。请返回历史记录并选择其他模拟。",
+      "simulation_unreadable": "无法读取此已保存模拟记录。请刷新重试。",
+      "simulation_active": "已保存运行被标记为活动状态。请在停止后刷新。",
+      "sources_changed": "已保存文件发生变化。请刷新，依据已应用的平台读取最新文件。",
+      "too_many_agent_pairs": "此概览超过 1000 个平台与 Agent 组合。请选择一个平台并应用，或返回已保存活动，使用已知且最多 64 位的精确 ID。单个平台仍可能超限。",
+      "response_too_large": "此概览超过 1 MiB 响应限制。请选择一个平台并应用，或返回已保存活动，使用已知且最多 64 位的精确 ID。单个平台仍可能超限。"
+    }
   }
 }

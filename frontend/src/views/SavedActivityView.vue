@@ -57,7 +57,8 @@
       <p v-if="dirty" class="notice" role="status">{{ t('savedActivity.draftNote') }}</p>
       <p v-if="loading" data-testid="loading" class="notice" role="status" aria-live="polite">{{ t('savedActivity.loading') }}</p>
       <p v-if="error" data-testid="error" class="notice error" role="alert">{{ t(`savedActivity.errors.${error}`) }}</p>
-      <p v-if="acceptedCurrent"><RouterLink data-testid="activity-rounds-entry" :to="roundsLocation">{{ t('savedActivityRounds.entry') }}</RouterLink></p>
+      <div v-if="acceptedCurrent" class="actions"><RouterLink data-testid="activity-rounds-entry" :to="roundsLocation">{{ t('savedActivityRounds.entry') }}</RouterLink><button type="button" data-testid="activity-agents-entry" :onClick="agentsEntryHandler(result)">{{ t('savedActivityAgents.entry') }}</button></div>
+      <p v-if="acceptedCurrent" class="note">{{ t('savedActivityAgents.entryNote') }}</p>
       <section v-if="result" data-testid="results" :aria-label="t('savedActivity.resultsTitle')">
         <article class="panel" data-testid="saved-context">
           <div class="summary-heading"><h2>{{ t('savedActivity.contextTitle') }}</h2><span data-testid="availability" class="availability" :class="result.availability">{{ availabilityLabel(result.availability) }}</span></div>
@@ -248,6 +249,7 @@ async function load() {
 }
 function editDraft(key, value) {
   dirty.value = true
+  cancelPendingAgentEntry()
   retire()
   draft.value = { ...draft.value, [key]: value }
 }
@@ -290,6 +292,28 @@ function refresh() {
 const acceptedCurrent = computed(() => !!result.value && !dirty.value && !loading.value && !!activeRequest && owns(activeRequest))
 const canDownloadAll = computed(() => acceptedCurrent.value && !pendingNavigation && ['completed', 'stopped', 'failed'].includes(result.value.context.status))
 const roundsLocation = computed(() => ({ name: 'SavedActivityRounds', params: { simulationId: result.value?.simulation_id }, query: { ...(result.value?.filters.platform ? { platform: result.value.filters.platform } : {}), revision: result.value?.source_revision } }))
+function cancelPendingAgentEntry() {
+  if (pendingNavigation?.kind !== 'agents-entry' || route.fullPath === pendingNavigation.path) return
+  pendingNavigation.retired = true; pendingNavigation = null
+  // A draft edit cancels the older guarded entry without applying the draft.
+  void router.replace(route.fullPath).catch(() => {})
+}
+function agentsEntryHandler(saved) {
+  const request = activeRequest
+  return async () => {
+    if (!saved || result.value !== saved || !acceptedCurrent.value || activeRequest !== request || !owns(request)) return
+    const target = { name: 'SavedActivityAgents', params: { simulationId: saved.simulation_id }, query: { ...(saved.filters.platform ? { platform: saved.filters.platform } : {}), revision: saved.source_revision } }
+    retire(); acknowledgement = null
+    const navigation = { path: router.resolve(target).fullPath, kind: 'agents-entry', retired: false }
+    pendingNavigation = navigation
+    try {
+      await router.push(target)
+      if (!disposed && pendingNavigation === navigation && !navigation.retired && route.fullPath !== navigation.path) error.value = 'generic'
+    } catch {
+      if (!disposed && pendingNavigation === navigation && !navigation.retired) error.value = 'generic'
+    } finally { if (pendingNavigation === navigation) pendingNavigation = null }
+  }
+}
 const canPrevious = computed(() => !!result.value && !dirty.value && !loading.value && result.value.offset > 0)
 const canNext = computed(() => !!result.value && !dirty.value && !loading.value && result.value.has_more && result.value.offset + result.value.limit <= 500000)
 function goPage(offset) {
@@ -383,7 +407,7 @@ watch(() => route.fullPath, () => {
   if (navigation?.path === route.fullPath && navigation.retired) return
   retire(); syncDraft(); load()
 }, { immediate: true, flush: 'sync' })
-onBeforeUnmount(() => { disposed = true; acknowledgement = null; retire(); pendingNavigation = null })
+onBeforeUnmount(() => { disposed = true; acknowledgement = null; cancelPendingAgentEntry(); retire(); pendingNavigation = null })
 </script>
 
 <style scoped>

@@ -11,6 +11,7 @@ import SavedInterviewComparisonView from '../views/SavedInterviewComparisonView.
 import SavedActivityView from '../views/SavedActivityView.vue'
 import SavedActivityFilesView from '../views/SavedActivityFilesView.vue'
 import SavedActivityRoundsView from '../views/SavedActivityRoundsView.vue'
+import SavedActivityAgentsView from '../views/SavedActivityAgentsView.vue'
 import SimulationComparisonView from '../views/SimulationComparisonView.vue'
 import RuntimeStatusView from '../views/RuntimeStatusView.vue'
 import PromptTrialsView from '../views/PromptTrialsView.vue'
@@ -56,6 +57,11 @@ const routes = [
     path: '/simulation/:simulationId/activity/rounds',
     name: 'SavedActivityRounds',
     component: SavedActivityRoundsView
+  },
+  {
+    path: '/simulation/:simulationId/activity/agents',
+    name: 'SavedActivityAgents',
+    component: SavedActivityAgentsView
   },
   {
     path: '/prompt-examples',

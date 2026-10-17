@@ -240,3 +240,10 @@ export const getSavedActivityRounds = (simulationId, params = {}, signal) => {
   const query = Object.fromEntries(allowed.filter(key => Object.hasOwn(params, key)).map(key => [key, params[key]]))
   return service.get(`/api/simulation/${encodeURIComponent(simulationId)}/saved-action-rounds`, { params: query, signal })
 }
+
+/** Read bounded saved attempts by exact platform/agent pair. */
+export const getSavedActivityAgents = (simulationId, params = {}, signal) => {
+  const allowed = ['platform', 'revision']
+  const query = Object.fromEntries(allowed.filter(key => Object.hasOwn(params, key)).map(key => [key, params[key]]))
+  return service.get(`/api/simulation/${encodeURIComponent(simulationId)}/saved-action-agents`, { params: query, signal })
+}

@@ -3452,3 +3452,50 @@ The picker deliberately returns a bounded subset in directory encounter order, s
 `GET /api/graph/project/input-candidates` accepts no query parameters and returns a compact no-store JSON observation capped at 256 KiB. It reads project metadata only, never the saved source, original files, graphs, simulations or reports. Missing storage is an empty observation without directory creation. Root failures use sanitized errors, and ordinary file changes are skipped or disclosed. These checks follow the existing trusted-host storage assumptions; they do not defend against a hostile local writer.
 
 Close, Refresh, leaving Home and Start retire the picker’s selection and pending callbacks. Returning Home leaves the picker closed. Downloading retains the established “download requested; saving is not confirmed” behavior.
+
+
+## Activity by agent
+
+From an accepted **Saved activity** observation, choose **Activity by agent**.
+Only its simulation ID, selected platform and source revision carry over. Phrase,
+agent, round, action-type, outcome and record-page filters do not apply. The
+legacy agent-stats API is unchanged.
+
+Each row is an exact recorded `(platform, agent ID)` pair, with all attempts and
+saved true, false and unknown outcome counts. Repeated attempts, including
+retries, count separately. Twitter 7 and Reddit 7 are separate rows. IDs stay
+canonical decimal strings, including values above JavaScript's safe integer
+range. Names and profiles are not joined, and absent IDs do not prove inactivity.
+Saved outcomes and the fixed display order are not assessments of an agent or
+prediction quality.
+
+The sole order is saved-failure count descending, total attempts descending,
+Twitter before Reddit, then exact numeric agent ID ascending. The accepted
+bounded result is paginated locally at 25 rows; page changes do not read storage
+or change the observation. Complete empty, partial empty and unavailable sources
+have distinct states. Partial counts contain only admitted records. A stopped or
+failed run retains its partial-run warning independently of saved-log coverage.
+
+A positive count opens existing Saved activity at the same revision with its
+exact platform and agent ID, offset 0, limit 50 and, for an outcome cell, that
+outcome. IDs above 64 decimal digits remain visible but all drilldown controls
+are disabled because the existing records filter cannot express them. Overview
+success does not relax the records reader's limits: the first record page may
+still report unavailable or changed sources, or refuse its response size.
+
+`GET /api/simulation/<simulation_id>/saved-action-agents` accepts only optional
+`platform` (`twitter` or `reddit`) and lowercase 64-hex `revision`. Unknown,
+repeated, empty or malformed values are rejected before storage inspection.
+The overview refuses all rows with HTTP 413 above 1,000 distinct selected
+platform/ID pairs or 1 MiB for the complete ASCII-escaped success response.
+It never returns a truncated prefix. Choose one platform, or use Saved activity
+with a known supported exact ID; a single platform can still exceed the limits.
+Existing shared source, line, record and action-type limits remain unchanged.
+
+Each source's counts and pair overflow remain tentative until it is admitted;
+a refused source contributes neither. Global source refusal clears all counts.
+Revisions use the same source fingerprints as the existing records reader,
+including unselected files. Ordinary detected changes return `sources_changed`;
+explicit Refresh obtains a new observation, while platform Apply keeps the
+accepted revision. This is not an atomic snapshot or an immutable archive.
+No export, comparison, persistence or automatic interpretation is added.

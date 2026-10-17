@@ -2686,5 +2686,43 @@
       "failed": "Failed",
       "unknown": "Unknown status"
     }
+  },
+  "savedActivityAgents": {
+    "title": "Activity by agent",
+    "entry": "Activity by agent",
+    "backRecords": "Back to saved records",
+    "entryNote": "Activity by agent carries this platform and source revision only. Phrase, agent, round, action-type, outcome and page filters do not carry over.",
+    "scope": "All admitted saved attempts for this platform and source observation, including repeated attempts. Each row is an exact platform/agent-ID pair. Missing IDs do not establish inactivity.",
+    "filtersTitle": "Choose saved platform",
+    "agentId": "Recorded agent ID",
+    "filterNote": "Apply preserves the observed revision. Refresh reads the latest files using the applied URL platform. Record drilldowns keep this revision and remain subject to the records reader’s own source and response limits.",
+    "orderNote": "Saved failures descending, then all attempts descending, Twitter before Reddit, then exact numeric agent ID ascending. This is a display order of saved counts, not an assessment of an agent.",
+    "draftNote": "The platform has changed. Apply to read a new overview; the previous observation and its controls are retired.",
+    "loading": "Reading saved agent activity…",
+    "resultsTitle": "Recorded attempts by platform and agent ID",
+    "pairCount": "Returned platform/agent pairs: {count}",
+    "total": "All attempts",
+    "partialNote": "Coverage is partial. These counts include only admitted records in the available sources.",
+    "tableCaption": "Recorded attempt counts · positive counts open matching saved records at this source revision",
+    "unsupportedId": "This recorded agent ID exceeds the records filter's 64-digit limit.",
+    "openCount": "Open {count} {outcome} saved attempts for {platform} agent {agent}",
+    "pagination": "Local agent table pages",
+    "pagePosition": "Local page {page} of {pages} · 25 rows per page",
+    "empty": "No recorded action attempts in this source observation.",
+    "partialEmpty": "No admitted attempts in the available records. Coverage is partial.",
+    "unavailable": "Saved sources are unavailable. Attempt and outcome totals are unknown; see the source reasons above.",
+    "errors": {
+      "generic": "The saved agent overview could not be loaded. Apply or Refresh to try again.",
+      "invalid_selection": "The URL contains an invalid selection. Use one simulation ID and one value for each supported platform and revision.",
+      "invalid_filters": "Choose all platforms, Twitter or Reddit. Other filters do not apply to this overview.",
+      "invalid_revision": "The saved revision in this URL is invalid. Refresh to read the latest saved files.",
+      "unsafe_path": "This saved record cannot be safely read. Return to history and choose another simulation.",
+      "simulation_not_found": "This saved simulation no longer exists. Return to history and choose another simulation.",
+      "simulation_unreadable": "This saved simulation record could not be read. Refresh to try again.",
+      "simulation_active": "The saved run is marked active. Wait until it has stopped, then Refresh.",
+      "sources_changed": "The saved files changed. Refresh to read the latest files for the applied platform.",
+      "too_many_agent_pairs": "This overview exceeds 1000 platform/agent pairs. Choose one platform and Apply, or return to Saved activity for a known exact ID of up to 64 digits. A single platform may still exceed the limit.",
+      "response_too_large": "This overview exceeds the 1 MiB response limit. Choose one platform and Apply, or return to Saved activity for a known exact ID of up to 64 digits. A single platform may still exceed the limit."
+    }
   }
 }
