@@ -368,6 +368,11 @@
     "outlineUnavailable": "Saved report headings could not be read. The available section files are shown below."
   },
   "step5": {
+    "downloadConversation": "Download conversation TXT",
+    "downloadConversationNote": "Includes every displayed message and error notice in this Report Agent chat. Chats aren’t restored after a reload. TXT uses English labels and visible escapes for control characters.",
+    "downloadConversationInitiated": "Download requested. Check your browser’s downloads; saving the file isn’t confirmed.",
+    "downloadConversationTooLarge": "This conversation exceeds the 1 MiB TXT limit. No file was downloaded; the conversation was not shortened.",
+    "downloadConversationFailed": "Couldn’t complete the download request. Check your browser’s downloads before trying again.",
     "interactiveTools": "Interactive Tools",
     "agentsAvailable": "{count} agents available",
     "profilesLoading": "Loading agent profiles…",

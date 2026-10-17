@@ -263,6 +263,17 @@
             </div>
           </div>
 
+          <div v-if="activeTab === 'chat' && chatTarget === 'report_agent'" class="conversation-download">
+            <button type="button" data-testid="report-conversation-download"
+              :disabled="!canDownloadConversation" :onClick="conversationDownloadAction"
+              aria-describedby="report-conversation-download-note">{{ $t('step5.downloadConversation') }}</button>
+            <p id="report-conversation-download-note" data-testid="report-conversation-download-note">{{ $t('step5.downloadConversationNote') }}</p>
+            <p v-if="conversationDownloadFeedback === 'initiated'" role="status" aria-live="polite"
+              data-testid="report-conversation-download-status">{{ $t('step5.downloadConversationInitiated') }}</p>
+            <p v-else-if="conversationDownloadFeedback" role="alert" class="conversation-download-error"
+              data-testid="report-conversation-download-error">{{ $t(conversationDownloadFeedback === 'too_large' ? 'step5.downloadConversationTooLarge' : 'step5.downloadConversationFailed') }}</p>
+          </div>
+
           <!-- Chat Messages -->
           <div class="chat-messages" ref="chatMessages">
             <div v-if="chatHistory.length === 0" class="chat-empty">
@@ -474,6 +485,7 @@
 
 <script setup>
 import { renderMarkdown } from '../utils/content.js'
+import { formatReportConversationText } from '../utils/reportConversationText.js'
 import { ref, computed, watch, onMounted, onUnmounted, nextTick } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { chatWithReport, getReport, getAgentLog } from '../api/report'
@@ -557,6 +569,93 @@ const viewContext = () => ({
 const isCurrentView = (context) => !disposed && !context.signal?.aborted
   && context.generation === viewGeneration
   && context.reportId === props.reportId && context.simulationId === props.simulationId
+
+// The rendered selection and an individual browser attempt have separate lives.
+// Returning to the same IDs/target must not revive an old handler; an ordinary
+// repeat click on the same selection remains a new valid download attempt.
+const conversationDownloadRevision = ref(0)
+const conversationDownloadFeedback = ref('')
+let conversationDownloadGeneration = 0
+let activeConversationDownload = null
+const releaseConversationDownload = (attempt = activeConversationDownload) => {
+  if (!attempt) return
+  if (activeConversationDownload === attempt) activeConversationDownload = null
+  const { anchor, url } = attempt
+  attempt.anchor = null; attempt.url = null
+  try { anchor?.remove() } catch { /* Still attempt this URL's release. */ }
+  try { if (url) URL.revokeObjectURL(url) } catch { /* Never touch a newer owner. */ }
+}
+const retireConversationDownload = () => {
+  conversationDownloadRevision.value++
+  conversationDownloadGeneration++
+  conversationDownloadFeedback.value = ''
+  releaseConversationDownload()
+}
+watch(() => [props.reportId, props.simulationId, activeTab.value, chatTarget.value,
+  selectedAgentIndex.value, chatHistory.value, chatHistory.value?.length, isSending.value],
+retireConversationDownload, { flush: 'sync' })
+const canDownloadConversation = computed(() => !disposed && viewController && !viewController.signal.aborted
+  && typeof props.reportId === 'string' && props.reportId.length > 0
+  && typeof props.simulationId === 'string' && props.simulationId.length > 0
+  && activeTab.value === 'chat' && chatTarget.value === 'report_agent'
+  && !isSending.value && Array.isArray(chatHistory.value) && chatHistory.value.length > 0)
+const conversationDownloadAction = computed(() => {
+  const context = viewContext(), revision = conversationDownloadRevision.value
+  const tab = activeTab.value, target = chatTarget.value, agent = selectedAgentIndex.value
+  const source = chatHistory.value, length = source?.length, ready = canDownloadConversation.value
+  const owns = () => ready && canDownloadConversation.value && isCurrentView(context)
+    && revision === conversationDownloadRevision.value && tab === activeTab.value
+    && target === chatTarget.value && agent === selectedAgentIndex.value
+    && source === chatHistory.value && length === source.length
+  return () => {
+    if (!owns()) return
+    const generation = ++conversationDownloadGeneration
+    releaseConversationDownload()
+    // Revocation can synchronously start a newer attempt at the same selection.
+    if (generation !== conversationDownloadGeneration || !owns()) return
+    const attempt = { url: null, anchor: null }
+    activeConversationDownload = attempt
+    conversationDownloadFeedback.value = ''
+    const current = () => activeConversationDownload === attempt
+      && generation === conversationDownloadGeneration && owns()
+    let dispatched = false
+    try {
+      // The complete immutable text is captured before new browser resources.
+      const formatted = formatReportConversationText({ reportId: context.reportId,
+        simulationId: context.simulationId, capturedAt: new Date().toISOString(), messages: source })
+      if (!current()) return
+      if (!formatted.ok) {
+        conversationDownloadFeedback.value = formatted.code === 'too_large' ? 'too_large' : 'failed'
+        return
+      }
+      const blob = new Blob([formatted.text], { type: 'text/plain;charset=utf-8' })
+      if (!current()) return
+      attempt.url = URL.createObjectURL(blob)
+      if (!current()) return
+      attempt.anchor = document.createElement('a')
+      if (!current()) return
+      attempt.anchor.href = attempt.url
+      if (!current()) return
+      attempt.anchor.download = 'mirofish-report-conversation.txt'
+      if (!current()) return
+      document.body.appendChild(attempt.anchor)
+      if (!current()) return
+      attempt.anchor.click()
+      if (!current()) return
+      dispatched = true
+      const anchor = attempt.anchor; attempt.anchor = null
+      try { anchor.remove() } catch { /* A returned click still requested a download. */ }
+      if (current()) conversationDownloadFeedback.value = 'initiated'
+    } catch {
+      const report = current()
+      releaseConversationDownload(attempt)
+      if (report && generation === conversationDownloadGeneration && owns()) conversationDownloadFeedback.value = 'failed'
+    } finally {
+      // Keep at most the current successful URL until replacement/retirement.
+      if (!dispatched || !current()) releaseConversationDownload(attempt)
+    }
+  }
+})
 
 const conversationKey = () => chatTarget.value === 'report_agent'
   ? 'report_agent' : `agent_${selectedAgentIndex.value}`
@@ -998,6 +1097,7 @@ onMounted(() => {
 onUnmounted(() => {
   disposed = true
   viewController?.abort()
+  retireConversationDownload()
   document.removeEventListener('click', handleClickOutside)
 })
 
@@ -1046,6 +1146,13 @@ watch(() => [props.reportId, props.simulationId], () => {
   font-family: 'Inter', 'Noto Sans SC', system-ui, sans-serif;
   overflow: hidden;
 }
+
+.conversation-download { flex-shrink: 0; padding: 12px 20px; border-bottom: 1px solid #e5e7eb; }
+.conversation-download button { padding: 8px 12px; border: 1px solid #bbb; border-radius: 5px; background: #fff; cursor: pointer; }
+.conversation-download button:disabled { opacity: .5; cursor: default; }
+.conversation-download button:focus-visible { outline: 2px solid #ff5722; outline-offset: 3px; }
+.conversation-download p { margin: 8px 0 0; font-size: 12px; line-height: 1.5; color: #555; }
+.conversation-download .conversation-download-error { color: #a22; }
 
 /* Utility Classes */
 .mono {

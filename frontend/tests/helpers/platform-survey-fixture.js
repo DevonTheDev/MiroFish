@@ -6,23 +6,25 @@ import { parse, compileScript, compileTemplate } from '@vue/compiler-sfc'
 import * as Vue from 'vue'
 import * as I18n from 'vue-i18n'
 import * as content from '../../src/utils/content.js'
+import * as conversationText from '../../src/utils/reportConversationText.js'
 
 // Compile the unchanged interaction script AND template. Real Vue reactivity,
 // model bindings, survey controls and answer rendering run in a custom host.
 // Browser geometry/document listeners and unrelated report reads are seams.
-export function buildSurvey(api, { locale = 'en', props: initialProps = {} } = {}) {
+export function buildSurvey(api, { locale = 'en', props: initialProps = {}, downloadHost = null } = {}) {
   const warnings = [], emitted = [], listeners = new Set()
   let instance
   const previousDocument = globalThis.document
-  const document = { activeElement: null, querySelector: () => null,
+  const document = { ...downloadHost?.document, activeElement: null, querySelector: () => null,
     addEventListener: (_name, listener) => listeners.add(listener),
     removeEventListener: (_name, listener) => listeners.delete(listener) }
   // Vue's actual v-model directive consults the host document on updates.
   globalThis.document = document
-  const modules = { vue: Vue, 'vue-i18n': I18n, '../utils/content.js': content }
+  const modules = { vue: Vue, 'vue-i18n': I18n, '../utils/content.js': content,
+    '../utils/reportConversationText.js': conversationText }
   function evaluate(source, name = 'component') {
     const ast = parseJavaScript(source, { sourceType: 'module' })
-    const globals = { AbortController, document,
+    const globals = { AbortController, ...downloadHost?.globals, document,
       console: { warn: (...args) => warnings.push(args), error: (...args) => warnings.push(args) } }
     for (const statement of ast.program.body.filter(item => item.type === 'ImportDeclaration').reverse()) {
       const dependency = modules[statement.source.value] ?? api
@@ -79,7 +81,7 @@ export function buildSurvey(api, { locale = 'en', props: initialProps = {} } = {
     return visit(host)
   }
   return { host, props, warnings, emitted, listeners, all, i18n, find: predicate => all(predicate)[0],
-    state: () => instance.setupState, close: () => {
+    state: () => instance.setupState, childProps: () => instance.props, close: () => {
       app.unmount()
       if (previousDocument === undefined) delete globalThis.document
       else globalThis.document = previousDocument

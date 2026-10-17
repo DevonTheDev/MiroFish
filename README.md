@@ -301,6 +301,15 @@ mismatched selected reports fail before agent work. API clients can supply
 The existing context limit still applies; graph searches and interviews use
 current simulation data, not a historical graph snapshot.
 
+In Step 5 Report Agent chat, **Download conversation TXT** saves every displayed
+stored turn in the current page session, including displayed error notices. It
+uses the stored message text and English field labels, with visible escapes for
+control characters. Other agent chats, surveys, unsent input, hidden prompts and
+tool metadata are excluded. The complete UTF-8 output must fit within 1 MiB;
+larger conversations are refused without shortening them. The download request
+does not confirm that the browser saved a file. Chats are not restored after a
+reload, and this TXT file cannot resume a conversation.
+
 When a Step 5 agent interview returns text from both platforms, its single reply
 shows **Twitter:** and **Reddit:** separately. If only one platform returns text,
 that answer appears on its own. Follow-up questions share this conversation:

@@ -368,6 +368,11 @@
     "outlineUnavailable": "无法读取已保存的报告标题。下方显示可读取的章节文件。"
   },
   "step5": {
+    "downloadConversation": "下载对话 TXT",
+    "downloadConversationNote": "包含当前 Report Agent 对话中显示的所有消息和错误提示。刷新页面后不会恢复对话。TXT 使用英文标签，并以可见转义显示控制字符。",
+    "downloadConversationInitiated": "已请求下载。请检查浏览器的下载记录；尚未确认文件是否已保存。",
+    "downloadConversationTooLarge": "此对话超过 1 MiB 的 TXT 大小限制。未下载文件，也未截短对话。",
+    "downloadConversationFailed": "未能完成下载请求。重试前请检查浏览器的下载记录。",
     "interactiveTools": "Interactive Tools",
     "agentsAvailable": "{count} agents available",
     "profilesLoading": "正在加载个体档案…",

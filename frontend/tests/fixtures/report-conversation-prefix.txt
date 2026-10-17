@@ -1,0 +1,8 @@
+MiroFish Report Agent conversation
+format_version: 1
+Scope: All displayed stored turns in the current Report Agent conversation from this browser page session. Displayed error notices may appear as assistant messages.
+This is not a complete run history, historical graph snapshot, verified model trace or resumable conversation.
+Content is stored message text, including Markdown syntax, not rendered HTML. Hidden prompts and tool metadata are excluded.
+Encoding: UTF-8 with fixed English labels. String values use two-space indentation and preserve ordinary Unicode, spaces and every LF. Backslashes, CR, tab, other controls and lone surrogates use visible escapes.
+Escapes describe individual values; TXT is not an import format. Indentation and the final LF are presentation syntax.
+
