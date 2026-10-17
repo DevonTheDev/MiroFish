@@ -3261,3 +3261,70 @@ omit later document or entity context, or be empty. If the fixed content alone
 exceeds the limit or sizing fails, the original request retains the existing
 gateway refusal, three-attempt retry loop and default-event fallback. This does
 not change time or agent configuration, token limits or model context capacity.
+
+### Stop generating a local report
+
+An active local report has an explicit **Stop generating report** action. It
+requests cooperative cancellation for that exact report ID. Closing the page,
+navigating away, or aborting a browser request only stops observation. None of
+those actions cancels a report, and a lost Stop response does not confirm
+cancellation. Observe or explicitly retry Stop for the same report ID.
+
+Stop prevents admission of later report operations and publication of their
+output. **The current operation may still use models or save interview records.**
+One admitted operation can contain multiple graph pages, retries, model calls,
+or interview substeps. A queued model request may reach its provider after Stop
+is accepted. There is no fixed cancellation latency or transport abort. An
+interview already dispatched to the simulation can finish and save non-report
+records even after the report worker retires following an IPC timeout. Stop does
+not stop the simulation, close its environment, or roll back those records.
+
+While the exact worker still owns the report, the UI says **Cancelling report.
+Waiting for the current operation to return.** Ownership lasts through terminal
+persistence and logger cleanup. Only after that worker releases its graph-reader
+claim and registry entry does the UI say **Report cancelled**. This describes
+retirement of this report workflow, not globally stopped model/simulation work.
+Then **Generate a new report** makes one explicit new request. Concurrent
+requests while the old worker is cancelling reuse its exact IDs; they do not
+start a replacement. A lost new-generation response requires an explicit retry.
+
+Sections committed before Stop was accepted stay under the original report ID
+and are labelled **Partial report**. The returning unfinished section is discarded;
+no completed full report is assembled for cancellation. Reload reconciles saved
+section files, including a section whose later log/progress write failed. Log
+previews are diagnostic and are never promoted into saved sections. Cancellation
+before the outline displays **No sections saved** and stops waiting animations.
+Partial output does not enable completion-only chat or resume a report.
+
+The local API exposes `POST /api/report/<report_id>/cancel` and exact-ID
+`GET /api/report/<report_id>/progress`. A successful active cancellation returns
+202 with `status: cancelling`, `cancellation_requested: true`, `worker_active:
+true`, and the exact report/task/simulation IDs. Repeats remain 202 while that
+worker owns the job, even if cancelled metadata/task state was already written.
+After cleanup, the exact outcome is 200 cancelled with `worker_active: false`.
+Completion or failure that won the publication fence first retains that outcome.
+Progress includes `cancellation_supported`, worker ownership, cancellation and
+terminal status; cloud progress reports `cancellation_supported: false` and cloud
+Stop is unsupported. An unknown ID is 404. A saved nonterminal report with no
+owned worker returns 409 `no_active_report_job`, not inferred resumability or
+cancellation. If terminal persistence fails, the exact in-memory task outcome
+and error remain observable until process restart. This is a process-local
+registry, with no cross-process coordination or crash recovery guarantee.
+
+Admission, cancellation and output commits share one per-job fence. The lock is
+not held over model/tool calls. Outline/section snapshots are detached from
+mutable drafts; cancelled persistence contains only committed output. A commit
+already inside the fence may finish before Stop is acknowledged. Final assembly
+(including its file write), final saves, task completion and completion event
+share a terminal fence. Failure there selects failed before unlocking. Individual
+files remain atomic replacements, not a multi-file transaction or rollback.
+Ordinary console diagnostics from admitted work may still appear.
+
+Saved-report filters and portable report files recognize `cancelled`. The
+version-1 file wrapper and exact observation fields remain unchanged; runtime
+ownership and progress fields are not exported. Previously accepted files still
+read unchanged. Older app versions may reject the new cancelled status.
+
+Finer checks inside shared graph paging/retry helpers, JSON negotiation, gateway
+queue/provider transport and simulation interview handling are deferred. Their
+existing local budgets, concurrency, drain policy and lifecycle remain unchanged.

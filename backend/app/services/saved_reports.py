@@ -26,7 +26,7 @@ MAX_DETAIL_RESPONSE_BYTES = 16 * 1024 * 1024
 MAX_QUERY_LENGTH = 200
 MAX_OFFSET = 2000
 MAX_LIMIT = 50
-_STATUSES = ("pending", "planning", "generating", "completed", "failed")
+_STATUSES = ("pending", "planning", "generating", "completed", "failed", "cancelled")
 _MESSAGES = {
     "invalid_query": "The saved report query is invalid.",
     "invalid_report_id": "Choose a valid saved report ID.",

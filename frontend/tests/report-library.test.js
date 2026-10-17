@@ -246,3 +246,16 @@ for (const contentError of ['unreadable', 'too_large']) test(`unavailable saved 
   await resolve(calls.getSavedReport[0], detail({ content_available: false, content_source: 'full_report.md', content_revision: null, content_bytes: null, markdown_content: null, content_error: contentError }))
   assert.ok(h.byId('reader')); assert.match(h.text(), /Saved report A/); assert.ok(h.byId('content-error')); assert.equal(h.byId('download').props.disabled, true)
 })
+
+for (const locale of ['en', 'zh']) test(`cancelled saved reports filter and reader remain valid without runtime ownership fields (${locale})`, async t => {
+  const { h, calls } = await setup(t, 'status=cancelled&report_id=report_A', locale)
+  assert.equal(calls.getSavedReports[0].args[0].status, 'cancelled')
+  await resolve(calls.getSavedReports[0], catalogue({ filters: { q: null, status: 'cancelled' }, reports: [summary({ status: 'cancelled' })] }))
+  await resolve(calls.getSavedReport[0], detail({ status: 'cancelled', content_source: 'metadata' }))
+  assert.ok(h.byId('results')); assert.ok(h.byId('reader'))
+  assert.equal(h.byId('status').props.value, 'cancelled')
+  assert.match(h.text(h.byId('report-row-report_A')), locale === 'en' ? /Cancelled/ : /已取消/)
+  assert.ok(h.find(node => node.type === 'option' && node.props.value === 'cancelled'))
+  assert.equal(calls.getSavedReports.length, 1); assert.equal(calls.getSavedReport.length, 1)
+  assert.deepEqual(h.warnings, [])
+})

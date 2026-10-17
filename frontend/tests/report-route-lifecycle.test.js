@@ -80,14 +80,18 @@ const complete = id => ok({ from_line: 0, logs: [{ action: 'report_complete', ti
 const translations = Object.fromEntries(['en', 'zh'].map(locale => [locale,
   JSON.parse(readFileSync(new URL('../../locales/' + locale + '.json', import.meta.url), 'utf8'))]))
 
-function build({ locale, reportProps } = {}) {
+function build({ locale, reportProps, runtime = 'cloud' } = {}) {
   const translate = (key, params) => locale
     ? key.split('.').reduce((value, segment) => value?.[segment], translations[locale]) ?? key
     : key + (params ? JSON.stringify(params) : '')
   const requests = {}, instances = {}, intervals = new Map(), warnings = []
   let nextTimer = 1
   const api = new Proxy({}, { get(_target, name) {
-    return (...args) => new Promise((resolve, reject) => {
+    return (...args) => {
+      // Existing observation-only cases explicitly exercise unsupported cloud mode.
+      // Manual mode leaves exact-ID progress under each cancellation test's control.
+      if (name === 'getReportProgress' && runtime === 'cloud') return Promise.resolve(ok({ report_id: args[0], cancellation_supported: false }))
+      return new Promise((resolve, reject) => {
       // The transport deliberately settles after abort. Ownership checks, not
       // a cooperative mock transport, must prevent every stale continuation.
       const request = { args, signal: args.at(-1) instanceof AbortSignal ? args.at(-1) : undefined,
@@ -95,7 +99,8 @@ function build({ locale, reportProps } = {}) {
         resolve(value) { request.settled = true; resolve(value) },
         reject(error) { request.settled = true; reject(error) } }
       ;(requests[name] ??= []).push(request)
-    })
+      })
+    }
   } })
   const boundary = { render: () => Vue.h('unrelated-boundary') }
   const graph = { props: ['graphData', 'loading', 'currentPhase', 'isSimulating'],

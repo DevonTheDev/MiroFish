@@ -5,7 +5,7 @@ export const REPORT_OBSERVATION_KEYS = Object.freeze([
   'content_revision', 'content_error',
 ])
 
-const statuses = ['pending', 'planning', 'generating', 'completed', 'failed']
+const statuses = ['pending', 'planning', 'generating', 'completed', 'failed', 'cancelled']
 const revisionPattern = /^[a-f0-9]{64}$/, idPattern = /^[A-Za-z0-9_-]{1,128}$/
 const bounded = (value, max) => Number.isSafeInteger(value) && value >= 0 && value <= max
 const optionalText = value => value === null || typeof value === 'string'

@@ -133,7 +133,7 @@ def test_unusable_explicit_report_never_falls_back_or_constructs_agent(chat, leg
 
 
 @pytest.mark.parametrize('status', [ReportStatus.PENDING, ReportStatus.PLANNING,
-                                   ReportStatus.GENERATING, ReportStatus.FAILED])
+                                   ReportStatus.GENERATING, ReportStatus.FAILED, ReportStatus.CANCELLED])
 def test_explicit_report_must_be_completed(chat, status):
     chat.save('report_a', '2026-01-01', status=status)
     chat.save('report_b', '2026-01-02')

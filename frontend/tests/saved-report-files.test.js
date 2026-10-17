@@ -45,7 +45,7 @@ test('exposes the canonical seventeen fields and inclusive portable file budget'
 
 test('shared summary validation preserves live Unicode limits and arbitrary recorded strings', () => {
   const { validSavedReportSummary, validSavedReportObservation } = api()
-  for (const status of ['pending', 'planning', 'generating', 'completed', 'failed', 'unknown']) {
+  for (const status of ['pending', 'planning', 'generating', 'completed', 'failed', 'cancelled', 'unknown']) {
     const data = report({ status, title: '😀'.repeat(300), summary_preview: '😀'.repeat(500), requirement_preview: '文'.repeat(500), simulation_id: '../ arbitrary\r\n\u0000', created_at: 'not a date', completed_at: '', observed_at: '\ufeff historical \r\n' })
     assert.equal(validSavedReportSummary(data), true)
     assert.equal(validSavedReportObservation(data), true)
@@ -252,4 +252,26 @@ test('refuses incorrect UTF-8 byte metadata even when JavaScript character count
     assert.throws(() => create(data), invalid)
     await assert.rejects(read(downloaded(data)), invalid)
   }
+})
+
+for (const source of ['modern', 'legacy']) test(`cancelled ${source} partial and empty observations preserve the version-one seventeen-field shape`, async () => {
+  const { createSavedReportFile, readSavedReportFile } = api()
+  const cases = [
+    withBody('# Retained partial report\n\nCommitted section.', { status: 'cancelled', source, content_source: 'metadata' }),
+    withBody('', { status: 'cancelled', source, content_source: 'metadata' }),
+    unavailable({ status: 'cancelled', source }),
+  ]
+  for (const data of cases) {
+    const text = createSavedReportFile({ ...data, task_id: 'live-task', worker_active: false,
+      cancellation_supported: true, cancellation_requested: true, terminal_status: 'cancelled' })
+    const wrapper = JSON.parse(text)
+    assert.deepEqual(Object.keys(wrapper), ['format', 'version', 'observation'])
+    assert.equal(wrapper.version, 1)
+    assert.deepEqual(Object.keys(wrapper.observation), keys)
+    assert.deepEqual(await readSavedReportFile(file(text)), data)
+    assert.doesNotMatch(text, /task_id|worker_active|cancellation_supported|cancellation_requested|terminal_status/)
+    await assert.rejects(readSavedReportFile(downloaded({ ...data, worker_active: false })), invalid)
+  }
+  assert.equal(api().validSavedReportSummary(report({ status: 'cancelled' })), true)
+  assert.equal(api().validSavedReportSummary(report({ status: 'future-status' })), false)
 })

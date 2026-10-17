@@ -330,7 +330,29 @@
     "panelRelatedEdges": "Related Edges",
     "panelRelatedNodes": "Related Nodes",
     "world1": "World 1",
-    "world2": "World 2"
+    "world2": "World 2",
+    "stopReport": "Stop generating report",
+    "requestingStop": "Requesting stop…",
+    "stopNotice": "Cancel stops later report steps. The current operation may still use models or save interview records.",
+    "cancelling": "Cancelling report",
+    "cancellingNotice": "Cancelling report. Waiting for the current operation to return.",
+    "cancelled": "Report cancelled",
+    "cancelledNotice": "Saved sections are kept. Interviews already sent to the simulation may still finish and save records.",
+    "partialReport": "Partial report",
+    "noSectionsSaved": "No sections saved",
+    "readingSections": "Reading saved sections…",
+    "savedSection": "Saved section {number}",
+    "cancelUnconfirmed": "Cancellation not confirmed. Checking this report; you can explicitly retry Stop.",
+    "progressUnavailable": "Report status is unavailable. Waiting for an authoritative update.",
+    "sectionsUnavailable": "Saved sections could not be read. Previously displayed sections are kept.",
+    "retrySections": "Read saved sections again",
+    "newReport": "Generate a new report",
+    "requestingNewReport": "Requesting new report…",
+    "newReportUnconfirmed": "New report request not confirmed. You can explicitly retry; the server checks for an existing active job.",
+    "openNewReport": "Open new report",
+    "openNewReportFailed": "The new report was accepted but could not open. Open it again without generating another report.",
+    "reportTitle": "Report",
+    "outlineUnavailable": "Saved report headings could not be read. The available section files are shown below."
   },
   "step5": {
     "interactiveTools": "Interactive Tools",
@@ -1192,7 +1214,8 @@
       "generating": "Generating",
       "completed": "Completed",
       "failed": "Failed",
-      "unknown": "Unknown"
+      "unknown": "Unknown",
+      "cancelled": "Cancelled"
     },
     "sources": {
       "modern": "Report folder",

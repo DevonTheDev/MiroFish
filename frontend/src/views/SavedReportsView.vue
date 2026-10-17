@@ -67,7 +67,7 @@ import { createSavedReportFile } from '../utils/savedReportFiles.js'
 
 const { t } = useI18n()
 const route = useRoute(), router = useRouter()
-const statuses = ['pending', 'planning', 'generating', 'completed', 'failed']
+const statuses = ['pending', 'planning', 'generating', 'completed', 'failed', 'cancelled']
 const queryKeys = ['q', 'status', 'offset', 'limit', 'revision', 'report_id', 'metadata_revision']
 const errorCodes = ['invalid_query', 'invalid_report_id', 'report_not_found', 'metadata_unavailable', 'sources_changed', 'catalogue_too_large', 'response_too_large', 'library_unavailable']
 const reasonCodes = ['metadata_unreadable', 'metadata_too_large', 'identity_mismatch', 'unsafe_path']

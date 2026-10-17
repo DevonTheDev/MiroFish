@@ -19,6 +19,7 @@ class TaskStatus(str, Enum):
     PROCESSING = "processing"    # 处理中
     COMPLETED = "completed"      # 已完成
     FAILED = "failed"            # 失败
+    CANCELLED = "cancelled"      # 已取消
 
 
 @dataclass
@@ -179,7 +180,7 @@ class TaskManager:
         with self._task_lock:
             old_ids = [
                 tid for tid, task in self._tasks.items()
-                if task.created_at < cutoff and task.status in [TaskStatus.COMPLETED, TaskStatus.FAILED]
+                if task.created_at < cutoff and task.status in [TaskStatus.COMPLETED, TaskStatus.FAILED, TaskStatus.CANCELLED]
             ]
             for tid in old_ids:
                 del self._tasks[tid]

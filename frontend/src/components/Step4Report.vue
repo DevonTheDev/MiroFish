@@ -1,5 +1,26 @@
 <template>
   <div class="report-panel">
+    <section v-if="progressState?.cancellation_supported || newReportId" class="report-stop-panel" data-testid="report-stop-panel" aria-live="polite">
+      <p v-if="isCancelled" data-testid="report-cancelled">{{ $t('step4.cancelled') }}</p>
+      <p v-else-if="isCancelling" data-testid="report-cancelling">{{ $t('step4.cancellingNotice') }}</p>
+      <p v-if="isCancelled">{{ $t('step4.cancelledNotice') }}</p>
+      <p v-else :id="`${sectionIdPrefix}-stop-note`">{{ $t('step4.stopNotice') }}</p>
+      <p v-if="cancelUnconfirmed" role="alert" data-testid="cancel-unconfirmed">{{ $t('step4.cancelUnconfirmed') }}</p>
+      <p v-if="mutationError" role="alert" data-testid="report-mutation-error">{{ mutationError }}</p>
+      <button v-if="canStopReport" type="button" data-testid="stop-report"
+        :disabled="mutationPending" :aria-busy="mutationPending" :aria-describedby="`${sectionIdPrefix}-stop-note`"
+        v-on="{ click: stopReportAction }">{{ $t(mutationPending ? 'step4.requestingStop' : 'step4.stopReport') }}</button>
+      <button v-if="canGenerateNewReport || newReportId" type="button" data-testid="generate-new-report"
+        :disabled="!viewActive || mutationPending || openingReport" :aria-busy="mutationPending || openingReport"
+        v-on="{ click: newReportAction }">{{ $t(newReportId ? 'step4.openNewReport' : mutationPending ? 'step4.requestingNewReport' : 'step4.newReport') }}</button>
+    </section>
+    <p v-if="isTerminal && outlineStatus === 'error'" class="report-observation-note" role="status" data-testid="report-outline-unavailable">{{ $t('step4.outlineUnavailable') }}</p>
+    <p v-if="progressState?.error" class="report-observation-note" role="alert" data-testid="report-persistence-error">{{ progressState.error }}</p>
+    <p v-if="progressUnavailable" class="report-observation-note" role="status" data-testid="report-progress-unavailable">{{ $t('step4.progressUnavailable') }}</p>
+    <p v-if="sectionsStatus === 'error'" class="report-observation-note" role="alert" data-testid="report-sections-unavailable">
+      {{ $t('step4.sectionsUnavailable') }}
+      <button type="button" v-on="{ click: retrySectionsAction }">{{ $t('step4.retrySections') }}</button>
+    </p>
     <!-- Main Split Layout -->
     <div class="main-split-layout">
       <!-- LEFT PANEL: Report Style -->
@@ -8,7 +29,7 @@
           <!-- Report Header -->
           <div class="report-header-block">
             <div class="report-meta">
-              <span class="report-tag">Prediction Report</span>
+              <span class="report-tag">{{ isCancelled || isCancelling ? $t('step4.partialReport') : 'Prediction Report' }}</span>
               <span class="report-id">ID: {{ reportId || 'REF-2024-X92' }}</span>
             </div>
             <h1 class="main-title">{{ reportOutline.title }}</h1>
@@ -64,7 +85,7 @@
                 <div v-if="generatedSections[idx + 1]" class="generated-content" v-html="renderMarkdown(generatedSections[idx + 1])"></div>
                 
                 <!-- Loading State -->
-                <div v-else-if="currentSectionIndex === idx + 1" class="loading-state">
+                <div v-else-if="currentSectionIndex === idx + 1 && !isTerminal && !isCancelling" class="loading-state">
                   <div class="loading-icon">
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor">
                       <circle cx="12" cy="12" r="10" stroke-width="4" stroke="#E5E7EB"></circle>
@@ -78,8 +99,13 @@
           </div>
         </div>
 
+        <div v-if="isCancelled && completedSections === 0" class="waiting-placeholder" data-testid="cancelled-empty-report">
+          <span>{{ $t('step4.cancelled') }}</span>
+          <span v-if="sectionsStatus === 'ready'">{{ $t('step4.noSectionsSaved') }}</span>
+          <span v-else-if="sectionsStatus === 'loading'">{{ $t('step4.readingSections') }}</span>
+        </div>
         <!-- Waiting State -->
-        <div v-if="!reportOutline" class="waiting-placeholder">
+        <div v-if="!reportOutline && !isTerminal" class="waiting-placeholder">
           <div class="waiting-animation">
             <div class="waiting-ring"></div>
             <div class="waiting-ring"></div>
@@ -91,7 +117,7 @@
 
       <!-- RIGHT PANEL: Workflow Timeline -->
       <div class="right-panel" ref="rightPanel">
-        <div class="panel-header" :class="`panel-header--${activeStep.status}`" v-if="!isComplete">
+        <div class="panel-header" :class="`panel-header--${activeStep.status}`" v-if="!isTerminal">
           <span class="header-dot" v-if="activeStep.status === 'active'"></span>
           <span class="header-index mono">{{ activeStep.noLabel }}</span>
           <span class="header-title">{{ activeStep.title }}</span>
@@ -99,7 +125,7 @@
         </div>
 
         <!-- Workflow Overview (flat, status-based palette) -->
-        <div class="workflow-overview" v-if="agentLogs.length > 0 || reportOutline">
+        <div class="workflow-overview" v-if="agentLogs.length > 0 || reportOutline || isCancelled">
           <div class="workflow-metrics">
             <div class="metric">
               <span class="metric-label">Sections</span>
@@ -386,7 +412,7 @@
           </TransitionGroup>
 
           <!-- Empty State -->
-          <div v-if="agentLogs.length === 0 && !isComplete" class="workflow-empty">
+          <div v-if="agentLogs.length === 0 && !isTerminal" class="workflow-empty">
             <div class="empty-pulse"></div>
             <span>Waiting for agent activity...</span>
           </div>
@@ -413,7 +439,7 @@
 import { ref, computed, watch, onMounted, onUnmounted, nextTick, h, reactive, getCurrentInstance } from 'vue'
 import { useRouter, RouterLink } from 'vue-router'
 import { useI18n } from 'vue-i18n'
-import { getAgentLog, getConsoleLog } from '../api/report'
+import { getAgentLog, getConsoleLog, getReportProgress, getReportSections, getReport, cancelReport, generateReport } from '../api/report'
 import { renderMarkdown, renderInlineText } from '../utils/content.js'
 
 const router = useRouter()
@@ -429,7 +455,7 @@ const emit = defineEmits(['add-log', 'update-status'])
 
 // Navigation
 const goToInteraction = () => {
-  if (props.reportId) {
+  if (props.reportId && isComplete.value && !isCancelled.value) {
     router.push({ name: 'Interaction', params: { reportId: props.reportId } })
   }
 }
@@ -447,7 +473,7 @@ const expandedLogs = ref(new Set())
 const collapsedSections = ref(new Set())
 const sectionIdPrefix = `report-section-${getCurrentInstance().uid}`
 const isComplete = ref(false)
-const canOpenSavedReport = computed(() => isComplete.value
+const canOpenSavedReport = computed(() => (isComplete.value || isCancelled.value)
   && typeof props.reportId === 'string'
   && props.reportId.length >= 1 && props.reportId.length <= 128
   && !/[^A-Za-z0-9_-]/.test(props.reportId))
@@ -1731,12 +1757,18 @@ const QuickSearchDisplay = {
 
 // Computed
 const statusClass = computed(() => {
+  if (isCancelled.value) return 'cancelled'
+  if (isCancelling.value) return 'cancelling'
+  if (progressState.value?.status === 'failed') return 'error'
   if (isComplete.value) return 'completed'
   if (agentLogs.value.length > 0) return 'processing'
   return 'pending'
 })
 
 const statusText = computed(() => {
+  if (isCancelled.value) return t('step4.cancelled')
+  if (isCancelling.value) return t('step4.cancelling')
+  if (progressState.value?.status === 'failed') return 'Error'
   if (isComplete.value) return 'Completed'
   if (agentLogs.value.length > 0) return 'Generating...'
   return 'Waiting'
@@ -1775,7 +1807,7 @@ const displayLogs = computed(() => {
 
 // Workflow steps overview (status-based, no nested cards)
 const activeSectionIndex = computed(() => {
-  if (isComplete.value) return null
+  if (isTerminal.value || isCancelling.value) return null
   if (currentSectionIndex.value) return currentSectionIndex.value
   if (totalSections.value > 0 && completedSections.value < totalSections.value) return completedSections.value + 1
   return null
@@ -1790,7 +1822,7 @@ const isPlanningStarted = computed(() => {
 })
 
 const isFinalizing = computed(() => {
-  return !isComplete.value && isPlanningDone.value && totalSections.value > 0 && completedSections.value >= totalSections.value
+  return !isTerminal.value && !isCancelling.value && isPlanningDone.value && totalSections.value > 0 && completedSections.value >= totalSections.value
 })
 
 // 当前活跃的步骤（用于顶部显示）
@@ -1812,7 +1844,7 @@ const workflowSteps = computed(() => {
   const steps = []
 
   // Planning / Outline
-  const planningStatus = isPlanningDone.value ? 'done' : (isPlanningStarted.value ? 'active' : 'todo')
+  const planningStatus = isPlanningDone.value ? 'done' : (!isTerminal.value && !isCancelling.value && isPlanningStarted.value ? 'active' : 'todo')
   steps.push({
     key: 'planning',
     noLabel: 'PL',
@@ -1897,7 +1929,7 @@ const truncateText = (text, maxLen) => {
 
 
 const getTimelineItemClass = (log, idx, total) => {
-  const isLatest = idx === total - 1 && !isComplete.value
+  const isLatest = idx === total - 1 && !isTerminal.value && !isCancelling.value
   const isMilestone = log.action === 'section_complete' || log.action === 'report_complete'
   return {
     'node--active': isLatest,
@@ -1908,7 +1940,7 @@ const getTimelineItemClass = (log, idx, total) => {
 }
 
 const getConnectorClass = (log, idx, total) => {
-  const isLatest = idx === total - 1 && !isComplete.value
+  const isLatest = idx === total - 1 && !isTerminal.value && !isCancelling.value
   if (isLatest) return 'dot-active'
   if (log.action === 'section_complete' || log.action === 'report_complete') return 'dot-done'
   return 'dot-muted'
@@ -1938,89 +1970,286 @@ const getLogLevelClass = (log) => {
 }
 
 // Polling
+// Runtime state is intentionally separate from the portable saved-report schema.
+const viewActive = ref(false)
+const progressState = ref(null)
+const progressUnavailable = ref(false)
+const cancelUnconfirmed = ref(false)
+const mutationPending = ref(false)
+const mutationError = ref('')
+const sectionsStatus = ref('idle')
+const outlineStatus = ref('idle')
+const newReportId = ref(null)
+const openingReport = ref(false)
+const stopReportAction = ref(null)
+const newReportAction = ref(null)
+const retrySectionsAction = ref(null)
+const isCancelling = computed(() => progressState.value?.cancellation_requested === true
+  && progressState.value?.worker_active === true)
+const isCancelled = computed(() => progressState.value?.status === 'cancelled'
+  && progressState.value?.worker_active === false)
+const isTerminal = computed(() => isComplete.value || (progressState.value?.worker_active === false
+  && ['completed', 'failed', 'cancelled'].includes(progressState.value?.status)))
+const canStopReport = computed(() => viewActive.value && progressState.value?.cancellation_supported === true
+  && progressState.value?.worker_active === true && !progressState.value?.cancellation_requested
+  && !['completed', 'failed'].includes(progressState.value?.status) && !newReportId.value)
+const canGenerateNewReport = computed(() => viewActive.value && isCancelled.value
+  && progressState.value?.cancellation_supported === true && validId(progressState.value?.simulation_id))
+
 let agentLogTimer = null
 let consoleLogTimer = null
+let progressTimer = null
 let pollingGeneration = 0
 let agentLogRequest = null
 let consoleLogRequest = null
+let progressRequest = null
+let sectionsRequest = null
+let outlineRequest = null
+let reportContext = null
 let disposed = false
+const validId = value => typeof value === 'string' && /^[A-Za-z0-9_-]{1,128}$/.test(value)
+const ownsReport = context => !!context && !disposed && context.active && context === reportContext
+  && context.id === props.reportId
+const ownsRead = (context, generation, request) => ownsReport(context)
+  && generation === pollingGeneration && !request.signal.aborted
 
 const cancelLogRequests = () => {
   pollingGeneration++
-  agentLogRequest?.abort()
-  consoleLogRequest?.abort()
-  agentLogRequest = null
-  consoleLogRequest = null
+  for (const request of [agentLogRequest, consoleLogRequest, progressRequest, sectionsRequest, outlineRequest]) request?.abort()
+  agentLogRequest = consoleLogRequest = progressRequest = sectionsRequest = outlineRequest = null
+}
+
+// Cancelled metadata alone is never evidence that a worker has released ownership.
+const acceptProgress = (context, response) => {
+  const data = response?.data
+  if (ownsReport(context) && response?.success === true && data?.report_id === context.id
+    && data.cancellation_supported === false) {
+    // Cloud progress keeps its existing payload; only capability and exact ID are additive.
+    progressState.value = data
+    progressUnavailable.value = false
+    if (progressTimer !== null) clearInterval(progressTimer)
+    progressTimer = null
+    isComplete.value ||= agentLogs.value.some(log => log.action === 'report_complete')
+    if (isComplete.value) {
+      currentSectionIndex.value = null
+      emit('update-status', 'completed')
+    }
+    return true
+  }
+  if (!ownsReport(context) || response?.success !== true || !data || data.report_id !== context.id
+    || typeof data.cancellation_supported !== 'boolean' || typeof data.worker_active !== 'boolean'
+    || typeof data.cancellation_requested !== 'boolean'
+    || !['pending', 'planning', 'generating', 'processing', 'cancelling', 'completed', 'failed', 'cancelled'].includes(data.status)
+    || (data.simulation_id !== null && !validId(data.simulation_id))
+    || (data.task_id !== null && !validId(data.task_id))
+    || (data.worker_active && (!validId(data.simulation_id) || !validId(data.task_id)))
+    || (context.simulationId && data.simulation_id !== context.simulationId)
+    || (context.taskId && data.task_id !== context.taskId)) return false
+  context.simulationId ||= data.simulation_id
+  context.taskId ||= data.task_id
+  progressState.value = { ...data, status: data.cancellation_requested && data.worker_active ? 'cancelling' : data.status }
+  progressUnavailable.value = false
+  if (data.cancellation_requested || data.worker_active === false) cancelUnconfirmed.value = false
+  // A log is diagnostic; only exact-ID progress can complete a local workflow.
+  isComplete.value = data.status === 'completed' && data.worker_active === false
+  if (isCancelling.value || isTerminal.value) currentSectionIndex.value = null
+  emit('update-status', isCancelled.value ? 'cancelled' : isCancelling.value ? 'cancelling'
+    : data.status === 'failed' ? 'error' : isComplete.value ? 'completed' : 'processing')
+  return true
+}
+
+// Exact metadata restores saved headings; section bodies still come only from files.
+const fetchSavedOutline = async (context = reportContext) => {
+  if (!ownsReport(context) || outlineRequest) return
+  const generation = pollingGeneration, request = new AbortController()
+  outlineRequest = request
+  outlineStatus.value = 'loading'
+  try {
+    const response = await getReport(context.id, request.signal)
+    if (!ownsRead(context, generation, request) || outlineRequest !== request) return
+    const data = response?.data, outline = data?.outline
+    if (response?.success !== true || data?.report_id !== context.id) throw new Error('Invalid saved report metadata')
+    if (outline === null || outline === undefined) {
+      outlineStatus.value = 'ready'
+      return
+    }
+    if (typeof outline.title !== 'string' || typeof outline.summary !== 'string' || !Array.isArray(outline.sections)
+      || !outline.sections.every(section => typeof section?.title === 'string')) throw new Error('Invalid saved outline')
+    reportOutline.value = { title: outline.title, summary: outline.summary,
+      sections: outline.sections.map(section => ({ title: section.title })) }
+    outlineStatus.value = 'ready'
+  } catch (error) {
+    if (ownsRead(context, generation, request) && outlineRequest === request) outlineStatus.value = 'error'
+  } finally {
+    if (outlineRequest === request) outlineRequest = null
+  }
+}
+
+const fetchSections = async (context = reportContext) => {
+  if (!ownsReport(context) || sectionsRequest) return
+  const generation = pollingGeneration, request = new AbortController()
+  sectionsRequest = request
+  sectionsStatus.value = 'loading'
+  try {
+    const response = await getReportSections(context.id, request.signal)
+    if (!ownsRead(context, generation, request) || sectionsRequest !== request) return
+    const data = response?.data
+    if (response?.success !== true || data?.report_id !== context.id || !Array.isArray(data.sections)
+      || !data.sections.every(section => Number.isSafeInteger(section.section_index) && section.section_index > 0
+        && typeof section.content === 'string')) throw new Error('Invalid section observation')
+    // Only files or section_complete events may supply the committed display.
+    for (const section of data.sections) generatedSections.value[section.section_index] = section.content
+    if (!reportOutline.value && data.sections.length) {
+      const max = Math.max(...data.sections.map(section => section.section_index))
+      reportOutline.value = { title: t(isComplete.value ? 'step4.reportTitle' : 'step4.partialReport'), summary: '', sections: Array.from({ length: max }, (_, index) => ({ title: t('step4.savedSection', { number: index + 1 }) })) }
+    }
+    sectionsStatus.value = 'ready'
+  } catch (error) {
+    if (ownsRead(context, generation, request) && sectionsRequest === request) sectionsStatus.value = 'error'
+  } finally {
+    if (sectionsRequest === request) sectionsRequest = null
+  }
+}
+
+const fetchProgress = async (context = reportContext) => {
+  if (!ownsReport(context) || progressRequest) return
+  const generation = pollingGeneration, request = new AbortController()
+  progressRequest = request
+  try {
+    const response = await getReportProgress(context.id, request.signal)
+    if (!ownsRead(context, generation, request) || progressRequest !== request) return
+    const wasCancelling = isCancelling.value, wasTerminal = isTerminal.value
+    if (!acceptProgress(context, response)) throw new Error('Invalid report observation')
+    if ((!wasCancelling && isCancelling.value) || (!wasTerminal && isTerminal.value)) {
+      // Retire any pre-cancel logs and section reads; reconcile a fresh file view.
+      cancelLogRequests()
+    }
+    if (isTerminal.value) stopPolling()
+    if (progressState.value?.cancellation_supported === true) {
+      fetchSections(context)
+      if (!reportOutline.value || isTerminal.value) fetchSavedOutline(context)
+    }
+  } catch (error) {
+    if (ownsRead(context, generation, request) && progressRequest === request) progressUnavailable.value = true
+  } finally {
+    if (progressRequest === request) progressRequest = null
+  }
+}
+
+const requestStop = context => {
+  if (!ownsReport(context)) return
+  if (context.mutation) return context.mutation.promise
+  if (!canStopReport.value) return
+  const request = { kind: 'cancel', controller: new AbortController(), promise: null }
+  context.mutation = request
+  mutationPending.value = true
+  mutationError.value = ''
+  request.promise = (async () => {
+    try {
+      const response = await cancelReport(context.id, request.controller.signal)
+      if (!ownsReport(context) || context.mutation !== request) return
+      if (!acceptProgress(context, response)) throw new Error('Cancellation not confirmed')
+      // Response acceptance invalidates older observations before the fresh read.
+      cancelLogRequests()
+      if (isTerminal.value) stopPolling()
+      fetchProgress(context)
+    } catch (error) {
+      if (!ownsReport(context) || context.mutation !== request) return
+      cancelUnconfirmed.value = true
+      // A lost response is not an acknowledgement. Observe; never resend here.
+      cancelLogRequests()
+      fetchProgress(context)
+    } finally {
+      if (ownsReport(context) && context.mutation === request) {
+        context.mutation = null
+        mutationPending.value = false
+      }
+    }
+  })()
+  return request.promise
+}
+
+const openNewReport = async context => {
+  if (!ownsReport(context) || !newReportId.value || openingReport.value) return
+  const acceptedId = newReportId.value
+  openingReport.value = true
+  try {
+    await router.push({ name: 'Report', params: { reportId: acceptedId } })
+  } catch (error) {
+    if (ownsReport(context)) mutationError.value = t('step4.openNewReportFailed')
+  } finally {
+    if (ownsReport(context)) openingReport.value = false
+  }
+}
+
+const requestNewReport = context => {
+  if (!ownsReport(context)) return
+  if (context.mutation) return context.mutation.promise
+  if (newReportId.value) return openNewReport(context)
+  if (!canGenerateNewReport.value) return
+  const request = { kind: 'generate', controller: new AbortController(), promise: null }
+  context.mutation = request
+  mutationPending.value = true
+  mutationError.value = ''
+  const simulationId = progressState.value.simulation_id
+  request.promise = (async () => {
+    try {
+      const response = await generateReport({ simulation_id: simulationId, force_regenerate: true }, request.controller.signal)
+      if (!ownsReport(context) || context.mutation !== request) return
+      if (response?.success !== true || !validId(response.data?.report_id)
+        || (response.data.simulation_id !== undefined && response.data.simulation_id !== simulationId)) throw new Error('Generation not confirmed')
+      // Persist the receipt before navigation; a failed opening must not regenerate.
+      newReportId.value = response.data.report_id
+      await openNewReport(context)
+    } catch (error) {
+      if (ownsReport(context) && context.mutation === request) mutationError.value = t('step4.newReportUnconfirmed')
+    } finally {
+      if (ownsReport(context) && context.mutation === request) {
+        context.mutation = null
+        mutationPending.value = false
+      }
+    }
+  })()
+  return request.promise
 }
 
 const fetchAgentLog = async () => {
-  if (!props.reportId || disposed || isComplete.value || agentLogRequest) return
-  const reportId = props.reportId
-  const generation = pollingGeneration
-  const request = new AbortController()
+  const context = reportContext
+  if (!ownsReport(context) || isTerminal.value || agentLogRequest) return
+  const generation = pollingGeneration, request = new AbortController()
   agentLogRequest = request
-
   try {
-    const res = await getAgentLog(reportId, agentLogLine.value, request.signal)
-    if (disposed || request.signal.aborted || generation !== pollingGeneration || reportId !== props.reportId) return
-
+    const res = await getAgentLog(context.id, agentLogLine.value, request.signal)
+    if (!ownsRead(context, generation, request) || agentLogRequest !== request) return
     if (res.success && res.data) {
       const newLogs = res.data.logs || []
-      
-      if (newLogs.length > 0) {
-        newLogs.forEach(log => {
-          agentLogs.value.push(log)
-          
-          if (log.action === 'planning_complete' && log.details?.outline) {
-            reportOutline.value = log.details.outline
+      for (const log of newLogs) {
+        agentLogs.value.push(log)
+        if (!isCancelling.value && !isTerminal.value) {
+          if (log.action === 'planning_complete' && log.details?.outline) reportOutline.value = log.details.outline
+          if (log.action === 'section_start') currentSectionIndex.value = log.section_index
+          if (log.action === 'section_complete' && typeof log.details?.content === 'string') {
+            generatedSections.value[log.section_index] = log.details.content
+            expandedContent.value.add(log.section_index - 1)
+            currentSectionIndex.value = null
           }
-          
-          if (log.action === 'section_start') {
-            currentSectionIndex.value = log.section_index
-          }
-
-          // section_complete - 章节生成完成
-          if (log.action === 'section_complete') {
-            if (log.details?.content) {
-              generatedSections.value[log.section_index] = log.details.content
-              // 自动展开刚生成的章节
-              expandedContent.value.add(log.section_index - 1)
-              currentSectionIndex.value = null
-            }
-          }
-          
-          if (log.action === 'report_complete') {
+          if (log.action === 'report_complete' && progressState.value?.cancellation_supported === false) {
             isComplete.value = true
-            currentSectionIndex.value = null  // 确保清除 loading 状态
+            currentSectionIndex.value = null
             emit('update-status', 'completed')
             stopPolling()
-            // 滚动逻辑统一在循环结束后的 nextTick 中处理
           }
-          
-          if (log.action === 'report_start') {
-            startTime.value = new Date(log.timestamp)
-          }
-        })
-        
-        agentLogLine.value = res.data.from_line + newLogs.length
-        
-        nextTick(() => {
-          if (disposed || generation !== pollingGeneration) return
-          if (rightPanel.value) {
-            // 如果任务已完成，滚动到顶部；否则滚动到底部跟随最新日志
-            if (isComplete.value) {
-              rightPanel.value.scrollTop = 0
-            } else {
-              rightPanel.value.scrollTop = rightPanel.value.scrollHeight
-            }
-          }
-        })
+        }
+        if (log.action === 'report_start') startTime.value = new Date(log.timestamp)
       }
+      agentLogLine.value = res.data.from_line + newLogs.length
+      nextTick(() => {
+        if (!ownsRead(context, generation, request)) return
+        if (rightPanel.value) rightPanel.value.scrollTop = isComplete.value ? 0 : rightPanel.value.scrollHeight
+      })
     }
-  } catch (err) {
-    if (!disposed && !request.signal.aborted && generation === pollingGeneration) {
-      console.warn('Failed to fetch agent log:', err)
-    }
+  } catch (error) {
+    if (ownsRead(context, generation, request)) console.warn('Failed to fetch agent log:', error)
   } finally {
     if (agentLogRequest === request) agentLogRequest = null
   }
@@ -2072,93 +2301,123 @@ const extractFinalContent = (response) => {
 }
 
 const fetchConsoleLog = async () => {
-  if (!props.reportId || disposed || isComplete.value || consoleLogRequest) return
-  const reportId = props.reportId
-  const generation = pollingGeneration
-  const request = new AbortController()
+  const context = reportContext
+  if (!ownsReport(context) || isTerminal.value || consoleLogRequest) return
+  const generation = pollingGeneration, request = new AbortController()
   consoleLogRequest = request
-
   try {
-    const res = await getConsoleLog(reportId, consoleLogLine.value, request.signal)
-    if (disposed || request.signal.aborted || generation !== pollingGeneration || reportId !== props.reportId) return
-
+    const res = await getConsoleLog(context.id, consoleLogLine.value, request.signal)
+    if (!ownsRead(context, generation, request) || consoleLogRequest !== request) return
     if (res.success && res.data) {
       const newLogs = res.data.logs || []
-      
-      if (newLogs.length > 0) {
-        consoleLogs.value.push(...newLogs)
-        consoleLogLine.value = res.data.from_line + newLogs.length
-        
-        nextTick(() => {
-          if (disposed || generation !== pollingGeneration) return
-          if (logContent.value) {
-            logContent.value.scrollTop = logContent.value.scrollHeight
-          }
-        })
-      }
+      consoleLogs.value.push(...newLogs)
+      consoleLogLine.value = res.data.from_line + newLogs.length
+      nextTick(() => {
+        if (ownsRead(context, generation, request) && logContent.value) logContent.value.scrollTop = logContent.value.scrollHeight
+      })
     }
-  } catch (err) {
-    if (!disposed && !request.signal.aborted && generation === pollingGeneration) {
-      console.warn('Failed to fetch console log:', err)
-    }
+  } catch (error) {
+    if (ownsRead(context, generation, request)) console.warn('Failed to fetch console log:', error)
   } finally {
     if (consoleLogRequest === request) consoleLogRequest = null
   }
 }
 
 const startPolling = () => {
-  if (disposed || isComplete.value || !props.reportId || agentLogTimer || consoleLogTimer) return
-  
+  if (!ownsReport(reportContext) || isTerminal.value || agentLogTimer !== null || consoleLogTimer !== null || progressTimer !== null) return
+  fetchProgress()
   fetchAgentLog()
   fetchConsoleLog()
-  
   agentLogTimer = setInterval(fetchAgentLog, 2000)
   consoleLogTimer = setInterval(fetchConsoleLog, 1500)
+  progressTimer = setInterval(() => fetchProgress(), 2000)
 }
 
 const stopPolling = () => {
-  if (agentLogTimer) {
-    clearInterval(agentLogTimer)
-    agentLogTimer = null
+  for (const timer of [agentLogTimer, consoleLogTimer, progressTimer]) if (timer !== null) clearInterval(timer)
+  agentLogTimer = consoleLogTimer = progressTimer = null
+}
+
+const retireReport = () => {
+  viewActive.value = false
+  if (reportContext) {
+    if (reportContext.mutation?.kind === 'cancel') cancelUnconfirmed.value = true
+    reportContext.active = false
+    reportContext.mutation?.controller.abort()
   }
-  if (consoleLogTimer) {
-    clearInterval(consoleLogTimer)
-    consoleLogTimer = null
+  stopPolling()
+  cancelLogRequests()
+  stopReportAction.value = newReportAction.value = retrySectionsAction.value = null
+}
+
+const selectReport = (newId, preserve = false) => {
+  retireReport()
+  mutationPending.value = openingReport.value = false
+  if (!preserve) {
+    agentLogs.value = []
+    consoleLogs.value = []
+    agentLogLine.value = consoleLogLine.value = 0
+    reportOutline.value = null
+    currentSectionIndex.value = null
+    generatedSections.value = {}
+    expandedContent.value = new Set()
+    expandedLogs.value = new Set()
+    collapsedSections.value = new Set()
+    isComplete.value = false
+    startTime.value = null
+    newReportId.value = null
+    cancelUnconfirmed.value = false
+    mutationError.value = ''
+  }
+  progressState.value = null
+  progressUnavailable.value = false
+  sectionsStatus.value = outlineStatus.value = 'idle'
+  reportContext = validId(newId) ? { id: newId, active: true, mutation: null, simulationId: null, taskId: null } : null
+  if (reportContext) {
+    viewActive.value = true
+    const context = reportContext
+    // Direct v-on object bindings preserve these exact closures in rendered VNodes.
+    stopReportAction.value = () => requestStop(context)
+    newReportAction.value = () => requestNewReport(context)
+    retrySectionsAction.value = () => { fetchSections(context); fetchSavedOutline(context) }
+    startPolling()
   }
 }
 
-// Lifecycle
-onMounted(() => {
-  if (props.reportId) {
-    addLog(`Report Agent initialized: ${props.reportId}`)
-    startPolling()
-  }
+// Route departure only retires observation, including captured rendered actions.
+// An aborted departure renews observation; it never automatically retries a write.
+let pendingNavigation = null
+const removeNavigationGuard = router.beforeEach(to => {
+  if (!reportContext || to.name === 'Report' && to.params.reportId === reportContext.id) return
+  pendingNavigation = to
+  retireReport()
+})
+const removeNavigationListener = router.afterEach(to => {
+  if (to !== pendingNavigation) return
+  pendingNavigation = null
+  nextTick(() => {
+    if (!disposed && !reportContext?.active && router.currentRoute.value.name === 'Report'
+      && router.currentRoute.value.params.reportId === props.reportId) selectReport(props.reportId, true)
+  })
+})
+const removeNavigationError = router.onError((_error, to) => {
+  if (to !== pendingNavigation) return
+  pendingNavigation = null
+  if (!disposed && router.currentRoute.value.name === 'Report'
+    && router.currentRoute.value.params.reportId === props.reportId) selectReport(props.reportId, true)
 })
 
+onMounted(() => {
+  if (props.reportId) addLog(`Report Agent initialized: ${props.reportId}`)
+})
 onUnmounted(() => {
   disposed = true
-  stopPolling()
-  cancelLogRequests()
+  retireReport()
+  removeNavigationGuard()
+  removeNavigationListener()
+  removeNavigationError()
 })
-
-watch(() => props.reportId, (newId) => {
-  stopPolling()
-  cancelLogRequests()
-  agentLogs.value = []
-  consoleLogs.value = []
-  agentLogLine.value = 0
-  consoleLogLine.value = 0
-  reportOutline.value = null
-  currentSectionIndex.value = null
-  generatedSections.value = {}
-  expandedContent.value = new Set()
-  expandedLogs.value = new Set()
-  collapsedSections.value = new Set()
-  isComplete.value = false
-  startTime.value = null
-
-  if (newId) startPolling()
-}, { immediate: true })
+watch(() => props.reportId, newId => selectReport(newId), { immediate: true, flush: 'sync' })
 </script>
 
 <style scoped>
@@ -2170,6 +2429,17 @@ watch(() => props.reportId, (newId) => {
   font-family: 'Inter', 'Noto Sans SC', system-ui, sans-serif;
   overflow: hidden;
 }
+
+.report-stop-panel, .report-observation-note {
+  padding: 12px 20px;
+  border-bottom: 1px solid #DDD;
+  background: #FFF;
+  flex-shrink: 0;
+}
+.report-stop-panel p { margin: 4px 0 10px; }
+.report-stop-panel button { padding: 8px 14px; cursor: pointer; }
+.report-stop-panel button:disabled { cursor: wait; opacity: 0.6; }
+.report-stop-panel button:focus-visible { outline: 2px solid #2563EB; outline-offset: 2px; }
 
 /* Main Split Layout */
 .main-split-layout {

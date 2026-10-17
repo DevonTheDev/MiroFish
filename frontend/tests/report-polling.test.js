@@ -5,7 +5,7 @@ import vm from 'node:vm'
 import { createServer } from 'node:http'
 import axios from 'axios'
 import { parse, compileScript } from '@vue/compiler-sfc'
-import { effectScope, nextTick, reactive, ref, watch } from 'vue'
+import { computed, effectScope, nextTick, reactive, ref, watch } from 'vue'
 
 const source = await readFile(new URL('../src/components/Step4Report.vue', import.meta.url), 'utf8')
 const { descriptor } = parse(source)
@@ -39,7 +39,12 @@ function harness(reportId = 'A') {
     requests.push({ id, fromLine, signal, resolve, reject })
   })
   const state = scope.run(() => vm.runInNewContext(code, {
-    ref, watch, nextTick, props, AbortController,
+    ref, computed, watch, nextTick, props, AbortController,
+    t: key => key,
+    // These established log/cursor cases select unsupported cloud mode explicitly.
+    getReportProgress: id => Promise.resolve({ success: true, data: { report_id: id, cancellation_supported: false } }),
+    getReportSections: () => { throw new Error('Cloud log cases do not reconcile local sections') },
+    router: { beforeEach: () => () => {}, afterEach: () => () => {}, onError: () => () => {}, currentRoute: { value: { name: 'Report', params: {} } } },
     getAgentLog: request(agentRequests), getConsoleLog: request(consoleRequests),
     setInterval: (callback, ms) => { const id = nextId++; intervals.set(id, { callback, ms }); return id },
     clearInterval: id => intervals.delete(id),

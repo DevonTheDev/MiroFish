@@ -162,6 +162,8 @@ const statusClass = computed(() => {
 })
 
 const statusText = computed(() => {
+  if (currentStatus.value === 'cancelled') return t('step4.cancelled')
+  if (currentStatus.value === 'cancelling') return t('step4.cancelling')
   if (currentStatus.value === 'error') return 'Error'
   if (currentStatus.value === 'completed') return 'Completed'
   return 'Generating'

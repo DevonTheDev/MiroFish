@@ -23,6 +23,21 @@ export const generateReport = (data, signal) => {
   return service.post('/api/report/generate', data, { signal })
 }
 
+/** Exact-ID runtime observation; aborting observation never stops generation. */
+export const getReportProgress = (reportId, signal) => {
+  return service.get(`/api/report/${encodeURIComponent(reportId)}/progress`, { signal })
+}
+
+/** Read committed section files, including partial reports and missing log events. */
+export const getReportSections = (reportId, signal) => {
+  return service.get(`/api/report/${encodeURIComponent(reportId)}/sections`, { signal })
+}
+
+/** One explicit local cancellation request. No automatic mutation retry. */
+export const cancelReport = (reportId, signal) => {
+  return service.post(`/api/report/${encodeURIComponent(reportId)}/cancel`, {}, { signal })
+}
+
 /**
  * 获取报告生成状态
  * @param {string} reportId

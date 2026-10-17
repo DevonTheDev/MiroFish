@@ -13,12 +13,15 @@ import os
 import json
 import time
 import re
+from copy import deepcopy
+from contextlib import nullcontext
 from typing import Dict, Any, List, Optional, Callable
 from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
 
 from ..config import Config
+from .report_control import ReportCancelled
 from ..storage import StoragePathError, storage_path, validate_record_id
 from ..utils.llm_client import LLMClient
 from ..utils.logger import get_logger
@@ -43,7 +46,7 @@ class ReportLogger:
     每行是一个完整的 JSON 对象，包含时间戳、动作类型、详细内容等。
     """
     
-    def __init__(self, report_id: str):
+    def __init__(self, report_id: str, control=None):
         """
         初始化日志记录器
         
@@ -51,6 +54,7 @@ class ReportLogger:
             report_id: 报告ID，用于确定日志文件路径
         """
         self.report_id = report_id
+        self.control = control
         self.log_file_path = ReportManager._get_agent_log_path(report_id)
         self.start_time = datetime.now()
         self._ensure_log_file()
@@ -93,9 +97,14 @@ class ReportLogger:
             "details": details
         }
         
-        # 追加写入 JSONL 文件
-        with open(self.log_file_path, 'a', encoding='utf-8') as f:
-            f.write(json.dumps(log_entry, ensure_ascii=False) + '\n')
+        # Report-owned events share the output fence. Console diagnostics from
+        # an already-admitted tool remain independent of these publications.
+        terminal_event = action in {"report_cancelled", "error"}
+        fence = (self.control.terminal() if terminal_event else self.control.commit()) \
+            if self.control else nullcontext()
+        with fence:
+            with open(self.log_file_path, 'a', encoding='utf-8') as f:
+                f.write(json.dumps(log_entry, ensure_ascii=False) + '\n')
     
     def log_start(self, simulation_id: str, graph_id: str, simulation_requirement: str):
         """记录报告生成开始"""
@@ -391,6 +400,7 @@ class ReportStatus(str, Enum):
     GENERATING = "generating"
     COMPLETED = "completed"
     FAILED = "failed"
+    CANCELLED = "cancelled"
 
 
 @dataclass
@@ -892,7 +902,9 @@ class ReportAgent:
         simulation_id: str,
         simulation_requirement: str,
         llm_client: Optional[LLMClient] = None,
-        zep_tools: Optional[ZepToolsService] = None
+        zep_tools: Optional[ZepToolsService] = None,
+        control=None,
+        terminal_callback=None,
     ):
         """
         初始化Report Agent
@@ -904,6 +916,8 @@ class ReportAgent:
             llm_client: LLM客户端（可选）
             zep_tools: Zep工具服务（可选）
         """
+        self.control = control
+        self.terminal_callback = terminal_callback
         self.graph_id = graph_id
         self.simulation_id = simulation_id
         self.simulation_requirement = simulation_requirement
@@ -921,6 +935,11 @@ class ReportAgent:
         
         logger.info(t('report.agentInitDone', graphId=graph_id, simulationId=simulation_id))
     
+    def _report_operation(self, operation, *args, **kwargs):
+        """Whole-operation admission only; shared tools keep their own behavior."""
+        control = getattr(self, "control", None)
+        return control.operation(operation, *args, **kwargs) if control else operation(*args, **kwargs)
+
     def _define_tools(self) -> Dict[str, Dict[str, Any]]:
         """定义可用工具"""
         return {
@@ -1062,6 +1081,8 @@ class ReportAgent:
             else:
                 return f"未知工具: {tool_name}。请使用以下工具之一: insight_forge, panorama_search, quick_search"
                 
+        except ReportCancelled:
+            raise
         except Exception as e:
             logger.error(t('report.toolExecFailed', toolName=tool_name, error=str(e)))
             return f"工具执行失败: {str(e)}"
@@ -1193,7 +1214,7 @@ class ReportAgent:
             progress_callback("planning", 0, t('progress.analyzingRequirements'))
         
         # 首先获取模拟上下文
-        context = self.zep_tools.get_simulation_context(
+        context = self._report_operation(self.zep_tools.get_simulation_context,
             graph_id=self.graph_id,
             simulation_requirement=self.simulation_requirement
         )
@@ -1216,7 +1237,7 @@ class ReportAgent:
         )
 
         try:
-            response = self.llm.chat_json(
+            response = self._report_operation(self.llm.chat_json,
                 messages=self._fit_local_outline_messages([
                     {"role": "system", "content": system_prompt},
                     {"role": "user", "content": user_prompt}
@@ -1247,6 +1268,8 @@ class ReportAgent:
             logger.info(t('report.outlinePlanDone', count=len(sections)))
             return outline
             
+        except ReportCancelled:
+            raise
         except Exception as e:
             logger.error(t('report.outlinePlanFailed', error=str(e)))
             # 返回默认大纲（3个章节，作为fallback）
@@ -1453,7 +1476,7 @@ class ReportAgent:
                 )
             
             # 调用LLM
-            response = self.llm.chat(
+            response = self._report_operation(self.llm.chat,
                 messages=self._fit_local_section_messages(
                     messages, previous_sections, section.title,
                     temperature=0.5, max_tokens=4096,
@@ -1586,7 +1609,7 @@ class ReportAgent:
                         iteration=iteration + 1
                     )
 
-                result = self._execute_tool(
+                result = self._report_operation(self._execute_tool,
                     call["name"],
                     call.get("parameters", {}),
                     report_context=report_context
@@ -1662,7 +1685,7 @@ class ReportAgent:
         logger.warning(t('report.sectionMaxIter', title=section.title))
         messages.append({"role": "user", "content": REACT_FORCE_FINAL_MSG})
         
-        response = self.llm.chat(
+        response = self._report_operation(self.llm.chat,
             messages=self._fit_local_section_messages(
                 messages, previous_sections, section.title,
                 temperature=0.5, max_tokens=4096,
@@ -1717,6 +1740,9 @@ class ReportAgent:
         Returns:
             Report: 完整报告
         """
+        if getattr(self, "control", None) is not None:
+            return self._generate_report_controlled(progress_callback, report_id)
+
         import uuid
         
         # 如果没有传入 report_id，则自动生成
@@ -1925,6 +1951,224 @@ class ReportAgent:
             
             return report
     
+    def _generate_report_controlled(self, progress_callback, report_id):
+        """Local report retirement, with detached committed output and one fence.
+
+        This scopes report operations, not their nested calls or transport. An
+        admitted tool can outlive cancellation and save non-report records.
+        """
+        import uuid
+
+        report_id = report_id or f"report_{uuid.uuid4().hex[:12]}"
+        control = self.control
+        started = datetime.now()
+        committed = Report(
+            report_id=report_id, simulation_id=self.simulation_id,
+            graph_id=self.graph_id,
+            simulation_requirement=self.simulation_requirement,
+            status=ReportStatus.PENDING, created_at=started.isoformat(),
+        )
+        completed_titles = []
+        generated_sections = []
+        result = None
+
+        def progress(stage, amount, message, current_section=None):
+            with control.commit():
+                ReportManager.update_progress(
+                    report_id, stage, amount, message,
+                    current_section=current_section,
+                    completed_sections=list(completed_titles),
+                )
+                if progress_callback:
+                    progress_callback(stage, amount, message)
+
+        try:
+            with control.commit():
+                ReportManager._ensure_report_folder(report_id)
+                self.report_logger = ReportLogger(report_id, control=control)
+                self.console_logger = ReportConsoleLogger(report_id)
+                ReportManager.save_report(deepcopy(committed))
+                self.report_logger.log_start(
+                    self.simulation_id, self.graph_id, self.simulation_requirement,
+                )
+                progress("pending", 0, t('progress.initReport'))
+                progress("planning", 5, t('progress.startPlanningOutline'))
+                self.report_logger.log_planning_start()
+
+            outline_draft = self.plan_outline(
+                progress_callback=lambda stage, amount, message:
+                    progress(stage, amount // 5, message),
+            )
+            # A returned value is still a draft. Cancellation can win between
+            # the operation's return check and this commit acquisition.
+            with control.commit():
+                accepted_outline = deepcopy(outline_draft)
+                def accept_outline():
+                    committed.outline = deepcopy(accepted_outline)
+                    committed.status = ReportStatus.PLANNING
+
+                ReportManager.save_outline(
+                    report_id, accepted_outline, on_committed=accept_outline,
+                )
+                # Advance the snapshot immediately after the output file, before
+                # any event/progress failure can hide this committed output.
+                ReportManager.save_report(deepcopy(committed))
+                self.report_logger.log_planning_complete(committed.outline.to_dict())
+                progress("planning", 15, t('progress.outlineDone', count=len(accepted_outline.sections)))
+
+            total = len(committed.outline.sections)
+            for index in range(total):
+                section_number = index + 1
+                base_progress = 20 + int(index / total * 70)
+                with control.commit():
+                    committed.status = ReportStatus.GENERATING
+                    section_draft = deepcopy(committed.outline.sections[index])
+                    outline_context = deepcopy(committed.outline)
+                    previous_context = list(generated_sections)
+                    progress(
+                        "generating", base_progress,
+                        t('progress.generatingSection', title=section_draft.title,
+                          current=section_number, total=total),
+                        section_draft.title,
+                    )
+                content_draft = self._generate_section_react(
+                    section=section_draft, outline=outline_context,
+                    previous_sections=previous_context,
+                    progress_callback=lambda stage, amount, message:
+                        progress(stage, base_progress + int(amount * 0.7 / total), message),
+                    section_index=section_number,
+                )
+                with control.commit():
+                    accepted_section = deepcopy(section_draft)
+                    accepted_section.content = content_draft
+                    def accept_section():
+                        committed.outline.sections[index] = deepcopy(accepted_section)
+                        completed_titles.append(accepted_section.title)
+                        generated_sections.append(f"## {accepted_section.title}\n\n{content_draft}")
+
+                    ReportManager.save_section(
+                        report_id, section_number, accepted_section,
+                        on_committed=accept_section,
+                    )
+                    self.report_logger.log_section_full_complete(
+                        section_title=accepted_section.title,
+                        section_index=section_number,
+                        full_content=generated_sections[-1].strip(),
+                    )
+                    progress(
+                        "generating", base_progress + int(70 / total),
+                        t('progress.sectionDone', title=accepted_section.title),
+                    )
+
+            with control.commit():
+                # Assembly itself writes full_report.md, so it must not escape
+                # this terminal fence. An error selects failed before unlocking.
+                final_draft = deepcopy(committed)
+                try:
+                    progress("generating", 95, t('progress.assemblingReport'))
+                    final_draft.markdown_content = ReportManager.assemble_full_report(
+                        report_id, final_draft.outline,
+                    )
+                    final_draft.status = ReportStatus.COMPLETED
+                    final_draft.completed_at = datetime.now().isoformat()
+                    ReportManager.save_report(final_draft)
+                    progress("completed", 100, t('progress.reportComplete'))
+                    if self.terminal_callback:
+                        self.terminal_callback(final_draft)
+                    self.report_logger.log_report_complete(
+                        total_sections=total,
+                        total_time_seconds=(datetime.now() - started).total_seconds(),
+                    )
+                    control.finish("completed")
+                    result = deepcopy(final_draft)
+                except Exception as error:
+                    control.finish("failed", str(error))
+                    result = self._finish_local_report(
+                        final_draft, completed_titles, ReportStatus.FAILED, error,
+                    )
+            return result
+        except ReportCancelled:
+            result = self._finish_local_report(
+                committed, completed_titles, ReportStatus.CANCELLED,
+            )
+            return result
+        except Exception as error:
+            # Cancellation wins if it was accepted before failure publication.
+            result = self._finish_local_report(
+                committed, completed_titles, ReportStatus.FAILED, error,
+            )
+            return result
+        finally:
+            if self.console_logger:
+                try:
+                    self.console_logger.close()
+                except Exception as error:
+                    control.record_error(f"Report logger cleanup failed: {error}")
+                    if result is not None:
+                        result.error = control.snapshot()["error"]
+                        try:
+                            if self.terminal_callback:
+                                self.terminal_callback(result)
+                        except Exception as callback_error:
+                            control.record_error(f"Task cleanup update failed: {callback_error}")
+                finally:
+                    self.console_logger = None
+
+    def _finish_local_report(self, committed, completed_titles, status, error=None):
+        """Publish only detached committed output; never serialize a live draft."""
+        control = self.control
+        with control.terminal():
+            selected = control.snapshot()
+            if selected["terminal_status"] is not None:
+                status = ReportStatus(selected["terminal_status"])
+            elif selected["cancellation_requested"]:
+                status = ReportStatus.CANCELLED
+            report = deepcopy(committed)
+            report.status = status
+            report.completed_at = datetime.now().isoformat()
+            if status == ReportStatus.CANCELLED:
+                report.markdown_content = ""
+                # The admitted operation's error is not a failed cancellation.
+                report.error = None
+            elif error is not None:
+                report.error = str(error)
+            control.finish(status.value, report.error)
+            terminal_message = (
+                "Report cancelled. Saved sections are kept. Interviews already sent "
+                "to the simulation may still finish and save records."
+                if status == ReportStatus.CANCELLED else t('progress.reportFailed', error=report.error)
+            )
+            def terminal_event():
+                # Cancellation may win before the first ordinary initialization
+                # commit, after the API has handed ownership to this agent.
+                if self.report_logger is None:
+                    self.report_logger = ReportLogger(report.report_id, control=control)
+                self.report_logger.log(
+                    "report_cancelled" if status == ReportStatus.CANCELLED else "error",
+                    status.value, {"message": terminal_message},
+                )
+
+            for label, write in (
+                ("metadata", lambda: ReportManager.save_report(report)),
+                ("progress", lambda: ReportManager.update_progress(
+                    report.report_id, status.value, -1, terminal_message,
+                    completed_sections=list(completed_titles),
+                )),
+                ("event", terminal_event),
+            ):
+                try:
+                    write()
+                except Exception as write_error:
+                    control.record_error(f"Report {label} persistence failed: {write_error}")
+            report.error = control.snapshot()["error"] or report.error
+            if self.terminal_callback:
+                try:
+                    self.terminal_callback(report)
+                except Exception as callback_error:
+                    control.record_error(f"Report task publication failed: {callback_error}")
+                    report.error = control.snapshot()["error"]
+            return report
+
     def _fit_local_chat_messages(
         self, messages: List[Dict[str, str]], report_content: str,
         prompt_values: Dict[str, Any], language_instruction: str,
@@ -2298,7 +2542,7 @@ class ReportManager:
         return result["logs"]
     
     @classmethod
-    def save_outline(cls, report_id: str, outline: ReportOutline) -> None:
+    def save_outline(cls, report_id: str, outline: ReportOutline, *, on_committed=None) -> None:
         """
         保存报告大纲
         
@@ -2307,7 +2551,9 @@ class ReportManager:
         cls._ensure_report_folder(report_id)
         
         write_json_atomic(cls._get_outline_path(report_id), outline.to_dict(), logger=logger)
-        
+        if on_committed is not None:
+            on_committed()
+
         logger.info(t('report.outlineSaved', reportId=report_id))
     
     @classmethod
@@ -2315,7 +2561,9 @@ class ReportManager:
         cls,
         report_id: str,
         section_index: int,
-        section: ReportSection
+        section: ReportSection,
+        *,
+        on_committed=None,
     ) -> str:
         """
         保存单个章节
@@ -2342,6 +2590,8 @@ class ReportManager:
         file_suffix = f"section_{section_index:02d}.md"
         file_path = cls._get_section_path(report_id, section_index)
         write_text_atomic(file_path, md_content, logger=logger)
+        if on_committed is not None:
+            on_committed()
 
         logger.info(t('report.sectionFileSaved', reportId=report_id, fileSuffix=file_suffix))
         return file_path

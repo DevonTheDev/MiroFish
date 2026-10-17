@@ -8,13 +8,15 @@ import json
 import traceback
 import threading
 from dataclasses import dataclass
+from datetime import datetime
 from io import BytesIO
 from flask import current_app, request, jsonify, send_file
 
 from . import report_bp
 from ..config import Config
 from ..storage import StoragePathError
-from ..services.report_agent import ReportAgent, ReportManager, ReportStatus
+from ..services.report_agent import Report, ReportAgent, ReportLogger, ReportManager, ReportStatus
+from ..services.report_control import ReportCancelled, ReportControl
 from ..services import saved_reports
 from ..services.saved_reports import (
     SavedReportError,
@@ -45,6 +47,7 @@ class _ActiveReportJob:
     graph_id: str
     task_id: str
     report_id: str
+    control: ReportControl | None = None
 
 
 # Process-local ownership, never inferred from saved files or terminal task
@@ -70,6 +73,9 @@ def _fail_report_task(task_manager, task_id, error):
 
 
 def _generating_report_response(job, *, already_running):
+    # Call only after releasing the registry guard. Control never nests below
+    # the registry/graph locks, including this admission response.
+    observation = _job_observation(job) if job.control is not None else {}
     return jsonify({
         "success": True,
         "data": {
@@ -80,8 +86,227 @@ def _generating_report_response(job, *, already_running):
             "message": t('api.reportGenerateStarted'),
             "already_generated": False,
             "already_running": already_running,
+            **observation,
         },
     })
+
+
+def _find_report_job(report_id):
+    with _active_report_jobs_lock:
+        return next((job for job in _active_report_jobs.values()
+                     if job.report_id == report_id), None)
+
+
+def _owns_report_job(job):
+    with _active_report_jobs_lock:
+        return _active_report_jobs.get(job.simulation_id) is job
+
+
+def _exact_report_task(report_id):
+    # A snapshot from the real task lock, never a by-simulation cache lookup.
+    return next((task for task in TaskManager().list_tasks("report_generate")
+                 if task["metadata"].get("report_id") == report_id), None)
+
+
+def _saved_progress_fields(report_id):
+    """Preserve legacy detail fields without making live ownership need files."""
+    try:
+        progress = ReportManager.get_progress(report_id)
+        return progress if isinstance(progress, dict) else {}
+    except Exception:
+        logger.exception("Could not read saved progress for report %s", report_id)
+        return {}
+
+
+def _job_observation(job):
+    state = job.control.snapshot()
+    task = _exact_report_task(job.report_id) or {}
+    progress = _saved_progress_fields(job.report_id)
+    active = _owns_report_job(job)
+    if not active:
+        # Cleanup may have occurred between the first state snapshot and the
+        # ownership check. Terminal publication precedes cleanup, so reread it.
+        state = job.control.snapshot()
+        task = _exact_report_task(job.report_id) or {}
+    cancelling = state["cancellation_requested"] and active
+    status = "cancelling" if cancelling else state["terminal_status"] or "generating"
+    return {
+        **progress,
+        "report_id": job.report_id, "task_id": job.task_id,
+        "simulation_id": job.simulation_id, "status": status,
+        "progress": task.get("progress", 0),
+        "message": ("Cancelling report. Waiting for the current operation to return."
+                    if cancelling else task.get("message", "")),
+        "cancellation_supported": True,
+        "cancellation_requested": state["cancellation_requested"],
+        "worker_active": active,
+        "terminal_status": None if cancelling else state["terminal_status"],
+        "error": state["error"] or task.get("error"),
+    }
+
+
+def _local_report_observation(report_id):
+    """Exact live owner, exact terminal task, then exact saved report."""
+    job = _find_report_job(report_id)
+    if job is not None and job.control is not None:
+        observation = _job_observation(job)
+        if observation["worker_active"]:
+            return observation, 200
+
+    task = _exact_report_task(report_id)
+    terminal = {"completed", "failed", "cancelled"}
+    if task is not None and task["status"] in terminal:
+        result = task.get("result") or {}
+        status = task["status"]
+        return {
+            **_saved_progress_fields(report_id),
+            "report_id": report_id, "task_id": task["task_id"],
+            "simulation_id": task["metadata"].get("simulation_id"),
+            "status": status, "terminal_status": status,
+            "progress": task["progress"], "message": task["message"],
+            "cancellation_supported": True, "worker_active": False,
+            "cancellation_requested": status == "cancelled",
+            "error": task.get("error") or result.get("error"),
+        }, 200
+
+    report = ReportManager.get_report(report_id)
+    if report is None and task is None:
+        return None, 404
+    status = report.status.value if report is not None else task["status"]
+    progress = _saved_progress_fields(report_id)
+    observation = {
+        **progress, "report_id": report_id,
+        "task_id": task["task_id"] if task else None,
+        "simulation_id": (report.simulation_id if report else task["metadata"].get("simulation_id")),
+        "status": status, "terminal_status": status if status in terminal else None,
+        "progress": progress.get("progress", 100 if status == "completed" else 0),
+        "cancellation_supported": True, "worker_active": False,
+        "cancellation_requested": status == "cancelled",
+        "error": report.error if report is not None else task.get("error"),
+    }
+    return observation, 200 if status in terminal else 409
+
+
+def _local_observation_response(report_id):
+    observation, status = _local_report_observation(report_id)
+    if status == 404:
+        return jsonify({"success": False, "error": t('api.reportNotFound', id=report_id)}), 404
+    if status == 409:
+        return jsonify({
+            "success": False, "data": observation,
+            "error_code": "no_active_report_job",
+            "error": "No active report job in this backend",
+        }), 409
+    return jsonify({"success": True, "data": observation})
+
+
+def _publish_local_task(job, report):
+    result = {
+        "report_id": job.report_id, "simulation_id": job.simulation_id,
+        "status": report.status.value, "error": report.error,
+    }
+    tasks = TaskManager()
+    if report.status == ReportStatus.COMPLETED:
+        tasks.complete_task(job.task_id, result=result)
+    else:
+        tasks.update_task(
+            job.task_id, status=TaskStatus(report.status.value), result=result,
+            error=report.error,
+            message=("Report cancelled" if report.status == ReportStatus.CANCELLED
+                     else t('api.reportGenerateFailed')),
+        )
+
+
+def _finish_unstarted_local_report(job, simulation_requirement, error):
+    """Before agent ownership, no output exists; cancellation saves an empty report."""
+    with job.control.terminal():
+        snapshot = job.control.snapshot()
+        status = "cancelled" if snapshot["cancellation_requested"] else "failed"
+        report = Report(
+            report_id=job.report_id, simulation_id=job.simulation_id,
+            graph_id=job.graph_id, simulation_requirement=simulation_requirement,
+            status=ReportStatus(status), created_at=datetime.now().isoformat(),
+            completed_at=datetime.now().isoformat(),
+            error=None if status == "cancelled" else str(error),
+        )
+        for publish in (
+            lambda: ReportManager.save_report(report),
+            lambda: ReportManager.update_progress(job.report_id, status, 0, f"Report {status}"),
+            lambda: ReportLogger(job.report_id, control=job.control).log(
+                "report_cancelled" if status == "cancelled" else "error", status,
+                {"message": f"Report {status}", "error": report.error},
+            ),
+        ):
+            try:
+                publish()
+            except Exception as persistence_error:
+                job.control.record_error(persistence_error)
+        report.error = job.control.snapshot()["error"] or report.error
+        job.control.finish(status, report.error)
+        _publish_local_task(job, report)
+
+
+def _run_local_report(job, simulation_requirement, current_locale):
+    agent_started = False
+    try:
+        job.control.check()
+        set_locale(current_locale)
+        with job.control.commit():
+            TaskManager().update_task(job.task_id, status=TaskStatus.PROCESSING,
+                                      progress=0, message=t('api.initReportAgent'))
+        agent = job.control.operation(
+            ReportAgent, graph_id=job.graph_id, simulation_id=job.simulation_id,
+            simulation_requirement=simulation_requirement, control=job.control,
+            terminal_callback=lambda report: _publish_local_task(job, report),
+        )
+
+        def progress_callback(stage, progress, message):
+            with job.control.commit():
+                TaskManager().update_task(job.task_id, progress=progress,
+                                          message=f"[{stage}] {message}")
+
+        agent_started = True
+        # The controlled agent alone owns terminal persistence and task callback.
+        # In particular, do not save its returned mutable report a second time.
+        agent.generate_report(progress_callback=progress_callback, report_id=job.report_id)
+    except Exception as error:
+        try:
+            if not agent_started:
+                _finish_unstarted_local_report(job, simulation_requirement, error)
+            else:
+                # A failed terminal logger/task callback must still leave an
+                # exact in-memory outcome; never rewrite the agent's output.
+                with job.control.terminal():
+                    snapshot = job.control.snapshot()
+                    status = snapshot["terminal_status"] or (
+                        "cancelled" if snapshot["cancellation_requested"] else "failed")
+                    if not isinstance(error, ReportCancelled):
+                        job.control.record_error(error)
+                    job.control.finish(status)
+                    TaskManager().update_task(
+                        job.task_id, status=TaskStatus(status),
+                        result={"report_id": job.report_id, "simulation_id": job.simulation_id,
+                                "status": status, "error": job.control.snapshot()["error"]},
+                        error=job.control.snapshot()["error"], message=f"Report {status}",
+                    )
+        except Exception:
+            logger.exception("Could not publish local report terminal task")
+    finally:
+        snapshot = job.control.snapshot()
+        if snapshot["terminal_status"]:
+            try:
+                status = snapshot["terminal_status"]
+                TaskManager().update_task(
+                    job.task_id, status=TaskStatus(status),
+                    progress=100 if status == "completed" else None,
+                    result={"report_id": job.report_id, "simulation_id": job.simulation_id,
+                            "status": status, "error": snapshot["error"]},
+                    error=snapshot["error"], message=f"Report {status}",
+                )
+            except Exception as publication_error:
+                job.control.record_error(publication_error)
+                logger.exception("Could not retain local report terminal task")
+        _release_active_report(job)
 
 
 @report_bp.before_request
@@ -343,9 +568,11 @@ def generate_report():
                             "success": False,
                             "error": "An active report uses a different graph for this simulation",
                         }), 409
-                    return _generating_report_response(active_job, already_running=True)
+                    job = active_job
+                else:
+                    job = None
 
-                if not force_regenerate:
+                if job is None and not force_regenerate:
                     existing_report = ReportManager.get_report_by_simulation(
                         simulation_id
                     )
@@ -364,84 +591,91 @@ def generate_report():
                             }
                         })
 
-                # Locale retrieval cannot strand an allocated task if it fails.
-                current_locale = get_locale()
-                task_manager = TaskManager()
-                task_id = task_manager.create_task(
-                    task_type="report_generate",
-                    metadata={
-                        "simulation_id": simulation_id,
-                        "graph_id": graph_id,
-                        "report_id": report_id
-                    }
-                )
-                job = _ActiveReportJob(simulation_id, graph_id, task_id, report_id)
-                _active_report_jobs[simulation_id] = job
+                if job is None:
+                    # Locale retrieval cannot strand an allocated task if it fails.
+                    current_locale = get_locale()
+                    task_manager = TaskManager()
+                    task_id = task_manager.create_task(
+                        task_type="report_generate",
+                        metadata={
+                            "simulation_id": simulation_id,
+                            "graph_id": graph_id,
+                            "report_id": report_id
+                        }
+                    )
+                    job = _ActiveReportJob(
+                        simulation_id, graph_id, task_id, report_id,
+                        ReportControl() if Config.LOCAL_MODE else None,
+                    )
+                    _active_report_jobs[simulation_id] = job
 
-                def run_generate():
-                    try:
-                        set_locale(current_locale)
-                        task_manager.update_task(
-                            task_id,
-                            status=TaskStatus.PROCESSING,
-                            progress=0,
-                            message=t('api.initReportAgent')
-                        )
-
-                        agent = ReportAgent(
-                            graph_id=graph_id,
-                            simulation_id=simulation_id,
-                            simulation_requirement=simulation_requirement
-                        )
-
-                        def progress_callback(stage, progress, message):
+                    def run_generate():
+                        if job.control is not None:
+                            _run_local_report(job, simulation_requirement, current_locale)
+                            return
+                        try:
+                            set_locale(current_locale)
                             task_manager.update_task(
                                 task_id,
-                                progress=progress,
-                                message=f"[{stage}] {message}"
+                                status=TaskStatus.PROCESSING,
+                                progress=0,
+                                message=t('api.initReportAgent')
                             )
 
-                        report = agent.generate_report(
-                            progress_callback=progress_callback,
-                            report_id=report_id
-                        )
-                        ReportManager.save_report(report)
-
-                        if report.status == ReportStatus.COMPLETED:
-                            task_manager.complete_task(
-                                task_id,
-                                result={
-                                    "report_id": report.report_id,
-                                    "simulation_id": simulation_id,
-                                    "status": "completed"
-                                }
+                            agent = ReportAgent(
+                                graph_id=graph_id,
+                                simulation_id=simulation_id,
+                                simulation_requirement=simulation_requirement
                             )
-                        else:
-                            task_manager.fail_task(
-                                task_id,
-                                report.error or t('api.reportGenerateFailed')
-                            )
-                    except Exception as e:
-                        _fail_report_task(task_manager, task_id, e)
-                        logger.error(f"报告生成失败: {str(e)}")
-                    finally:
-                        _release_active_report(job)
 
-                try:
-                    register_graph_reader(graph_id, report_id)
-                    # Publish before start and serialize startup rollback with
-                    # retries. The worker holds no lock during inference, and
-                    # admission never waits for worker completion.
-                    thread = threading.Thread(target=run_generate, daemon=True)
-                    thread.start()
-                except Exception as e:
+                            def progress_callback(stage, progress, message):
+                                task_manager.update_task(
+                                    task_id,
+                                    progress=progress,
+                                    message=f"[{stage}] {message}"
+                                )
+
+                            report = agent.generate_report(
+                                progress_callback=progress_callback,
+                                report_id=report_id
+                            )
+                            ReportManager.save_report(report)
+
+                            if report.status == ReportStatus.COMPLETED:
+                                task_manager.complete_task(
+                                    task_id,
+                                    result={
+                                        "report_id": report.report_id,
+                                        "simulation_id": simulation_id,
+                                        "status": "completed"
+                                    }
+                                )
+                            else:
+                                task_manager.fail_task(
+                                    task_id,
+                                    report.error or t('api.reportGenerateFailed')
+                                )
+                        except Exception as e:
+                            _fail_report_task(task_manager, task_id, e)
+                            logger.error(f"报告生成失败: {str(e)}")
+                        finally:
+                            _release_active_report(job)
+
                     try:
-                        _fail_report_task(task_manager, task_id, e)
-                    finally:
-                        _release_active_report(job)
-                    raise
+                        register_graph_reader(graph_id, report_id)
+                        # Publish before start and serialize startup rollback with
+                        # retries. The worker holds no lock during inference, and
+                        # admission never waits for worker completion.
+                        thread = threading.Thread(target=run_generate, daemon=True)
+                        thread.start()
+                    except Exception as e:
+                        try:
+                            _fail_report_task(task_manager, task_id, e)
+                        finally:
+                            _release_active_report(job)
+                        raise
 
-        return _generating_report_response(job, already_running=False)
+        return _generating_report_response(job, already_running=active_job is not None)
         
     except Exception as e:
         logger.error(f"启动报告生成任务失败: {str(e)}")
@@ -479,6 +713,21 @@ def get_generate_status():
         
         task_id = data.get('task_id')
         simulation_id = data.get('simulation_id')
+
+        if Config.LOCAL_MODE:
+            # A supplied exact task must never be replaced by an older report
+            # returned from the by-simulation completed cache.
+            if task_id:
+                task = TaskManager().get_task(task_id)
+                if task is None:
+                    return jsonify({"success": False, "error": t('api.taskNotFound', id=task_id)}), 404
+                if task is not None and task.metadata.get("report_id"):
+                    return _local_observation_response(task.metadata["report_id"])
+            elif simulation_id:
+                with _active_report_jobs_lock:
+                    job = _active_report_jobs.get(simulation_id)
+                if job is not None and job.control is not None:
+                    return _local_observation_response(job.report_id)
         
         # 如果提供了simulation_id，先检查是否已有完成的报告
         if simulation_id:
@@ -837,6 +1086,30 @@ def chat_with_report_agent():
 
 # ============== 报告进度与分章节接口 ==============
 
+@report_bp.route('/<report_id>/cancel', methods=['POST'])
+def cancel_report(report_id: str):
+    """Retire later local report operations; admitted work may still finish."""
+    if not Config.LOCAL_MODE:
+        return jsonify({
+            "success": False, "error_code": "report_cancellation_unsupported",
+            "error": "Report cancellation is supported only in local mode",
+        }), 409
+    try:
+        # Resolve the exact accepted ID before touching storage, including the
+        # interval before thread startup or the report's first file write.
+        job = _find_report_job(report_id)
+        if job is not None and job.control is not None:
+            job.control.request_cancel()
+            observation = _job_observation(job)
+            if observation["worker_active"]:
+                status = 202 if observation["status"] == "cancelling" else 200
+                return jsonify({"success": True, "data": observation}), status
+        return _local_observation_response(report_id)
+    except Exception as error:
+        logger.exception("Could not cancel local report")
+        return jsonify({"success": False, "error": str(error)}), 500
+
+
 @report_bp.route('/<report_id>/progress', methods=['GET'])
 def get_report_progress(report_id: str):
     """
@@ -856,6 +1129,8 @@ def get_report_progress(report_id: str):
         }
     """
     try:
+        if Config.LOCAL_MODE:
+            return _local_observation_response(report_id)
         progress = ReportManager.get_progress(report_id)
         
         if not progress:
@@ -866,7 +1141,7 @@ def get_report_progress(report_id: str):
         
         return jsonify({
             "success": True,
-            "data": progress
+            "data": {**progress, "report_id": report_id, "cancellation_supported": False}
         })
         
     except Exception as e:

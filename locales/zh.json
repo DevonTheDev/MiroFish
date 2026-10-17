@@ -330,7 +330,29 @@
     "panelRelatedEdges": "相关关系",
     "panelRelatedNodes": "相关节点",
     "world1": "世界1",
-    "world2": "世界2"
+    "world2": "世界2",
+    "stopReport": "停止生成报告",
+    "requestingStop": "正在请求停止…",
+    "stopNotice": "取消会停止后续报告步骤。当前操作仍可能使用模型或保存访谈记录。",
+    "cancelling": "正在取消报告",
+    "cancellingNotice": "正在取消报告，等待当前操作返回。",
+    "cancelled": "报告已取消",
+    "cancelledNotice": "已保存的章节会保留。已发送到模拟的访谈仍可能完成并保存记录。",
+    "partialReport": "部分报告",
+    "noSectionsSaved": "没有已保存的章节",
+    "readingSections": "正在读取已保存的章节…",
+    "savedSection": "已保存章节 {number}",
+    "cancelUnconfirmed": "尚未确认取消。正在检查此报告；你可以再次明确点击停止。",
+    "progressUnavailable": "报告状态暂不可用，正在等待权威状态更新。",
+    "sectionsUnavailable": "无法读取已保存的章节。之前显示的章节会保留。",
+    "retrySections": "重新读取已保存章节",
+    "newReport": "生成新报告",
+    "requestingNewReport": "正在请求新报告…",
+    "newReportUnconfirmed": "尚未确认新报告请求。你可以明确重试；服务器会检查是否已有活动任务。",
+    "openNewReport": "打开新报告",
+    "openNewReportFailed": "新报告请求已接受，但未能打开。请再次打开，无需重新生成报告。",
+    "reportTitle": "报告",
+    "outlineUnavailable": "无法读取已保存的报告标题。下方显示可读取的章节文件。"
   },
   "step5": {
     "interactiveTools": "Interactive Tools",
@@ -1192,7 +1214,8 @@
       "generating": "生成中",
       "completed": "已完成",
       "failed": "失败",
-      "unknown": "未知"
+      "unknown": "未知",
+      "cancelled": "已取消"
     },
     "sources": {
       "modern": "报告文件夹",
