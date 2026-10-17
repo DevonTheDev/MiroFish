@@ -366,7 +366,7 @@ test('file route imports no API or persistence and metadata makes no content-der
   const {readFileSync}=await import('node:fs'); const source=readFileSync(new URL('../src/views/SavedReportFilesView.vue',import.meta.url),'utf8')
   assert.doesNotMatch(source,/from ['"][^'"]*\/api\/|localStorage|sessionStorage|indexedDB|fetch\(|v-html/)
   const view=await mountReportFiles()
-  try{const value=report();value.simulation_id='https://private.example';await acceptFile(view,value);assert.ok(view.all(n=>n.type==='a').every(n=>['/','/reports'].includes(n.props.href)));assert.match(view.text(),/historical local observation/i);assert.match(view.text(),/Pinned comparison slots remain/);noEffects(view)}finally{view.unmount()}
+  try{const value=report();value.simulation_id='https://private.example';await acceptFile(view,value);assert.ok(view.all(n=>n.type==='a').every(n=>['/','/reports','/report-review'].includes(n.props.href)));assert.match(view.text(),/historical local observation/i);assert.match(view.text(),/Pinned comparison slots remain/);noEffects(view)}finally{view.unmount()}
 })
 
 for(const downloadId of ['comparison-left-download','comparison-left-download-json']) for(const mutation of ['comparison-clear','comparison-swap','comparison-left-clear','capture-left','unmount']) for(const stage of ['create','anchor','append','click'])test(`comparison ${downloadId} ${mutation} at ${stage} retires exact download resources`,async()=>{

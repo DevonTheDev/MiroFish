@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict'
-import { readFileSync } from 'node:fs'
+import { readFileSync, existsSync } from 'node:fs'
 import vm from 'node:vm'
+import { webcrypto } from 'node:crypto'
 import { parse as parseJavaScript } from '@babel/parser'
 import { parse, compileScript, compileTemplate } from '@vue/compiler-sfc'
 import * as Vue from 'vue'
@@ -14,6 +15,10 @@ import * as projectInputRecipe from '../../src/utils/projectInputRecipe.js'
 import * as savedReportObservation from '../../src/utils/savedReportObservation.js'
 import * as savedReportFiles from '../../src/utils/savedReportFiles.js'
 import * as savedReportClipboard from '../../src/utils/savedReportClipboard.js'
+
+const sourceUrl = path => new URL('../../src/' + path, import.meta.url)
+const reviewNotes = existsSync(sourceUrl('utils/savedReportReviewNotes.js')) ? await import(sourceUrl('utils/savedReportReviewNotes.js')) : {}
+const reviewModule = existsSync(sourceUrl('store/savedReportReview.js')) ? await import(sourceUrl('store/savedReportReview.js')) : {}
 
 export const ok = data => ({ success: true, data })
 export async function flush() {
@@ -70,7 +75,7 @@ function renderer(scrollCalls, focusCalls, document) {
   return { host, root, body }
 }
 
-export async function mountReportLibrary({ api, initialPath = '/reports', locale = 'en', timers = fakeTimers(), deferredScrolls = null, onSearchIndex = null, onHeadingIndex = null, onHeadingRef = null } = {}) {
+export async function mountReportLibrary({ api, initialPath = '/reports', locale = 'en', timers = fakeTimers(), deferredScrolls = null, onSearchIndex = null, onHeadingIndex = null, onHeadingRef = null, reviewHost = {} } = {}) {
   const requests = api ? null : deferredApi()
   api ??= requests.api
   const warnings = [], downloads = [], revokedUrls = [], scrollCalls = [], focusCalls = []
@@ -97,6 +102,15 @@ export async function mountReportLibrary({ api, initialPath = '/reports', locale
     },
     body: { appendChild() {} },
   }
+  const windowListeners = new Map()
+  const reviewPlatform = {
+    crypto: webcrypto, TextEncoder, TextDecoder, Blob, URL: urlApi, document,
+    setTimeout: timers.setTimeout, clearTimeout: timers.clearTimeout,
+    addEventListener(type, callback) { if (!windowListeners.has(type)) windowListeners.set(type, new Set()); windowListeners.get(type).add(callback) },
+    removeEventListener(type, callback) { windowListeners.get(type)?.delete(callback) },
+  }
+  Object.defineProperties(reviewPlatform, Object.getOwnPropertyDescriptors(reviewHost))
+  const reviewStore = reviewModule.createReviewStore?.(reviewPlatform)
   const { host, root, body } = renderer(scrollCalls, focusCalls, document)
   const stub = { render: () => Vue.h('fixture-boundary') }
   const passThrough = { setup: (_props, { slots }) => () => slots.default?.() }
@@ -114,6 +128,8 @@ export async function mountReportLibrary({ api, initialPath = '/reports', locale
     'vue-router': { ...Router, createWebHistory: Router.createMemoryHistory },
     'vue-i18n': { useI18n },
     '../store/pendingUpload.js': PendingUpload,
+    '../store/savedReportReview.js': { ...reviewModule, reviewStore },
+    '../utils/savedReportReviewNotes.js': reviewNotes,
     '../utils/projectInputRecipe.js': projectInputRecipe,
     '../utils/savedReportHeadings.js': { ...savedReportHeadings, indexReportHeadings: text => {
       const index = savedReportHeadings.indexReportHeadings(text); onHeadingIndex?.(index); return index
@@ -133,9 +149,10 @@ export async function mountReportLibrary({ api, initialPath = '/reports', locale
   const components = { '../components/LanguageSwitcher.vue': stub }
   function evaluate(source, returnName = 'component') {
     const ast = parseJavaScript(source, { sourceType: 'module' })
-    const globals = { AbortController, Date, Intl, console, Blob, URL: urlApi, document,
+    const globals = { AbortController, Date, Intl, console, Blob, TextEncoder, TextDecoder, URL: urlApi, document, window: reviewPlatform,
       setTimeout: timers.setTimeout, clearTimeout: timers.clearTimeout,
       IntersectionObserver: class { observe() {} disconnect() {} } }
+    Object.defineProperty(globals, 'crypto', { get: () => reviewPlatform.crypto })
     for (const statement of ast.program.body.filter(item => item.type === 'ImportDeclaration').reverse()) {
       const path = statement.source.value
       const dependency = modules[path] ?? (path.includes('/api/') ? api : null)
@@ -160,6 +177,9 @@ export async function mountReportLibrary({ api, initialPath = '/reports', locale
   }
   components['../components/SavedReportComparison.vue'] = component('components/SavedReportComparison.vue')
   components['../components/SavedReportReader.vue'] = component('components/SavedReportReader.vue')
+  if (existsSync(sourceUrl('components/SavedReportReviewLaunch.vue'))) components['../components/SavedReportReviewLaunch.vue'] = component('components/SavedReportReviewLaunch.vue')
+  if (existsSync(sourceUrl('views/SavedReportReviewView.vue'))) components['../views/SavedReportReviewView.vue'] = component('views/SavedReportReviewView.vue')
+  if (existsSync(sourceUrl('views/SavedReportFilesView.vue'))) components['../views/SavedReportFilesView.vue'] = component('views/SavedReportFilesView.vue')
   components['../views/SavedReportsView.vue'] = component('views/SavedReportsView.vue')
   components['../views/Home.vue'] = component('views/Home.vue')
   const router = evaluate(readFileSync(new URL('../../src/router/index.js', import.meta.url), 'utf8'))
@@ -181,7 +201,8 @@ export async function mountReportLibrary({ api, initialPath = '/reports', locale
     const raw = literal || target.type === 'pre'
     return (target.type === '#comment' ? '' : target.text ?? '') + (target.children ?? []).map(child => text(child, raw)).join(raw ? '' : ' ')
   }
-  return { root, body, router, i18n, warnings, requests, flush, waitFor, all, find, byId, text, downloads, revokedUrls, timers, scrollCalls, focusCalls, document, documentListeners,
+  return { root, body, router, i18n, warnings, requests, flush, waitFor, all, find, byId, text, downloads, revokedUrls, timers, scrollCalls, focusCalls, document, documentListeners, reviewStore, reviewHost: reviewPlatform, windowListeners,
+    dispatchWindow(type, event) { for (const callback of [...(windowListeners.get(type) ?? [])]) callback(event) },
     async click(id) {
       const target = byId(id); assert.ok(target, `missing clickable control ${id}`)
       assert.ok(!target.props.disabled, `disabled control ${id}`)
@@ -210,7 +231,7 @@ export async function mountReportLibrary({ api, initialPath = '/reports', locale
     async navigate(path) { await router.push(path); await flush() },
     async back() { router.back(); await flush() },
     async forward() { router.forward(); await flush() },
-    unmount() { app.unmount() },
+    unmount() { app.unmount(); reviewStore?.dispose?.() },
   }
 }
 

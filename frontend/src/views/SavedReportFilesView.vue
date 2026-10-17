@@ -26,6 +26,7 @@
           <p v-if="!entry.observation.content_available" role="status" class="notice" :data-testid="`${entry.kind}-content-error`">{{ t(`savedReports.contentErrors.${entry.observation.content_error}`) }}</p>
           <template v-if="entry.kind === 'accepted'">
             <div class="actions"><button type="button" data-testid="download-file" :onClick="view.downloadJson">{{ t('savedReportFiles.download') }}</button><button type="button" data-testid="download-markdown" :disabled="!entry.observation.content_available" :onClick="view.downloadMarkdown">{{ t('savedReports.download') }}</button></div>
+            <SavedReportReviewLaunch :source="entry.observation" :is-current="isCurrentSource" />
             <SavedReportReader :source="entry.observation" :is-current="isCurrentSource" />
           </template>
         </article>
@@ -41,6 +42,7 @@ import { computed, shallowRef, watch, onBeforeUnmount } from 'vue'
 import { RouterLink, useRoute } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import SavedReportReader from '../components/SavedReportReader.vue'
+import SavedReportReviewLaunch from '../components/SavedReportReviewLaunch.vue'
 import SavedReportComparison from '../components/SavedReportComparison.vue'
 import { SAVED_REPORT_FILE_MAX_BYTES, createSavedReportFile, readSavedReportFile } from '../utils/savedReportFiles.js'
 

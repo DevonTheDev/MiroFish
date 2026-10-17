@@ -152,6 +152,31 @@ function jumpHeading(snapshot) {
     if (typeof target.scrollIntoView === 'function') target.scrollIntoView({ block: 'nearest', inline: 'nearest' })
   })
 }
+// Optional external intent; the reader alone owns target lookup and DOM focus.
+// Selection changes invalidate the old render, so resolve the target only after
+// the owned replacement render has registered its refs.
+function jumpToHeading(source, lineStart, isCurrent = () => true) {
+  const owner = headingOwner.value
+  if (disposed || props.source !== source || owner.source !== source || !props.isCurrent(source) || !isCurrent()) return false
+  const heading = owner.index.headings.find(item => item.lineStart === lineStart)
+  if (!heading) return false
+  const snapshot = { owner, heading, generation: ++selectionGeneration }
+  const intent = ++navigationIntent, focus = focusGeneration
+  selection.value = snapshot
+  const current = () => isCurrent() && ownsHeading(snapshot) && selectionGeneration === snapshot.generation && navigationIntent === intent
+  nextTick(() => {
+    if (!current() || focusGeneration !== focus) return
+    const render = rendered.value[0], target = headingElements.get(lineStart)
+    const ownsTarget = () => current() && ownsRender(render) && headingElements.get(lineStart) === target
+    if (!ownsTarget() || typeof target?.focus !== 'function') return
+    target.focus({ preventScroll: true })
+    if (!ownsTarget() || focusDocument?.activeElement !== target) return
+    if (typeof target.scrollIntoView === 'function') target.scrollIntoView({ block: 'nearest', inline: 'nearest' })
+  })
+  return true
+}
+defineExpose({ jumpToHeading })
+
 const headingActions = computed(() => {
   const snapshot = selection.value
   return {

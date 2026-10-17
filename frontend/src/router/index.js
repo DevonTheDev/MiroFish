@@ -1,3 +1,4 @@
+import { watch } from 'vue'
 import { createRouter, createWebHistory } from 'vue-router'
 import Home from '../views/Home.vue'
 import SavedSimulationsView from '../views/SavedSimulationsView.vue'
@@ -21,12 +22,15 @@ import PromptSuiteComparisonView from '../views/PromptSuiteComparisonView.vue'
 import PromptExamplesView from '../views/PromptExamplesView.vue'
 import SavedReportsView from '../views/SavedReportsView.vue'
 import SavedReportFilesView from '../views/SavedReportFilesView.vue'
+import SavedReportReviewView from '../views/SavedReportReviewView.vue'
+import { reviewStore } from '../store/savedReportReview.js'
 
 import RunCapturesView from '../views/RunCapturesView.vue'
 import RunCaptureFilesView from '../views/RunCaptureFilesView.vue'
 import NotFoundView from '../views/NotFoundView.vue'
 
 const routes = [
+  { path: '/report-review', name: 'SavedReportReview', component: SavedReportReviewView },
   { path: '/simulation/:simulationId/posts', name: 'SavedPosts', component: SavedPostsView },
   { path: '/simulations', name: 'SavedSimulations', component: SavedSimulationsView },
   { path: '/interview-files/compare', name: 'SavedInterviewComparison', component: SavedInterviewComparisonView },
@@ -156,5 +160,12 @@ const router = createRouter({
   history: createWebHistory(),
   routes
 })
+
+// Observe committed route state before routed components register their own
+// synchronous watchers. Aborted guards leave the current UI live. Query/hash
+// changes keep this reader mounted but retire earlier operation callbacks.
+watch(router.currentRoute, (to, from) => {
+  reviewStore.routeChanged(to.path, to.path === from.path && to.path === '/report-review')
+}, { flush: 'sync' })
 
 export default router

@@ -45,7 +45,8 @@
           <h3>{{ savedReport.title || t('savedReports.untitled') }}</h3>
           <dl><dt>{{ t('savedReports.reportId') }}</dt><dd>{{ savedReport.report_id }}</dd><dt>{{ t('savedReports.status') }}</dt><dd>{{ t(`savedReports.statuses.${savedReport.status}`) }}</dd><dt>{{ t('savedReports.capturedAt') }}</dt><dd>{{ savedReport.observed_at }}</dd><dt>{{ t('savedReports.metadataRevision') }}</dt><dd>{{ savedReport.metadata_revision }}</dd><dt>{{ t('savedReports.contentSource') }}</dt><dd>{{ savedReport.content_source ? t(`savedReports.contentSources.${savedReport.content_source.replace('.', '_')}`) : '—' }}</dd><dt>{{ t('savedReports.contentBytes') }}</dt><dd>{{ savedReport.content_bytes ?? '—' }}</dd><dt>{{ t('savedReports.contentRevision') }}</dt><dd>{{ savedReport.content_revision ?? '—' }}</dd></dl>
           <p v-if="!savedReport.content_available" role="status" class="notice warning" data-testid="content-error">{{ t(`savedReports.contentErrors.${savedReport.content_error}`) }}</p>
-          <SavedReportReader :source="savedReport" :is-current="isCurrentComparisonSource" />
+          <SavedReportReviewLaunch :source="savedReport" :is-current="isCurrentComparisonSource" />
+            <SavedReportReader :source="savedReport" :is-current="isCurrentComparisonSource" />
         </article>
         <p v-else-if="!detailLoading && !detailError" class="note">{{ t('savedReports.chooseReport') }}</p>
       </section>
@@ -61,6 +62,7 @@ import { useI18n } from 'vue-i18n'
 import LanguageSwitcher from '../components/LanguageSwitcher.vue'
 import SavedReportComparison from '../components/SavedReportComparison.vue'
 import SavedReportReader from '../components/SavedReportReader.vue'
+import SavedReportReviewLaunch from '../components/SavedReportReviewLaunch.vue'
 import { getSavedReports, getSavedReport } from '../api/report'
 import { validSavedReportSummary, validSavedReportObservation } from '../utils/savedReportObservation.js'
 import { createSavedReportFile } from '../utils/savedReportFiles.js'
