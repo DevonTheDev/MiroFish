@@ -9,6 +9,8 @@ import { createI18n, useI18n } from 'vue-i18n'
 import * as PendingUpload from '../../src/store/pendingUpload.js'
 import * as savedReportComparison from '../../src/utils/savedReportComparison.js'
 import * as savedReportSearch from '../../src/utils/savedReportSearch.js'
+import * as savedReportHeadings from '../../src/utils/savedReportHeadings.js'
+import * as projectInputRecipe from '../../src/utils/projectInputRecipe.js'
 import * as savedReportObservation from '../../src/utils/savedReportObservation.js'
 import * as savedReportFiles from '../../src/utils/savedReportFiles.js'
 import * as savedReportClipboard from '../../src/utils/savedReportClipboard.js'
@@ -68,7 +70,7 @@ function renderer(scrollCalls, focusCalls, document) {
   return { host, root, body }
 }
 
-export async function mountReportLibrary({ api, initialPath = '/reports', locale = 'en', timers = fakeTimers(), deferredScrolls = null, onSearchIndex = null } = {}) {
+export async function mountReportLibrary({ api, initialPath = '/reports', locale = 'en', timers = fakeTimers(), deferredScrolls = null, onSearchIndex = null, onHeadingIndex = null, onHeadingRef = null } = {}) {
   const requests = api ? null : deferredApi()
   api ??= requests.api
   const warnings = [], downloads = [], revokedUrls = [], scrollCalls = [], focusCalls = []
@@ -100,6 +102,11 @@ export async function mountReportLibrary({ api, initialPath = '/reports', locale
   const passThrough = { setup: (_props, { slots }) => () => slots.default?.() }
   const modules = {
     vue: { ...Vue, Transition: passThrough,
+      ...Object.fromEntries(['createElementVNode', 'createElementBlock'].map(name => [name, (...args) => {
+        const props = args[1]
+        if (props?.['data-heading-offset'] !== undefined && props.ref) onHeadingRef?.(props['data-heading-offset'], props.ref)
+        return Vue[name](...args)
+      }])),
       // Exercise the real nextTick callback with controllable late delivery.
       // The host only records scroll requests; it makes no layout assertion.
       nextTick: callback => Vue.nextTick(callback && (() => deferredScrolls ? deferredScrolls.push(callback) : callback())),
@@ -107,6 +114,10 @@ export async function mountReportLibrary({ api, initialPath = '/reports', locale
     'vue-router': { ...Router, createWebHistory: Router.createMemoryHistory },
     'vue-i18n': { useI18n },
     '../store/pendingUpload.js': PendingUpload,
+    '../utils/projectInputRecipe.js': projectInputRecipe,
+    '../utils/savedReportHeadings.js': { ...savedReportHeadings, indexReportHeadings: text => {
+      const index = savedReportHeadings.indexReportHeadings(text); onHeadingIndex?.(index); return index
+    } },
     '../utils/savedReportComparison.js': savedReportComparison,
     '../utils/savedReportObservation.js': savedReportObservation,
     '../utils/savedReportFiles.js': savedReportFiles,
@@ -166,7 +177,10 @@ export async function mountReportLibrary({ api, initialPath = '/reports', locale
   }
   const find = predicate => all(predicate)[0]
   const byId = id => find(node => node.props['data-testid'] === id)
-  const text = (target = root) => (target.type === '#comment' ? '' : target.text ?? '') + (target.children ?? []).map(text).join(' ')
+  const text = (target = root, literal = false) => {
+    const raw = literal || target.type === 'pre'
+    return (target.type === '#comment' ? '' : target.text ?? '') + (target.children ?? []).map(child => text(child, raw)).join(raw ? '' : ' ')
+  }
   return { root, body, router, i18n, warnings, requests, flush, waitFor, all, find, byId, text, downloads, revokedUrls, timers, scrollCalls, focusCalls, document, documentListeners,
     async click(id) {
       const target = byId(id); assert.ok(target, `missing clickable control ${id}`)

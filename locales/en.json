@@ -2843,5 +2843,16 @@
         "out_of_range": "No matching rows at this offset"
       }
     }
+  },
+  "savedReportHeadings": {
+    "label": "Headings in saved text",
+    "choose": "Choose a heading",
+    "jump": "Jump to heading",
+    "entry": "H{level} · Line {line}: {title}",
+    "note": "Recognized # headings outside plain fenced blocks. Select a heading, then Jump. The saved text stays unchanged.",
+    "empty": "The saved body is empty.",
+    "unavailable": "The saved body is unavailable.",
+    "none": "No recognized headings in this saved text.",
+    "limited": "First 200 headings shown. The full saved text remains readable and searchable."
   }
 }

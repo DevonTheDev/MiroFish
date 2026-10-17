@@ -10,6 +10,8 @@ import * as PendingUpload from '../../src/store/pendingUpload.js'
 import { pathToFileURL } from 'node:url'
 import * as savedReportComparison from '../../src/utils/savedReportComparison.js'
 import * as savedReportSearch from '../../src/utils/savedReportSearch.js'
+import * as savedReportHeadings from '../../src/utils/savedReportHeadings.js'
+import * as projectInputRecipe from '../../src/utils/projectInputRecipe.js'
 
 const sourceRoot = process.env.MIRO_REPORT_FILES_SOURCE_ROOT ? pathToFileURL(process.env.MIRO_REPORT_FILES_SOURCE_ROOT + '/frontend/') : new URL('../../', import.meta.url)
 const sourceUrl = path => new URL(path, sourceRoot)
@@ -72,7 +74,7 @@ function renderer(scrollCalls, focusCalls, document) {
   return { host, root, body }
 }
 
-export async function mountReportFiles({ api, initialPath = '/report-files', locale = 'en', timers = fakeTimers(), deferredScrolls = null, onSearchIndex = null, cacheHandlers, downloadHooks = {}, clipboardHost = {}, onReaderMount = null, clipboardGlobalFacade = false } = {}) {
+export async function mountReportFiles({ api, initialPath = '/report-files', locale = 'en', timers = fakeTimers(), deferredScrolls = null, onSearchIndex = null, onHeadingIndex = null, onHeadingRef = null, cacheHandlers, downloadHooks = {}, clipboardHost = {}, onReaderMount = null, clipboardGlobalFacade = false } = {}) {
   const requests = api ? null : deferredApi()
   api ??= requests.api
   const warnings = [], downloads = [], revokedUrls = [], scrollCalls = [], focusCalls = [], storageWrites = [], networkCalls = [], anchors = []
@@ -106,6 +108,11 @@ export async function mountReportFiles({ api, initialPath = '/report-files', loc
   const passThrough = { setup: (_props, { slots }) => () => slots.default?.() }
   const modules = {
     vue: { ...Vue, Transition: passThrough,
+      ...Object.fromEntries(['createElementVNode', 'createElementBlock'].map(name => [name, (...args) => {
+        const props = args[1]
+        if (props?.['data-heading-offset'] !== undefined && props.ref) onHeadingRef?.(props['data-heading-offset'], props.ref)
+        return Vue[name](...args)
+      }])),
       // Exercise the real nextTick callback with controllable late delivery.
       // The host only records scroll requests; it makes no layout assertion.
       nextTick: callback => Vue.nextTick(callback && (() => deferredScrolls ? deferredScrolls.push(callback) : callback())),
@@ -113,6 +120,10 @@ export async function mountReportFiles({ api, initialPath = '/report-files', loc
     'vue-router': { ...Router, createWebHistory: Router.createMemoryHistory },
     'vue-i18n': { useI18n },
     '../store/pendingUpload.js': PendingUpload,
+    '../utils/projectInputRecipe.js': projectInputRecipe,
+    '../utils/savedReportHeadings.js': { ...savedReportHeadings, indexReportHeadings: text => {
+      const index = savedReportHeadings.indexReportHeadings(text); onHeadingIndex?.(index); return index
+    } },
     '../utils/savedReportComparison.js': savedReportComparison,
     '../utils/savedReportObservation.js': reportObservation,
     '../utils/savedReportFiles.js': reportFiles,
@@ -182,7 +193,10 @@ export async function mountReportFiles({ api, initialPath = '/report-files', loc
   }
   const find = predicate => all(predicate)[0]
   const byId = id => find(node => node.props['data-testid'] === id)
-  const text = (target = root) => (target.type === '#comment' ? '' : target.text ?? '') + (target.children ?? []).map(text).join(' ')
+  const text = (target = root, literal = false) => {
+    const raw = literal || target.type === 'pre'
+    return (target.type === '#comment' ? '' : target.text ?? '') + (target.children ?? []).map(child => text(child, raw)).join(raw ? '' : ' ')
+  }
   return { root, body, router, i18n, warnings, requests, flush, waitFor, all, find, byId, text, downloads, revokedUrls, timers, scrollCalls, focusCalls, document, documentListeners, blobs, anchors, storageWrites, networkCalls, downloadHooks,
     async click(id) {
       const target = byId(id); assert.ok(target, `missing clickable control ${id}`)
