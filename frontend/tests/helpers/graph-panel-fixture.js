@@ -7,6 +7,7 @@ import * as Vue from 'vue'
 import * as d3 from 'd3'
 import * as graphViewSvg from '../../src/utils/graphViewSvg.js'
 import * as nodeRelationships from '../../src/utils/nodeRelationships.js'
+import * as loadedGraphPath from '../../src/utils/loadedGraphPath.js'
 
 // Real Vue SFC, renderer and D3. Only the DOM host is synthetic; this does not
 // verify native browser layout, pointer geometry or visual appearance.
@@ -99,7 +100,7 @@ export async function settle() {
 }
 
 export function mountGraphPanel(t, { messages = {}, deferGraphRedraw = false, initialGraph = null,
-  controlledTicks = false, touchEnabled = false } = {}) {
+  controlledTicks = false, controlledPathJobs = false, touchEnabled = false } = {}) {
   // D3's touch detection needs a browser navigator, absent in supported Node 20.
   const savedNavigator = Object.getOwnPropertyDescriptor(globalThis, 'navigator')
   Object.defineProperty(globalThis, 'navigator', { configurable: true, value: { maxTouchPoints: touchEnabled ? 1 : 0 } })
@@ -117,10 +118,22 @@ export function mountGraphPanel(t, { messages = {}, deferGraphRedraw = false, in
     templateOptions: { compilerOptions: { hoistStatic: false } } }).content
   const windowListeners = new Set(), emitted = [], warnings = [], captures = [], retired = [], simulations = []
   const observations = { viewport: 0, bbox: 0, ticks: 0, stops: 0, restarts: 0, focus: [] }, hooks = {}
-  const globals = { window: {
-    addEventListener: (_type, fn) => windowListeners.add(fn),
-    removeEventListener: (_type, fn) => windowListeners.delete(fn),
-  } }
+  let nextPathTaskId = 0
+  const pathTasks = new Map(), pathTaskQueue = []
+  const globals = {
+    setTimeout: controlledPathJobs ? callback => {
+      const id = ++nextPathTaskId
+      pathTasks.set(id, callback)
+      pathTaskQueue.push(id)
+      return id
+    } : globalThis.setTimeout,
+    clearTimeout: controlledPathJobs ? id => pathTasks.delete(id) : globalThis.clearTimeout,
+    performance: controlledPathJobs ? { now: () => 0 } : globalThis.performance,
+    window: {
+      addEventListener: (_type, fn) => windowListeners.add(fn),
+      removeEventListener: (_type, fn) => windowListeners.delete(fn),
+    },
+  }
   const redraws = []
   const modules = { vue: deferGraphRedraw ? { ...Vue, nextTick: callback => {
     if (callback) { redraws.push(callback); return Promise.resolve() }
@@ -133,7 +146,8 @@ export function mountGraphPanel(t, { messages = {}, deferGraphRedraw = false, in
       simulation[method] = function(...args) { observations[counter]++; return original.apply(this, args) }
     }
     return simulation
-  } } : d3, '../utils/graphViewSvg.js': graphViewSvg, '../utils/nodeRelationships.js': nodeRelationships }
+  } } : d3, '../utils/graphViewSvg.js': graphViewSvg, '../utils/nodeRelationships.js': nodeRelationships,
+    '../utils/loadedGraphPath.js': loadedGraphPath }
   for (const statement of parseJavaScript(code, { sourceType: 'module' }).program.body
     .filter(node => node.type === 'ImportDeclaration').reverse()) {
     const dependency = modules[statement.source.value]
@@ -182,6 +196,29 @@ export function mountGraphPanel(t, { messages = {}, deferGraphRedraw = false, in
       simulation.on('tick')?.call(simulation)
     },
     takeRedraws: () => redraws.splice(0),
+    async runNextPathTask() {
+      assert.ok(controlledPathJobs, 'path tasks must be explicitly controlled')
+      while (pathTaskQueue.length) {
+        const id = pathTaskQueue.shift(), callback = pathTasks.get(id)
+        if (!callback) continue
+        pathTasks.delete(id)
+        callback()
+        await settle()
+        return true
+      }
+      return false
+    },
+    takePathTasks() {
+      assert.ok(controlledPathJobs, 'path tasks must be explicitly controlled')
+      // Detach actual callbacks so callers can retain them across cancellation
+      // and then challenge stale job ownership directly.
+      const callbacks = pathTaskQueue.splice(0).flatMap(id => {
+        const callback = pathTasks.get(id)
+        pathTasks.delete(id)
+        return callback ? [callback] : []
+      })
+      return callbacks
+    },
     resize() { for (const listener of windowListeners) listener() },
     async input(value) {
       const input = host.querySelector('.node-search-input')

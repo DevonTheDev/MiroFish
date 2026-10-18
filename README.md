@@ -38,6 +38,56 @@ Opening a preset does not prepare or start a simulation.
 
 ## Find a node or relationship in the graph
 
+### Find a directed path between loaded nodes
+
+Select a node and choose **Use as path start**, then select another node and
+choose **Use as path end**. The **Directed path** section uses the existing node
+search or graph selection to identify both exact source occurrences. **Find path
+(up to 8 relationships)** returns one minimum-hop chain in eligible loaded
+records, following each relationship from its stored source ID to target ID.
+Equal-length alternatives use original relationship source order. It does not
+enumerate alternatives or treat incoming edges as outgoing.
+
+Nodes with the same name remain distinct. A stored node ID must be nonblank and
+unique, with case and whitespace preserved. Duplicate IDs, including repeated
+node references, cannot be endpoints or intermediate vertices. Invalid records,
+missing endpoints and ambiguous endpoints are excluded with counts. Duplicate or
+missing relationship UUIDs remain distinct source positions; the first eligible
+parallel occurrence wins. Two different nodes are required.
+
+The complete result has at most eight relationship rows. Open a row to inspect
+that exact existing individual detail, then **Back to path** clears the
+path-owned selection and returns focus to the same row. Endpoint choices and the
+chain remain. Global search mode, query, filters, page and viewport are preserved;
+Center and Fit stay explicit. Selecting something else retires the old Back
+action without clearing that newer selection. Changing an endpoint retires the
+previous result. **Cancel search** keeps endpoint choices; **Clear path** removes
+them and the result, closing only a detail still owned by that path.
+
+Search is limited to 5,000 node occurrences, 20,000 relationship occurrences,
+256 UTF-16 units per node/endpoint ID, and 2,097,152 total ID units. Work yields
+after at most 256 counted operations or 4 ms observed per slice and stops after
+250 ms accumulated active work. All indexing, duplicate resolution, adjacency,
+traversal and reconstruction participate in that budget. Size/identifier/work
+limits produce a limit message, never a negative connectivity claim. No chain
+found means only **no directed chain found within 8 relationships among eligible
+loaded records**. Rows bound names/labels/types to 80 UTF-16 units, IDs to 96 and
+fact previews to 160, plus a surrogate-safe ellipsis; existing full edge details
+remain available. No new graph request, storage or export is involved.
+
+Refresh, loading, graph replacement or any observed in-place graph-data change
+cancel the job and retire endpoints, result and owned detail; failed refreshes
+do not revive them. Resize retains the logical chain while requiring fresh
+drawing adapters before opening or returning from details. Retained controls,
+queued slices and focus callbacks cannot act for a superseded owner.
+
+Connections recorded in the loaded graph do not establish causation or verify
+facts. The chain is not a statement about completeness, chronology, evidential
+strength, or an atomic server snapshot. The eight-link limit and exclusion counts
+remain visible with results. English and Chinese copy is included.
+
+### Inspect and search loaded records
+
 Selecting a node also opens **Loaded relationships** inside its details. This list
 matches the node's exact nonblank stored ID against loaded relationship endpoint
 IDs, preserving case, whitespace and source order. It shows incoming, outgoing

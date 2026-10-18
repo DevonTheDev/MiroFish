@@ -61,6 +61,36 @@
         <button type="button" class="search-mode-nodes" :aria-pressed="searchMode === 'nodes'" @click="setSearchMode('nodes')">{{ $t('graph.searchModeNodes') }}</button>
         <button type="button" class="search-mode-relationships" :aria-pressed="searchMode === 'relationships'" @click="setSearchMode('relationships')">{{ $t('graph.searchModeRelationships') }}</button>
       </div>
+      <section class="graph-path" :aria-label="$t('graph.path.title')">
+        <h3 class="graph-path-title" tabindex="-1">{{ $t('graph.path.title') }}</h3>
+        <p class="graph-path-explanation">{{ $t('graph.path.explanation') }}</p>
+        <p v-for="side in ['start', 'end']" :key="side" :class="`graph-path-${side}-value`">
+          {{ $t(`graph.path.${side}`) }}:
+          <template v-if="pathView?.[side]">
+            {{ pathView[side].name }} · {{ pathView[side].id }} · {{ $t('graph.searchPosition', { position: pathView[side].position }) }}
+          </template>
+          <template v-else>{{ $t('graph.path.notSelected') }}</template>
+        </p>
+        <div class="graph-path-controls">
+          <button type="button" class="graph-path-find" :disabled="!pathView?.canFind" :onClick="pathView?.find">{{ $t('graph.path.find') }}</button>
+          <button v-if="pathView?.state === 'running'" type="button" class="graph-path-cancel" :onClick="pathView.cancel">{{ $t('graph.path.cancel') }}</button>
+          <button type="button" class="graph-path-clear" :disabled="!pathView?.canClear" :onClick="pathView?.clear">{{ $t('graph.path.clear') }}</button>
+        </div>
+        <p class="graph-path-state" role="status" aria-live="polite">{{ $t(`graph.path.${pathView?.state || 'chooseEndpoints'}`, { count: pathView?.rows.length || 0 }) }}</p>
+        <p v-if="pathView?.excluded" class="graph-path-excluded">{{ $t('graph.path.excluded', pathView.excluded) }}</p>
+        <ol v-if="pathView?.rows.length" class="graph-path-results">
+          <li v-for="row in pathView.rows" :key="row.index">
+            <button type="button" class="graph-path-row" :data-source-index="row.index" :disabled="!pathView.canOpen" :onClick="row.action">
+              <span class="graph-path-endpoints">{{ row.source }} → {{ row.target }}</span>
+              <span>{{ row.label }} · {{ row.recordedType }}</span>
+              <span v-if="row.fact" class="graph-path-fact">{{ row.fact }}</span>
+              <span class="graph-path-id">{{ row.sourceId }} → {{ row.targetId }}</span>
+              <span v-if="row.uuid">{{ row.uuid }}</span>
+              <span>{{ $t('graph.nodeRelationships.position', { position: row.index + 1 }) }}</span>
+            </button>
+          </li>
+        </ol>
+      </section>
       <label class="node-search-label">
         <span>{{ $t(searchMode === 'nodes' ? 'graph.searchNodes' : 'graph.searchRelationships') }}</span>
         <input class="node-search-input" type="search" maxlength="200"
@@ -174,6 +204,10 @@
               :disabled="!canCenterSelectedNode" @click="centerSelectedNode">
               {{ $t('graph.centerSelectedNode') }}
             </button>
+            <div class="graph-path-controls">
+              <button type="button" class="graph-path-start" :disabled="!pathNodeActions?.enabled" :onClick="pathNodeActions?.start">{{ $t('graph.path.useStart') }}</button>
+              <button type="button" class="graph-path-end" :disabled="!pathNodeActions?.enabled" :onClick="pathNodeActions?.end">{{ $t('graph.path.useEnd') }}</button>
+            </div>
             <div class="detail-row">
               <span class="detail-label">Name:</span>
               <span class="detail-value">{{ selectedItem.data.name }}</span>
@@ -255,6 +289,7 @@
           
           <!-- 边详情 -->
           <div v-else class="detail-content">
+            <button v-if="pathView?.inspecting" type="button" class="graph-path-back" :disabled="!pathView.canOpen" :onClick="pathView.back">{{ $t('graph.path.back') }}</button>
             <div v-if="relationshipView?.mode === 'detail'" class="node-relationship-context">
               <button type="button" class="node-relationships-back" :disabled="!relationshipView.enabled" :onClick="relationshipView.back">{{ $t('graph.nodeRelationships.back') }}</button>
               <p>{{ $t('graph.nodeRelationships.context', { node: relationshipView.nodePosition, relationship: relationshipView.opened.index + 1 }) }} · {{ $t(`graph.nodeRelationships.${relationshipView.opened.direction}`) }}</p>
@@ -413,7 +448,8 @@
 import { ref, shallowRef, onMounted, onUnmounted, watch, nextTick, computed } from 'vue'
 import * as d3 from 'd3'
 import { createGraphViewSvg } from '../utils/graphViewSvg.js'
-import { deriveNodeRelationships, formatNodeRelationship, relationshipDirection, relationshipPageSize } from '../utils/nodeRelationships.js'
+import { deriveNodeRelationships, formatNodeRelationship, relationshipDirection, relationshipPageSize, relationshipPreview } from '../utils/nodeRelationships.js'
+import { createLoadedGraphPathJob } from '../utils/loadedGraphPath.js'
 
 const props = defineProps({
   graphData: Object,
@@ -571,12 +607,197 @@ const backToNodeRelationships = owner => {
   publishRelationshipView()
   queueRelationshipFocus(relationshipView.value.owner, index)
 }
+
+// Path sessions retain loaded source occurrences, never a D3 object or closure.
+const pathView = shallowRef(null)
+const pathNodeActions = shallowRef(null)
+let pathSession = null, pathRun = null, pathResult = null, pathInspection = null
+let pathTimer = null, pathGeneration = 0, pathSerial = 0
+let pathState = 'chooseEndpoints'
+let clearRenderedHighlights = null
+const ownsPathSession = session => !!session && session === pathSession && !disposed
+  && !props.loading && session.graph === props.graphData && session.revision === graphRevision.value
+  && session.nodes === props.graphData?.nodes && session.edges === props.graphData?.edges
+const ownsPathEndpoint = (session, endpoint) => !!endpoint
+  && session.nodes?.[endpoint.index] === endpoint.raw && endpoint.raw?.uuid === endpoint.id
+const ownsPathAction = owner => !!owner && owner.generation === pathGeneration
+  && owner.session === pathSession && ownsPathSession(owner.session)
+const ownsPathInspection = () => !!pathInspection && pathInspection.result === pathResult
+  && selectedItem.value?.type === 'edge' && selectedItem.value.pathSerial === pathInspection.serial
+const currentPathResult = () => ownsPathSession(pathSession) && pathResult?.state === 'found'
+  && ownsPathEndpoint(pathSession, pathSession.start) && ownsPathEndpoint(pathSession, pathSession.end)
+  && pathResult.nodes.every(node => pathSession.nodes[node.index] === node.raw && node.raw.uuid === node.id)
+  && pathResult.edges.every(edge => pathSession.edges[edge.index] === edge.raw
+    && edge.raw.source_node_uuid === edge.sourceId && edge.raw.target_node_uuid === edge.targetId)
+
+const cancelPathWork = () => {
+  if (pathTimer !== null) clearTimeout(pathTimer)
+  pathTimer = null
+  pathRun?.job.cancel()
+  pathRun = null
+}
+const closePathInspection = () => {
+  const owned = ownsPathInspection()
+  pathInspection = null
+  if (owned) {
+    selectedItem.value = null
+    selectedRelationship.value = null
+    detailOpenedBySearch = false
+    clearRenderedHighlights?.()
+  }
+}
+const retirePath = (state = 'changed') => {
+  cancelPathWork()
+  closePathInspection()
+  pathSession = null
+  pathResult = null
+  pathState = state
+  publishPathView()
+}
+const pathEndpointPreview = endpoint => endpoint ? {
+  name: relationshipPreview(endpoint.raw?.name, 80, relationshipPreview(endpoint.id, 80)),
+  id: relationshipPreview(endpoint.id, 96), position: endpoint.index + 1
+} : null
+
+const publishPathView = () => {
+  const owner = Object.freeze({ session: pathSession, generation: ++pathGeneration })
+  const ready = ownsPathSession(pathSession) && searchReady.value && !!activateRenderedRelationship
+  const validResult = currentPathResult()
+  const rows = validResult ? pathResult.edges.map((edge, step) => ({
+    index: edge.index, source: relationshipPreview(pathResult.nodes[step].raw.name, 80, edge.sourceId),
+    target: relationshipPreview(pathResult.nodes[step + 1].raw.name, 80, edge.targetId),
+    sourceId: relationshipPreview(edge.sourceId, 96), targetId: relationshipPreview(edge.targetId, 96),
+    label: relationshipPreview(edge.raw.name, 80, 'RELATED_TO'),
+    recordedType: relationshipPreview(edge.raw.fact_type, 80, 'Unknown'),
+    uuid: relationshipPreview(edge.raw.uuid, 96), fact: relationshipPreview(edge.raw.fact, 160),
+    action: () => openPathRelationship(owner, step)
+  })) : []
+  pathView.value = { owner, start: pathEndpointPreview(pathSession?.start), end: pathEndpointPreview(pathSession?.end),
+    state: pathState, rows, excluded: pathResult?.excluded || null,
+    canFind: ready && !!pathSession.start && !!pathSession.end && !pathRun,
+    canClear: !!pathSession && !disposed, canOpen: ready && validResult,
+    inspecting: ownsPathInspection(), find: () => findPath(owner),
+    cancel: () => cancelPath(owner), clear: () => clearPath(owner), back: () => backToPath(owner) }
+  const selected = selectedItem.value
+  const nodeOwner = Object.freeze({ generation: pathGeneration, selected, graph: props.graphData,
+    revision: graphRevision.value, index: selected?.sourceIndex, raw: selected?.data, id: selected?.data?.uuid })
+  const enabled = !disposed && !props.loading && searchReady.value && !!activateRenderedNode
+    && selected?.type === 'node' && selected.graphRevision === graphRevision.value
+    && props.graphData?.nodes?.[nodeOwner.index] === nodeOwner.raw
+  pathNodeActions.value = { enabled, start: () => setPathEndpoint(nodeOwner, 'start'), end: () => setPathEndpoint(nodeOwner, 'end') }
+}
+const setPathEndpoint = (owner, side) => {
+  if (disposed || props.loading || !searchReady.value || !activateRenderedNode
+    || owner.generation !== pathGeneration || owner.selected !== selectedItem.value
+    || selectedItem.value?.type !== 'node' || owner.graph !== props.graphData
+    || owner.revision !== graphRevision.value || selectedItem.value.graphRevision !== owner.revision
+    || props.graphData?.nodes?.[owner.index] !== owner.raw || owner.raw?.uuid !== owner.id) return
+  cancelPathWork()
+  closePathInspection()
+  if (!ownsPathSession(pathSession)) pathSession = { graph: props.graphData, nodes: props.graphData?.nodes,
+    edges: props.graphData?.edges, revision: graphRevision.value, start: null, end: null }
+  pathSession[side] = Object.freeze({ index: owner.index, raw: owner.raw, id: owner.id })
+  pathResult = null
+  pathState = pathSession.start && pathSession.end ? 'ready' : 'chooseEndpoints'
+  publishPathView()
+}
+const ownsPathRun = run => run === pathRun && ownsPathSession(run.session)
+  && run.start === run.session.start && run.end === run.session.end
+  && ownsPathEndpoint(run.session, run.start) && ownsPathEndpoint(run.session, run.end)
+const queuePathStep = run => {
+  const ticket = ++run.sliceSerial
+  pathTimer = setTimeout(() => stepPath(run, ticket), 0)
+}
+const stepPath = (run, ticket) => {
+  if (!ownsPathRun(run) || ticket !== run.sliceSerial) return
+  run.sliceSerial++
+  pathTimer = null
+  const result = run.job.step()
+  if (!ownsPathRun(run)) return
+  if (result.state === 'running') {
+    queuePathStep(run)
+    return
+  }
+  pathRun = null
+  pathState = result.state
+  pathResult = result.state === 'found' ? result : null
+  // Exclusion counts belong to completed searches, including bounded absence.
+  if (result.state === 'notFound') pathResult = { ...result, nodes: [], edges: [] }
+  publishPathView()
+}
+const findPath = owner => {
+  if (!ownsPathAction(owner) || !pathView.value.canFind
+    || !ownsPathEndpoint(owner.session, owner.session.start) || !ownsPathEndpoint(owner.session, owner.session.end)) return
+  closePathInspection()
+  cancelPathWork()
+  pathResult = null
+  pathState = 'running'
+  const session = owner.session, start = session.start, end = session.end
+  const run = { session, start, end, sliceSerial: 0,
+    job: createLoadedGraphPathJob(session.graph, { start, end }, { now: () => performance.now() }) }
+  pathRun = run
+  publishPathView()
+  queuePathStep(run)
+}
+const cancelPath = owner => {
+  if (!ownsPathAction(owner) || !pathRun) return
+  cancelPathWork()
+  pathState = 'cancelled'
+  publishPathView()
+}
+const clearPath = owner => {
+  if (!ownsPathAction(owner)) return
+  retirePath('chooseEndpoints')
+}
+const focusPath = (owner, index = null) => nextTick(() => {
+  if (!ownsPathAction(owner) || !pathView.value.canOpen) return
+  const panel = index === null ? graphContainer.value?.querySelector('.detail-content')
+    : graphContainer.value?.parentNode?.querySelector('.node-search')
+  const target = index === null ? panel?.querySelector('.graph-path-back')
+    : [...(panel?.querySelectorAll('.graph-path-row') || [])].find(row => Number(row.getAttribute('data-source-index')) === index)
+  if (!target || !panel || !ownsPathAction(owner)) return
+  target.focus?.({ preventScroll: true })
+  const rect = target.getBoundingClientRect(), bounds = panel.getBoundingClientRect()
+  if (rect.top < bounds.top) panel.scrollTop -= bounds.top - rect.top
+  else if (rect.bottom > bounds.bottom) panel.scrollTop += rect.bottom - bounds.bottom
+})
+const openPathRelationship = (owner, step) => {
+  if (!ownsPathAction(owner) || !searchReady.value || !activateRenderedRelationship) return
+  if (!currentPathResult()) { retirePath(); return }
+  const edge = pathResult.edges[step]
+  if (!edge) return
+  const result = pathResult
+  retireNodeRelationships()
+  pathInspection = null
+  const activated = activateRenderedRelationship({ ...edge, revision: pathSession.revision }, {
+    source: { text: relationshipPreview(result.nodes[step].raw.name, 80, edge.sourceId) },
+    target: { text: relationshipPreview(result.nodes[step + 1].raw.name, 80, edge.targetId) }
+  })
+  if (!activated || selectedItem.value?.type !== 'edge' || !currentPathResult()) return
+  pathInspection = { result, index: edge.index, serial: ++pathSerial }
+  selectedItem.value.pathSerial = pathInspection.serial
+  publishPathView()
+  focusPath(pathView.value.owner)
+}
+const backToPath = owner => {
+  if (!ownsPathAction(owner) || !pathView.value.canOpen || !ownsPathInspection() || !currentPathResult()) return
+  const index = pathInspection.index
+  closePathInspection()
+  publishPathView()
+  focusPath(pathView.value.owner, index)
+}
+watch(selectedItem, selected => {
+  if (selected?.pathSerial !== pathInspection?.serial) pathInspection = null
+  publishPathView()
+}, { flush: 'sync' })
+
 const refreshGraph = () => {
+  retirePath()
   retireNodeRelationships(true)
   emit('refresh')
 }
 watch(() => props.loading, loading => {
-  if (loading) retireNodeRelationships(true)
+  if (loading) { retirePath(); retireNodeRelationships(true) }
 }, { flush: 'sync' })
 
 const graphIdentity = data => typeof data?.graph_id === 'string' && data.graph_id.trim()
@@ -792,8 +1013,10 @@ const retireRenderedGraph = () => {
   zoomReady.value = false
   activateRenderedNode = null
   activateRenderedRelationship = null
+  clearRenderedHighlights = null
   searchReady.value = false
   publishRelationshipView()
+  publishPathView()
   currentSimulation?.stop()
   currentSimulation = null
   linkLabelsRef = null
@@ -848,6 +1071,7 @@ const renderGraph = (revision, ticket) => {
       relationshipNotice: !match ? 'graph.searchRelationshipDetailsOnly'
         : match.edge.isSelfLoop ? 'graph.searchIndividualSelfRelation' : null
     }
+    return true
   }
   // SVG listeners survive child removal. Replace dismissal even on empty draws.
   svg.on('click', () => {
@@ -1278,6 +1502,7 @@ const renderGraph = (revision, ticket) => {
     linkLabelBg.attr('fill', 'rgba(255,255,255,0.95)')
     linkLabels.attr('fill', '#666')
   }
+  clearRenderedHighlights = clearHighlights
   highlightRelationship = edge => {
     link.filter(rendered => rendered === edge).attr('stroke', '#3498db').attr('stroke-width', 3)
   }
@@ -1309,6 +1534,7 @@ const renderGraph = (revision, ticket) => {
   }
   searchReady.value = true
   publishRelationshipView()
+  publishPathView()
 
   // Node Labels
   const nodeLabels = nodeGroup.selectAll('text')
@@ -1470,6 +1696,7 @@ const requestGraphRender = () => {
 
 watch(() => props.graphData, data => {
   // Invalidate before a queued render can run, including in-place data changes.
+  retirePath()
   retireNodeRelationships(true)
   graphRevision.value++
   selectedRelationship.value = null
@@ -1515,6 +1742,7 @@ onMounted(() => {
 
 onUnmounted(() => {
   disposed = true
+  retirePath()
   renderTicket++
   graphRevision.value++
   nodeQuery.value = ''
@@ -1557,6 +1785,18 @@ onUnmounted(() => {
 }
 
 .search-mode { display: flex; gap: 6px; margin-bottom: 8px; }
+.graph-path { border-bottom: 1px solid #DDD; margin-bottom: 12px; padding-bottom: 10px; overflow-wrap: anywhere; }
+.graph-path-title { font-size: 13px; margin: 8px 0; }
+.graph-path p { margin: 6px 0; line-height: 1.4; }
+.graph-path-explanation, .graph-path-excluded { color: #666; }
+.graph-path-controls { display: flex; flex-wrap: wrap; gap: 6px; margin: 8px 0; }
+.graph-path-controls button, .graph-path-back, .graph-path-row { padding: 6px 8px; border: 1px solid #BBB; border-radius: 4px; background: #FFF; color: #444; font: inherit; cursor: pointer; }
+.graph-path-controls button:disabled, .graph-path-row:disabled, .graph-path-back:disabled { opacity: 0.6; cursor: default; }
+.graph-path-results { padding-left: 22px; margin: 8px 0; }
+.graph-path-row { display: grid; gap: 4px; width: 100%; margin: 6px 0; text-align: left; overflow-wrap: anywhere; }
+.graph-path-endpoints { font-weight: 600; }
+.graph-path-id { font-family: monospace; }
+.graph-path-controls button:focus-visible, .graph-path-row:focus-visible, .graph-path-back:focus-visible, .graph-path-title:focus-visible { outline: 2px solid #004E89; outline-offset: 2px; }
 .search-mode button { flex: 1; padding: 6px; border: 1px solid #BBB; border-radius: 4px; background: #FFF; color: #444; cursor: pointer; }
 .search-mode button[aria-pressed="true"] { background: #004E89; border-color: #004E89; color: #FFF; }
 .relationship-search-endpoints, .relationship-search-fact { width: 100%; }
